@@ -51,14 +51,14 @@
   <ItemGroup>
     <!-- v3.1 hot-path msgpack decoder. Watchdog-only — the wrapper stays
          JSON-on-the-pipe so it doesn't pull this dependency. -->
-    <PackageReference Include="MessagePack" Version="3.1.7" />
+    <PackageReference Include="MessagePack" Version="3.1.8" />
     <!-- AOT migration commit 3: source-gen analyzer. Emits a partial
          class implementation of MeshMsgpackResolver at build time so
          every Msgpack*Frame Deserialize call resolves through static
          formatters at runtime, no Reflection.Emit. Required for AOT
          publish; without this the watchdog crashes at first msgpack
          frame with PlatformNotSupportedException. -->
-    <PackageReference Include="MessagePackAnalyzer" Version="3.1.7"
+    <PackageReference Include="MessagePackAnalyzer" Version="3.1.8"
         PrivateAssets="all"
         IncludeAssets="runtime;build;native;contentfiles;analyzers;buildtransitive" />
   </ItemGroup>
