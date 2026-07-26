@@ -11,7 +11,8 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
-_No notable changes since the last release._
+### Changed
+- Bump the minor-and-patch group with 3 updates (#71) (9b6106d)
 
 ---
 
