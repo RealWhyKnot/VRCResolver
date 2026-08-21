@@ -13,6 +13,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ### Changed
 - Bump the minor-and-patch group with 3 updates (#71) (9b6106d)
+- Bump the minor-and-patch group with 1 update (#72) (773dad4)
 
 ---
 
