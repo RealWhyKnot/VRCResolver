@@ -17,13 +17,13 @@ public static class BlockedAddressPolicy
         switch (addr.AddressFamily)
         {
             case AddressFamily.InterNetwork:
-                // 0.0.0.0/8 — "this network" / unspecified
+                // 0.0.0.0/8 -- "this network" / unspecified
                 if (bytes[0] == 0) return true;
                 // 10.0.0.0/8
                 if (bytes[0] == 10) return true;
                 // 127.0.0.0/8
                 if (bytes[0] == 127) return true;
-                // 169.254.0.0/16 — link-local + cloud metadata
+                // 169.254.0.0/16 -- link-local + cloud metadata
                 if (bytes[0] == 169 && bytes[1] == 254) return true;
                 // 172.16.0.0/12
                 if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
@@ -32,19 +32,19 @@ public static class BlockedAddressPolicy
                 return false;
 
             case AddressFamily.InterNetworkV6:
-                // IPv4-mapped IPv6 (::ffff:a.b.c.d) — unwrap and recheck against
+                // IPv4-mapped IPv6 (::ffff:a.b.c.d) -- unwrap and recheck against
                 // the v4 ranges so a mapped address can't smuggle a private v4
                 // past the v6 path.
                 if (addr.IsIPv4MappedToIPv6)
                     return IsBlocked(addr.MapToIPv4());
-                // fc00::/7 — Unique Local Addresses (RFC 4193)
+                // fc00::/7 -- Unique Local Addresses (RFC 4193)
                 if ((bytes[0] & 0xFE) == 0xFC) return true;
-                // fe80::/10 — Link-Local
+                // fe80::/10 -- Link-Local
                 if (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80) return true;
                 return false;
 
             default:
-                // Unknown address family — block conservatively
+                // Unknown address family -- block conservatively
                 return true;
         }
     }

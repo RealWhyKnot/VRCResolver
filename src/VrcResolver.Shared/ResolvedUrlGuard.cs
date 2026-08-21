@@ -2,9 +2,9 @@ using System.Net;
 
 namespace VrcResolver.Shared;
 
-// Last gate before a resolved URL is written to VRChat's stdout. The server —
+// Last gate before a resolved URL is written to VRChat's stdout. The server --
 // or a tampered resolve_cache.json, since LocalLow is writable at Low
-// integrity — could hand back a URL pointing at loopback, the LAN, or a
+// integrity -- could hand back a URL pointing at loopback, the LAN, or a
 // non-http scheme, and VRChat would fetch it blindly. Shape checks only: no
 // DNS lookups here, this runs on the wrapper's hot path. Public IP literals
 // and DNS names pass; VRChat does the fetching, this guard exists to stop
