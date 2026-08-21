@@ -1,91 +1,51 @@
 # VRCResolver
 
-VRChat's in-world video players use yt-dlp under the hood. Vanilla yt-dlp is slow on cold starts, breaks against YouTube changes the moment they ship, and hands AVPro URLs that VRChat's trusted-host allowlist rejects in default-public worlds. VRCResolver fixes all three.
+VRChat plays videos through yt-dlp. Stock yt-dlp is slow, breaks whenever YouTube changes something, and returns URLs that AVPro blocks in public worlds. VRCResolver replaces VRChat's `Tools/yt-dlp.exe` with a patched build that resolves videos through vrcresolver.com and serves them from a local address AVPro trusts. If anything fails, it falls back to VRChat's original yt-dlp, so playback is never worse than stock.
 
-A Windows console daemon swaps VRChat's `Tools/yt-dlp.exe` for a patched build that asks a remote resolver (`vrcresolver.com`) and routes the resulting stream URL through a local listener so AVPro accepts it everywhere. If the remote is unreachable or anything else goes wrong, the patched binary falls through to the vanilla yt-dlp it preserved at install time. Watchdog absent does not break VRChat.
-
-VRCResolver is the new name for WKVRCProxy. Installs from before the rename update across automatically; state, settings, and the VRChat patch carry over.
+Formerly WKVRCProxy. Old installs update automatically.
 
 **[Report a bug](https://github.com/RealWhyKnot/VRCResolver/issues/new?template=bug_report.yml)**
 
----
+## Features
 
-## What you get
+- **Works in public worlds.** Streams are served from `localhost.youtube.com:{port}`, which AVPro's trust list accepts.
+- **Resolves on a server, not your PC.** Regional blocks and rate limits don't apply, and the server updates its yt-dlp nightly, so YouTube breakage gets fixed without you doing anything.
+- **Fast.** 2-3 seconds for a new URL, about 20 ms for a repeat.
+- **Better quality.** 1080p HLS instead of 360p mp4.
+- **Never breaks playback.** Any failure hands the URL to VRChat's original yt-dlp.
 
-- **Public-instance playback.** A local HTTP listener at `localhost.youtube.com:{port}` wraps resolved playback proxy URLs so VRChat's AVPro trust list accepts them in default-public worlds. First-party manifest subresources and pasteable playback URLs stay under the same trusted local namespace.
-- **Server-side resolution behind WARP egress.** YouTube extraction happens on the backend behind Cloudflare WARP, so regional blocks and IP-rate-limits don't cost you a stalled video.
-- **Per-URL disk cache.** First resolve of a URL takes 2 to 3 seconds end-to-end. Second resolve in the same session lands in 20 ms (a 99.2% latency reduction on the wrapper-side). Cache survives watchdog restarts.
-- **HLS-first format selection.** AVPro gets 1080p HLS, not 360p progressive mp4. The dispatcher picks the best match for the player VRChat asked for.
-- **AOT-compiled.** Watchdog binary is 10.1 MB on disk; cold start to mesh-connected is ~486 ms. The patched yt-dlp shim VRChat invokes per video player is 3.3 MB native code with no JIT.
-- **Server auto-updates yt-dlp nightly.** YouTube ships a breaking change at 2 AM UTC; the resolver picks up the upstream fix within 24 hours without you doing anything.
-- **Graceful fallback.** Every failure path execs the vanilla `yt-dlp.exe` that was bundled into VRChat. You never end up with a broken `Tools/yt-dlp.exe`.
+No DRM bypass, no content hosting, no YouTube login.
 
-What it does NOT do: bypass DRM, change VRChat's per-avatar limits, host content, accept your YouTube login (server tier may use cookies; client tier never does), or work without internet (the fallback path is vanilla yt-dlp; the resolver path needs vrcresolver.com reachable).
+## Install
 
----
+1. Launch VRChat once, so `Tools/yt-dlp.exe` exists for the patcher to back up.
+2. Download the latest `vrcresolver-*.zip` release and extract it anywhere except `Program Files`.
+3. Run `vrcresolver.exe` and accept the one-time UAC prompt. It adds `127.0.0.1 localhost.youtube.com` to your hosts file, which public-world playback needs.
+4. Launch VRChat. When the console shows `[mesh] connected`, paste a video URL into any in-world player.
 
-## What's in the dist
+**Update:** type `/update` in the console.
+**Uninstall:** run `vrcresolver.Uninstaller.exe`. It restores the original `yt-dlp.exe`, removes the hosts entry, and wipes `%LOCALAPPDATA%Low\vrcresolver\`. There is no confirmation prompt.
 
-| Binary | Role |
-|---|---|
-| `vrcresolver.exe` | the watchdog. Long-running console window. Patches VRChat, holds the WebSocket, runs the trust-gateway listener. |
-| `tools/yt-dlp.exe` | the patched shim. Replaces VRChat's bundled yt-dlp at install time. AOT, 3.3 MB. |
-| `vrcresolver.Updater.exe` | self-update helper used by the watchdog's `/update` command. Manual run still works. |
-| `vrcresolver.Uninstaller.exe` | restore the original `yt-dlp.exe`, remove the hosts entry, wipe state. No prompt; running it IS consent. |
-| `WKVRCProxy*.exe` | pre-rename launchers, shipped this release cycle only so old installs update cleanly. Each just starts the matching renamed exe. |
+Windows 10/11 x64. Self-contained, no installer.
 
-Target: Windows 10/11 x64. Single-file, self-contained .NET 10. No installer, no admin install dir.
+## Troubleshooting
 
----
+The console prints one line per resolve: green = resolved, yellow = fell back to stock yt-dlp, red = error. Full logs are in `%LOCALAPPDATA%Low\vrcresolver\logs\`. When filing a bug, include the correlation-ID block for the failed resolve.
 
-## Quick start
-
-1. **Launch VRChat once first.** The patcher needs VRChat's own `yt-dlp.exe` in `Tools/` so it can preserve the original as `yt-dlp-og.exe`.
-2. **Download** `vrcresolver-*.zip` from the latest release.
-3. **Extract anywhere except `Program Files`.** The bundled updater swaps files in place and can't write to `Program Files` without elevation.
-4. **Run `vrcresolver.exe`.** UAC prompts once to add `127.0.0.1 localhost.youtube.com` to your hosts file. That entry is load-bearing for public-instance support and idle when the watchdog isn't running.
-5. **Launch VRChat.** The watchdog window prints `[mesh] connected` once the WebSocket is up. Paste a YouTube URL in any in-world video player.
-
-To uninstall: run `vrcresolver.Uninstaller.exe` from the same folder. It restores VRChat's vanilla `yt-dlp.exe`, removes the hosts entry, wipes `%LOCALAPPDATA%Low\vrcresolver\`, and deletes its own install directory.
-
-To update: run `vrcresolver.exe` and type `/update` in the watchdog window.
-
----
-
-## When something breaks
-
-The watchdog window scrolls one summary line per resolve. Green = resolved, yellow = server replied with og-fallback, red = local timeout or pipe error. Per-URL detail goes to `%LOCALAPPDATA%Low\vrcresolver\logs\`.
-
-Common failures and what to look at, in order: did the watchdog start? Does the watchdog show `[mesh] connected`? Does the watchdog show resolves when you paste a URL in-game? Include the relevant correlation-ID block from the Logs tab when filing a bug.
-
----
-
-## How it fits together
+## How it works
 
 ```
 VRChat (AVPro)
-   |  paste URL
-   v
-Tools/yt-dlp.exe          (our patched shim)
-   |  named pipe
-   v
-vrcresolver.exe           (watchdog)
-   |  WebSocket
-   v
-vrcresolver.com /mesh     (remote resolver)
-   |  resolves URL
-   v
-... resolved URL streamed back through the watchdog's local listener
-... AVPro fetches via http://localhost.youtube.com:{port}/play/<session>/manifest.<ext>?target=...
-... and plays.
+   v  paste URL
+Tools/yt-dlp.exe        patched shim
+   v  named pipe
+vrcresolver.exe         watchdog
+   v  WebSocket
+vrcresolver.com         remote resolver
 ```
 
-If any link breaks, the patched shim execs `yt-dlp-og.exe` and AVPro plays whatever vanilla yt-dlp returns. The watchdog absent removes the server-side path; videos that already worked with vanilla yt-dlp keep working.
-
-The remote resolver is vrcresolver.com.
-
----
+The resolved stream comes back through the watchdog's local listener at `http://localhost.youtube.com:{port}/play/<session>/manifest.<ext>?target=...`. If any link breaks, the shim runs the backed-up `yt-dlp-og.exe` instead.
 
 ## License
 
-Licensed under the GNU General Public License v3.0 or later. See [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for third-party attributions covering binaries shipped in release archives.
+GPL-3.0-or-later. See [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for third-party attributions.
