@@ -11,9 +11,20 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
+### Added
+- **watchdog:** Resolver health gate pauses mesh resolving after repeated failures (40b6c52)
+- **shared:** Blocked-address policy, resolved-url emit guard, relay liveness probe (8b42d4b)
+
 ### Changed
 - Bump the minor-and-patch group with 3 updates (#71) (9b6106d)
 - Bump the minor-and-patch group with 1 update (#72) (773dad4)
+- style(shared): ascii punctuation in new comments (849afb7)
+
+### Fixed
+- **mesh:** Fail pending resolves on clean close and lost sends, bound ipc fallback write (167d2f5)
+- **mesh:** Discovery redirects must land on a first-party dns host (c887d77)
+- **relay:** Connect-time address guard, origin rejection, in-flight cap (76503c5)
+- **wrapper:** Emit-shape guard, relay probe on direct urls, bounded og wait, stdout write hardening (d0dd3fc)
 
 ---
 
