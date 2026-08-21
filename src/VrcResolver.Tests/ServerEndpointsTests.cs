@@ -20,9 +20,15 @@ public class ServerEndpointsTests
     [InlineData("https://us1.vrcresolver.com/", true, "us1.vrcresolver.com")]
     [InlineData("https://eu1.vrcresolver.com/mesh", true, "eu1.vrcresolver.com")]
     [InlineData("https://node1.whyknot.dev/", true, "node1.whyknot.dev")]
+    [InlineData("https://proxy.whyknot.dev/", true, "proxy.whyknot.dev")]
     [InlineData("https://vrcresolver.com/", false, "vrcresolver.com")]
     [InlineData("/mesh", false, "vrcresolver.com")]
-    public void DiscoveryRedirectHostAcceptsAnyNonApexHost(
+    [InlineData("https://evil.example.com/", false, "evil.example.com")]
+    [InlineData("https://vrcresolver.com.evil.com/", false, "vrcresolver.com.evil.com")]
+    [InlineData("https://203.0.113.7/", false, "203.0.113.7")]
+    [InlineData("https://127.0.0.1/", false, "127.0.0.1")]
+    [InlineData("https://[::1]/", false, "[::1]")]
+    public void DiscoveryRedirectHostRequiresFirstPartyDnsHost(
         string location,
         bool expected,
         string expectedHost)
