@@ -242,16 +242,21 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private static string CidSuffix(string? correlationId) =>
         string.IsNullOrEmpty(correlationId) ? "" : " cid=" + LogUtil.SanitizeForConsole(correlationId, 64);
 
-    private async Task SendTextFrameAsync(byte[] payload, CancellationToken ct)
+    // False = the socket was not open at either check and nothing was sent.
+    // ResolveAsync must treat that as a failed send -- a silent no-op here
+    // used to leave its pending TaskCompletionSource waiting out the whole
+    // IPC budget with nothing ever coming back.
+    private async Task<bool> SendTextFrameAsync(byte[] payload, CancellationToken ct)
     {
         var ws = _ws;
-        if (ws is not { State: WebSocketState.Open }) return;
+        if (ws is not { State: WebSocketState.Open }) return false;
 
         await _sendGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (ws.State == WebSocketState.Open)
-                await ws.SendAsync(payload, WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
+            if (ws.State != WebSocketState.Open) return false;
+            await ws.SendAsync(payload, WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
+            return true;
         }
         finally
         {

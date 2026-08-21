@@ -82,6 +82,11 @@ internal sealed partial class MeshClient
             finally
             {
                 _welcomeTcs?.TrySetResult(null);
+                // Clean close (server sent a Close frame) exits PumpAsync
+                // without throwing, so the catch above never runs -- without
+                // this, in-flight resolves sat parked until the IPC budget
+                // fired. Idempotent with the catch path's call.
+                FailAllPending(WireConstants.FallbackServerUnreachable);
                 try { _ws?.Dispose(); } catch { /* ignore */ }
                 _ws = null;
             }

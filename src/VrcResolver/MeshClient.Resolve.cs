@@ -86,7 +86,13 @@ internal sealed partial class MeshClient : IAsyncDisposable
 
         try
         {
-            await SendTextFrameAsync(payload, ct).ConfigureAwait(false);
+            if (!await SendTextFrameAsync(payload, ct).ConfigureAwait(false))
+            {
+                // Socket closed between the Open check above and the send.
+                _pending.TryRemove(req.Id, out _);
+                _inflightCids.TryRemove(req.Id, out _);
+                return MakeFallbackResult(req.Id, WireConstants.FallbackServerUnreachable);
+            }
         }
         catch (Exception ex)
         {

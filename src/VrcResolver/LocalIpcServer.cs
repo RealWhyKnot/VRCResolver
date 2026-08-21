@@ -438,7 +438,11 @@ internal sealed partial class LocalIpcServer : IDisposable
             if (failReason != null)
             {
                 outcome = WireConstants.ActionFallbackNative + "/" + failReason;
-                await WriteFallbackAsync(pipe, id, failReason, CancellationToken.None).ConfigureAwait(false);
+                // Deliberately NOT perReqCts (already fired on this path),
+                // but bounded: an unbounded write to a wrapper that stopped
+                // reading parked this handler task forever.
+                using var writeCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await WriteFallbackAsync(pipe, id, failReason, writeCts.Token).ConfigureAwait(false);
                 ReportingService.ReportFallback(req, failReason, null);
             }
             else if (outcome.StartsWith(WireConstants.ActionFallbackNative))
