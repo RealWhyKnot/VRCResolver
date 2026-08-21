@@ -61,15 +61,17 @@ internal sealed partial class LocalIpcServer : IDisposable
     private readonly MeshClient _mesh;
     private readonly ResolveCache? _cache;
     private readonly OgFallbackHint? _ogFallbackHint;
+    private readonly ResolverHealthGate? _health;
     private readonly CancellationTokenSource _cts = new();
     private Task? _accepter;
     private Task? _legacyAccepter;
 
-    public LocalIpcServer(MeshClient mesh, ResolveCache? cache = null, OgFallbackHint? ogFallbackHint = null)
+    public LocalIpcServer(MeshClient mesh, ResolveCache? cache = null, OgFallbackHint? ogFallbackHint = null, ResolverHealthGate? health = null)
     {
         _mesh = mesh;
         _cache = cache;
         _ogFallbackHint = ogFallbackHint;
+        _health = health;
     }
 
     public void Start()
@@ -292,6 +294,30 @@ internal sealed partial class LocalIpcServer : IDisposable
                 return;
             }
 
+            // Health gate: repeated resolve or playback failures pause the
+            // whole mesh path -- cache included, since a mesh-down node may
+            // not serve the bytes behind a cached proxy URL either. The
+            // wrapper sees a non-retryable reason and execs og after a
+            // single pipe roundtrip. The first request after cooldown (with
+            // the socket actually open) passes through as the probe.
+            if (_health != null)
+            {
+                bool paused = _health.ShouldShortCircuit(_mesh.IsConnected, out var gateCheck);
+                if (gateCheck == ResolverHealthGate.Transition.Closed)
+                    ConsoleUx.Success(LogComponent.Ipc, "resolver restored -- mesh resolving re-enabled");
+                if (paused)
+                {
+                    await WriteFallbackAsync(pipe, id,
+                        WireConstants.OgFallbackReasonResolverUnhealthy,
+                        perReqCts.Token).ConfigureAwait(false);
+                    ConsoleUx.Write(LogComponent.Ipc,
+                        "og-fallback (resolver paused) id=" + id
+                            + CidSuffix(cid)
+                            + " host=" + ExtractHost(req.Url));
+                    return;
+                }
+            }
+
             try
             {
                 // v3.2: resolve disk-cache lookup. If we have a cached
@@ -467,6 +493,25 @@ internal sealed partial class LocalIpcServer : IDisposable
                 viaLhYt: viaLhYt,
                 elapsed: swReq.Elapsed,
                 reason: reasonForLine);
+
+            // Feed the health gate. Cache hits never touched the mesh, so
+            // they are no evidence either way. healthy = a real server
+            // verdict; synthesized unreachable/internal outcomes are what
+            // the resolve streak counts.
+            if (_health != null && !viaCache)
+            {
+                bool healthy = failReason == null
+                    && !(outcome == WireConstants.ActionFallbackNative
+                        && (serverReason == WireConstants.FallbackServerUnreachable
+                            || serverReason == WireConstants.FallbackInternalError));
+                var gateShift = _health.RecordResolveOutcome(healthy, outcome == WireConstants.ActionResolved);
+                if (gateShift == ResolverHealthGate.Transition.Opened)
+                    ConsoleUx.Warn(LogComponent.Ipc,
+                        "resolver paused -- " + ResolverHealthGate.OpenThreshold
+                        + " resolves failed in a row; VRChat's own resolver takes over while the connection recovers");
+                else if (gateShift == ResolverHealthGate.Transition.Closed)
+                    ConsoleUx.Success(LogComponent.Ipc, "resolver restored -- mesh resolving re-enabled");
+            }
 
             // Detailed per-request line (id, cid, full outcome) routed to
             // the rolling watchdog log only -- kept off the user-facing

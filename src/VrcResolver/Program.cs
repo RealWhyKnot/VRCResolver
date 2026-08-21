@@ -24,6 +24,7 @@ internal static class Program
     private static Heartbeat? s_heartbeat;
     private static ResolveCache? s_resolveCache;
     private static OgFallbackHint? s_ogFallbackHint;
+    private static ResolverHealthGate? s_healthGate;
     private static RelayPortManager? s_relayPort;
     private static LocalRelayServer? s_relay;
     private static InteractiveTerminal? s_terminal;
@@ -257,7 +258,8 @@ internal static class Program
         // synthesizes fallback_native within the TTL window so the next
         // retry exec's yt-dlp-og.exe.
         s_ogFallbackHint = new OgFallbackHint();
-        s_ipc = new LocalIpcServer(s_mesh, s_resolveCache, s_ogFallbackHint);
+        s_healthGate = new ResolverHealthGate();
+        s_ipc = new LocalIpcServer(s_mesh, s_resolveCache, s_ogFallbackHint, s_healthGate);
         s_ipc.Start();
         _ = s_mesh.StartAsync();
 
@@ -300,7 +302,7 @@ internal static class Program
         // AVPro couldn't actually load. Also wired to ResolveCache so a
         // load_failure / silent_stall on a cached URL evicts the cached
         // entry, closing the staleness-detection loop without server help.
-        s_logmon = new VrcLogMonitor(s_mesh, s_resolveCache, s_ogFallbackHint);
+        s_logmon = new VrcLogMonitor(s_mesh, s_resolveCache, s_ogFallbackHint, s_healthGate);
         s_logmon.Start();
 
         if (!s_patcher.Start())

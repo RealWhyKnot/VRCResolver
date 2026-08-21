@@ -46,6 +46,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
     private readonly MeshClient _mesh;
     private readonly ResolveCache? _cache;
     private readonly OgFallbackHint? _ogFallbackHint;
+    private readonly ResolverHealthGate? _health;
     private readonly CancellationTokenSource _cts = new();
     private Task? _loop;
 
@@ -66,11 +67,30 @@ internal sealed partial class VrcLogMonitor : IDisposable
     private CancellationTokenSource? _playingFeedbackCts;
     private string? _playingFeedbackUrl;
 
-    public VrcLogMonitor(MeshClient mesh, ResolveCache? cache = null, OgFallbackHint? ogFallbackHint = null)
+    public VrcLogMonitor(MeshClient mesh, ResolveCache? cache = null, OgFallbackHint? ogFallbackHint = null, ResolverHealthGate? health = null)
     {
         _mesh = mesh;
         _ogFallbackHint = ogFallbackHint;
         _cache = cache;
+        _health = health;
+    }
+
+    // A playback observation feeds the health gate only when the URL is one
+    // we served: a first-party playback proxy shape, or a resolved URL the
+    // cache can map back to its source. og-produced URLs match neither, so
+    // og successes can never close the gate and og failures never open it.
+    private bool IsAttributedToUs(string canonicalUrl)
+    {
+        if (string.IsNullOrEmpty(canonicalUrl)) return false;
+        return FirstPartyUrlPolicy.IsFirstPartyPlaybackProxyUrl(canonicalUrl)
+            || (_cache != null && _cache.TryGetSourceUrlForResolved(canonicalUrl, out _));
+    }
+
+    private void ConfirmPlayback(string canonicalUrl)
+    {
+        if (_health == null || !IsAttributedToUs(canonicalUrl)) return;
+        if (_health.RecordPlaybackConfirmed() == ResolverHealthGate.Transition.Closed)
+            ConsoleUx.Success(LogComponent.VrcLog, "resolver restored -- mesh resolving re-enabled");
     }
 
     public void Start()
@@ -196,6 +216,8 @@ internal sealed partial class VrcLogMonitor : IDisposable
                 string activeUrl = _activePlaybackUrl!;
                 DateTime activeAt = _activePlaybackAt == default ? DateTime.UtcNow : _activePlaybackAt;
                 RememberDeliveredHeight(activeUrl, observedHeight);
+                // Frames are flowing -- the strongest playing signal we get.
+                ConfirmPlayback(activeUrl);
                 StartPlayingFeedbackLoop(activeUrl, activeAt);
                 _ = _mesh.SendPlaybackFeedbackAsync(
                     activeUrl,
@@ -244,6 +266,14 @@ internal sealed partial class VrcLogMonitor : IDisposable
                 || line.Contains("Now Playing:")
                 || line.Contains("Load Url:"))
             {
+                // Only the AVPro line is proof OUR url was accepted; the
+                // world-script markers can announce a different video and
+                // stay stall-cancellers only.
+                if (line.Contains("[AVProVideo] Using playback path:")
+                    && _activePlaybackUrl is string acceptedUrl)
+                {
+                    ConfirmPlayback(acceptedUrl);
+                }
                 CancelStallWatchdog();
             }
         }
@@ -318,9 +348,11 @@ internal sealed partial class VrcLogMonitor : IDisposable
     {
         bool ogHintArmed = false;
 
-        // Reverse lookup must happen before eviction. EvictByUrl removes the
-        // cached resolved-url entry we need in order to recover the original
-        // source URL for the wrapper's next invocation.
+        // Attribution and reverse lookup must both happen before eviction.
+        // EvictByUrl removes the cached resolved-url entry that ties this
+        // playback to us and recovers the original source URL for the
+        // wrapper's next invocation.
+        bool attributed = IsAttributedToUs(reportedUrl);
         if (_ogFallbackHint != null
             && _cache != null
             && _cache.TryGetSourceUrlForResolved(reportedUrl, out string sourceUrl))
@@ -330,6 +362,15 @@ internal sealed partial class VrcLogMonitor : IDisposable
         }
 
         int evicted = _cache?.EvictByUrl(reportedUrl) ?? 0;
+
+        if (attributed && _health != null
+            && _health.RecordPlaybackFailure() == ResolverHealthGate.Transition.Opened)
+        {
+            ConsoleUx.Warn(LogComponent.VrcLog,
+                "resolver paused -- " + ResolverHealthGate.OpenThreshold
+                + " playbacks failed in a row; VRChat's own resolver takes over while things recover");
+        }
+
         return new PlaybackFailureRecovery(evicted, ogHintArmed);
     }
 
