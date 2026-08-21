@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.Versioning;
 using System.Text;
 using VrcResolver;
@@ -8,6 +10,54 @@ namespace VrcResolver.Tests;
 [SupportedOSPlatform("windows")]
 public class LocalRelayServerTests
 {
+    [Theory]
+    [InlineData("127.0.0.1")]
+    [InlineData("localhost")]
+    [InlineData("169.254.169.254")]
+    [InlineData("10.0.0.5")]
+    public async Task GuardedConnect_RefusesBlockedAddresses(string host)
+    {
+        await Assert.ThrowsAsync<HttpRequestException>(async () =>
+            await GuardedRelayConnect.ConnectAsync(new DnsEndPoint(host, 80), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Relay_RejectsRequestsCarryingAnOriginHeader()
+    {
+        int port;
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+
+        var relay = new LocalRelayServer(port);
+        relay.Start();
+        try
+        {
+            using var http = new HttpClient();
+            string playUrl = "http://127.0.0.1:" + port + "/play/abc/manifest.m3u8?target="
+                + LocalRelayTargetResolver.EncodeTargetParam(
+                    "https://proxy.whyknot.dev/api/proxy/manifest.m3u8?q=abc");
+
+            // A browser fetch carries Origin; the relay must refuse before
+            // any upstream work even though the target itself is allowed.
+            using var browserReq = new HttpRequestMessage(HttpMethod.Get, playUrl);
+            browserReq.Headers.TryAddWithoutValidation("Origin", "http://example.com");
+            using var browserResp = await http.SendAsync(browserReq);
+            Assert.Equal(HttpStatusCode.Forbidden, browserResp.StatusCode);
+
+            // Without Origin the pipeline is reachable (404 = path gate,
+            // proving the listener is alive and the reject above was the
+            // origin check, not a dead server).
+            using var mediaResp = await http.GetAsync("http://127.0.0.1:" + port + "/not-play");
+            Assert.Equal(HttpStatusCode.NotFound, mediaResp.StatusCode);
+        }
+        finally
+        {
+            await relay.StopAsync();
+        }
+    }
+
     [Fact]
     public void EncodeTargetParam_RoundTrips()
     {

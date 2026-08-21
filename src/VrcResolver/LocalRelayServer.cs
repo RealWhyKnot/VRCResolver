@@ -53,6 +53,11 @@ internal sealed partial class LocalRelayServer : IDisposable
     // during normal use.
     private static readonly bool s_verbose = BuildInfo.IsDevBuild;
     private static long s_reqCounter;
+    // Bounds the fire-and-forget handler tasks (and their upstream
+    // connections). Real HLS fan-out is a handful of segment requests;
+    // triple digits means something local is hammering the listener.
+    private const int MaxInFlight = 128;
+    private int _inFlight;
 
     public LocalRelayServer(int port, string scheme = "http")
     {
@@ -68,6 +73,9 @@ internal sealed partial class LocalRelayServer : IDisposable
             MaxAutomaticRedirections = 5,
             PooledConnectionIdleTimeout = TimeSpan.FromSeconds(60),
             ConnectTimeout = TimeSpan.FromSeconds(15),
+            // Address guard at connect time -- covers every redirect hop,
+            // which the pre-flight target allowlist cannot.
+            ConnectCallback = GuardedRelayConnect.Callback,
         };
         _http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
     }
@@ -113,7 +121,17 @@ internal sealed partial class LocalRelayServer : IDisposable
             }
             // Fire-and-forget per-request handler. HttpListener serialises
             // accept; the dispatched task does the actual work in parallel.
-            _ = Task.Run(() => HandleAsync(ctx));
+            if (Interlocked.Increment(ref _inFlight) > MaxInFlight)
+            {
+                Interlocked.Decrement(ref _inFlight);
+                try { ctx.Response.StatusCode = 503; ctx.Response.Close(); } catch { /* best-effort */ }
+                continue;
+            }
+            _ = Task.Run(async () =>
+            {
+                try { await HandleAsync(ctx).ConfigureAwait(false); }
+                finally { Interlocked.Decrement(ref _inFlight); }
+            });
         }
     }
 
@@ -155,6 +173,18 @@ internal sealed partial class LocalRelayServer : IDisposable
                 if (s_verbose) Verbose("req=" + reqId + " -> 405 (method)");
                 ctx.Response.StatusCode = 405;
                 ctx.Response.Headers["Allow"] = "GET, HEAD";
+                ctx.Response.Close();
+                return;
+            }
+
+            // Media players never send Origin; a browser on this machine
+            // does. The hosts-file pin makes localhost.youtube.com reachable
+            // from any local page, so drive-by fetch attempts are rejected
+            // outright rather than relayed.
+            if (ctx.Request.Headers["Origin"] != null)
+            {
+                if (s_verbose) Verbose("req=" + reqId + " -> 403 (origin header)");
+                ctx.Response.StatusCode = 403;
                 ctx.Response.Close();
                 return;
             }

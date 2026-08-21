@@ -18,9 +18,7 @@ internal static class LocalRelaySecurity
             host = host.Substring(0, colon);
         }
 
-        return host.Equals("localhost.youtube.com", StringComparison.OrdinalIgnoreCase)
-            || host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
-            || host.Equals("localhost", StringComparison.OrdinalIgnoreCase);
+        return TrustGatewayUrlBuilder.IsLocalTrustGatewayHost(host);
     }
 
     public static bool IsAllowedTargetUrl(string targetUrl, out string reason)
