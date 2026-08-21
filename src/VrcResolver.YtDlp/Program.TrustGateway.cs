@@ -26,12 +26,18 @@ internal static partial class Program
     //   - port file unreadable / malformed
     //   - resolved URL is not a first-party playback proxy URL
     //   - URL is already wrapped (defensive; avoid double-wrap)
-    private static string TryWrapForTrustGateway(string url)
+    private static string TryWrapForTrustGateway(string url, bool probeRelay = false)
     {
         if (string.IsNullOrEmpty(url)) return url;
 
         int? port = TryReadRelayPort();
         if (!port.HasValue) return url;
+        // Direct-URL invocations reach here without a pipe roundtrip, so the
+        // port file may have outlived the relay (watchdog killed hard). Probe
+        // before wrapping; a dead localhost URL is a silent black player.
+        // Pipe-resolved URLs skip the probe -- the resolve just proved the
+        // watchdog alive, and it deletes the port file when the relay is down.
+        if (probeRelay && !RelayLiveness.IsListening(port.Value)) return url;
         string scheme = TryReadRelayScheme();
 
         return TrustGatewayUrlBuilder.TryBuild(port.Value, url, session: null, scheme, out string localUrl)

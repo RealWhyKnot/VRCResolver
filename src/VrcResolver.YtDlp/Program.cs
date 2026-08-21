@@ -20,7 +20,7 @@ namespace VrcResolver.YtDlp;
 //   3. Send a v2 ResolveRequest as a single NDJSON line, including
 //      vrchat_format_arg (raw -f value), accept_protocols / accept_codecs
 //      defaults per the inferred player, and protocol_version=2.
-//   4. Read one response line (18 s ceiling — must outlast the watchdog's
+//   4. Read one response line (28 s ceiling — must outlast the watchdog's
 //      LocalIpcServer per-request timeout so the synthesized fallback
 //      response reliably wins the race).
 //      - action=resolved + url present  → write URL to stdout, exit 0.
@@ -102,8 +102,8 @@ internal static partial class Program
                     // a VRChat player. Do not send that back through the mesh
                     // resolver: it is already a server-minted playback URL,
                     // and resolving it again can recurse through /api/proxy.
-                    string toEmit = TryWrapForTrustGateway(url);
-                    WriteUrlToStdout(toEmit);
+                    string toEmit = TryWrapForTrustGateway(url, probeRelay: true);
+                    TryWriteUrlToStdout(toEmit);
                     bool wrapped = !string.Equals(toEmit, url, StringComparison.Ordinal);
                     Log("direct first-party playback URL host=" + ExtractHost(url)
                         + " emitted-host=" + ExtractHost(toEmit)
@@ -125,6 +125,17 @@ internal static partial class Program
                         result = (null, WireConstants.OgFallbackReasonPipeResolveFailed, null);
                     }
 
+                    // Emit-shape guard: the resolved URL crossed a pipe and,
+                    // before that, a WebSocket and possibly a disk cache --
+                    // none of which prove it is something VRChat should fetch.
+                    // Loopback / private-range / non-http shapes go to og.
+                    if (!string.IsNullOrEmpty(result.resolved)
+                        && !ResolvedUrlGuard.IsSafeToEmit(result.resolved))
+                    {
+                        Log("resolved URL fails emit guard (host=" + ExtractHost(result.resolved!) + ") -- falling back");
+                        result = (null, WireConstants.OgFallbackReasonResolvedUrlRejected, null);
+                    }
+
                     if (!string.IsNullOrEmpty(result.resolved))
                     {
                         // Trust-gateway wrap (Phase 1, HTTP-only). If the
@@ -135,7 +146,7 @@ internal static partial class Program
                         // worlds. Missing port file, non-first-party responses, or
                         // malformed URLs fall through to emitting the raw URL.
                         string toEmit = TryWrapForTrustGateway(result.resolved!);
-                        WriteUrlToStdout(toEmit);
+                        TryWriteUrlToStdout(toEmit);
                         bool wrapped = !ReferenceEquals(toEmit, result.resolved);
                         Log("emitted resolved URL to stdout host=" + ExtractHost(toEmit)
                             + " bytes=" + toEmit.Length
@@ -238,7 +249,12 @@ internal static partial class Program
                 return (null, WireConstants.OgFallbackReasonPipeConnectFailed, null);
             }
 
-            long remainingForAttempt = Math.Max(1000, totalDeadlineMs - swPipe.ElapsedMilliseconds);
+            long remainingForAttempt = totalDeadlineMs - swPipe.ElapsedMilliseconds;
+            if (remainingForAttempt <= 0)
+            {
+                Log("resolve budget exhausted before attempt elapsed_ms=" + swPipe.ElapsedMilliseconds);
+                return (null, WireConstants.OgFallbackReasonPipeResolveFailed, null);
+            }
             using var ctsResolve = new CancellationTokenSource(TimeSpan.FromMilliseconds(remainingForAttempt));
 
             req.WrapperDeadlineMs = (int)Math.Max(0, totalDeadlineMs - swPipe.ElapsedMilliseconds - 1000);
@@ -552,7 +568,21 @@ internal static partial class Program
             // bot-detect notices) while stdout is still streaming.
             var stdoutTask = proc.StandardOutput.ReadToEndAsync();
             var stderrTask = proc.StandardError.ReadToEndAsync();
-            await proc.WaitForExitAsync().ConfigureAwait(false);
+            // Bounded wait. og is VRChat's own yt-dlp and normally exits in
+            // seconds; a wedged og would otherwise pin this wrapper (and
+            // VRChat's resolve) forever, one zombie pair per video.
+            using var ctsOg = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            try
+            {
+                await proc.WaitForExitAsync(ctsOg.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                Log("FALLBACK og: no exit after 5 min -- killing process tree, emitting empty stdout");
+                try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+                try { await proc.WaitForExitAsync().ConfigureAwait(false); } catch { /* reaped */ }
+                return 0;
+            }
             string ogStdout = await stdoutTask.ConfigureAwait(false);
             string ogStderr = await stderrTask.ConfigureAwait(false);
             sw.Stop();
@@ -605,13 +635,23 @@ internal static partial class Program
 
     // VRChat's stdout reader is line-buffered + picky: exactly one '\n'
     // terminator, no CRLF, no BOM. Don't use Console.WriteLine.
-    private static void WriteUrlToStdout(string url)
+    // Swallows write failures (VRChat closed its end of the pipe) -- there is
+    // nobody left to read the URL and an unhandled IOException here used to
+    // crash the wrapper with a stack trace on stderr.
+    private static void TryWriteUrlToStdout(string url)
     {
-        string output = url.Trim() + "\n";
-        byte[] bytes = Encoding.UTF8.GetBytes(output);
-        using var stdout = Console.OpenStandardOutput();
-        stdout.Write(bytes, 0, bytes.Length);
-        stdout.Flush();
+        try
+        {
+            string output = url.Trim() + "\n";
+            byte[] bytes = Encoding.UTF8.GetBytes(output);
+            using var stdout = Console.OpenStandardOutput();
+            stdout.Write(bytes, 0, bytes.Length);
+            stdout.Flush();
+        }
+        catch (Exception ex)
+        {
+            Log("stdout write failed: " + ex.GetType().Name + ": " + ex.Message);
+        }
     }
 
     // First arg starting with http:// or https:// is the URL to resolve.

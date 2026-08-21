@@ -40,7 +40,7 @@ public static class ResolveRetryPolicy
     // Returns the delay in milliseconds before sending attempt number `attempt`
     // (0-indexed; attempt=0 -> first retry delay, attempt=1 -> second retry delay).
     // Schedule: 750 ms then 2250 ms -- gives two passes within ~3s total,
-    // which fits inside the 18s wrapper budget without starving the og fallback.
+    // which fits inside the 28s wrapper budget without starving the og fallback.
     public static int NextDelayMs(int attempt) => attempt switch
     {
         0 => 750,
