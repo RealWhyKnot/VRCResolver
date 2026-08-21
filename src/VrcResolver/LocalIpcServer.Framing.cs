@@ -124,21 +124,6 @@ internal sealed partial class LocalIpcServer : IDisposable
     // per-resolve summary. Path / query are NEVER printed to console — they
     // can carry user-identifying tokens (YouTube video ids, twitch streams,
     // etc.). The full URL stays in the watchdog log file via Logger.
-    private static string ExtractHost(string url)
-    {
-        try
-        {
-            if (Uri.TryCreate(url, UriKind.Absolute, out var u))
-            {
-                string h = u.Host;
-                if (h.StartsWith("www.", StringComparison.OrdinalIgnoreCase)) h = h[4..];
-                return h;
-            }
-        }
-        catch { /* best-effort */ }
-        return "?";
-    }
-
     // Player + target resolution label for the request line. The wrapper
     // doesn't populate maxHeight today (the constraint lives in the
     // vrchat_format_arg's `[height<=N]` selector instead) so we parse that

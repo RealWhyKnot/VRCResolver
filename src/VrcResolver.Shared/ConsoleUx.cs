@@ -33,7 +33,6 @@ public enum LogComponent
 public enum ResolveStatus
 {
     Resolved,
-    Cached,
     Fallback,
     Failed,
     Unexpected,
@@ -167,11 +166,6 @@ public static class ConsoleUx
                 color = ConsoleColor.Green;
                 token = "OK";
                 word = viaCache ? "cached" : "resolved";
-                break;
-            case ResolveStatus.Cached:
-                color = ConsoleColor.Green;
-                token = "OK";
-                word = "cached";
                 break;
             case ResolveStatus.Fallback:
                 color = ConsoleColor.Yellow;
@@ -332,18 +326,22 @@ public static class ConsoleUx
         catch { s_overlay = null; }
     }
 
-    private static bool ShouldUseColor()
+    // The one place NO_COLOR is read; TerminalCapabilities delegates here.
+    public static bool UseColor()
     {
         if (Console.IsOutputRedirected) return false;
         return string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NO_COLOR"));
     }
+
+    private static bool ShouldUseColor() => UseColor();
 
     private static string Bullet()
     {
         return ShouldUseUnicode() ? "•" : "*";
     }
 
-    private static bool ShouldUseUnicode()
+    // The one place ASCII_TERMINAL is read; TerminalCapabilities delegates here.
+    public static bool UseUnicode()
     {
         if (Console.IsOutputRedirected) return false;
         string? ascii = LegacyCompat.GetEnvWithLegacyFallback("ASCII_TERMINAL");
@@ -360,6 +358,8 @@ public static class ConsoleUx
             return true;
         }
     }
+
+    private static bool ShouldUseUnicode() => UseUnicode();
 
     private sealed class OverlayRegistration : IDisposable
     {

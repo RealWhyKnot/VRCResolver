@@ -11,10 +11,6 @@ namespace VrcResolver;
 
 internal sealed partial class LocalIpcServer : IDisposable
 {
-    private static bool IsRetryableFallback(string? reason) =>
-            reason == WireConstants.FallbackDiscoveryInProgress
-            || reason == WireConstants.FallbackServerUnreachable;
-
     private void HandleWrapperEvent(WrapperEventNotify notify)
     {
         if (string.Equals(notify.Action, WireConstants.ActionWrapperOgFailedNotify, StringComparison.Ordinal))
@@ -36,10 +32,14 @@ internal sealed partial class LocalIpcServer : IDisposable
             || head.IndexOf("wrapper_og_failed".AsSpan(), StringComparison.Ordinal) >= 0;
     }
 
-    private static void HandleOgFallbackNotify(WrapperEventNotify notify)
+    private void HandleOgFallbackNotify(WrapperEventNotify notify)
     {
-        string host = string.IsNullOrEmpty(notify.Url) ? "<no-url>" : ExtractHost(notify.Url);
+        string host = string.IsNullOrEmpty(notify.Url) ? "<no-url>" : LogUtil.BareHost(notify.Url);
         string reason = LogUtil.SanitizeForConsole(notify.Reason ?? "?", 32);
+        // The server's own one-liner for WHY it punted (DRM, geo-block, sign-in
+        // gate...). Above the fallback line so the user reads cause before effect.
+        if (!string.IsNullOrEmpty(notify.PublicMessage))
+            ConsoleUx.Warn(LogComponent.Wrapper, LogUtil.SanitizeForConsole(notify.PublicMessage, 160));
         // Pairs visually with the !! fallback colour on the resolve summary
         // line -- the wrapper's og fallback path is the same outcome category.
         ConsoleUx.WrapperFallback(host: host, reason: reason, elapsedMs: notify.ElapsedMs);
@@ -48,11 +48,23 @@ internal sealed partial class LocalIpcServer : IDisposable
             " host=" + host +
             " reason=" + reason +
             " elapsed_ms=" + notify.ElapsedMs);
+
+        // The wrapper refused OUR resolved URL: that is a config failure the
+        // server can score, and it cannot see it any other way. Feature-gated
+        // inside SendPlaybackFeedbackAsync; fire-and-forget.
+        if (!string.IsNullOrEmpty(notify.Url)
+            && (notify.Reason == WireConstants.OgFallbackReasonResolvedUrlRejected
+                || notify.Reason == WireConstants.OgFallbackReasonAvProIncompatible))
+        {
+            _ = _mesh.SendPlaybackFeedbackAsync(notify.Url!,
+                WireConstants.PlaybackFeedbackResolvedRejected, 0,
+                detail: notify.Reason, correlationIdOverride: notify.Rid);
+        }
     }
 
     private void HandleOgFailedNotify(WrapperEventNotify notify)
     {
-        string host = string.IsNullOrEmpty(notify.Url) ? "<no-url>" : ExtractHost(notify.Url);
+        string host = string.IsNullOrEmpty(notify.Url) ? "<no-url>" : LogUtil.BareHost(notify.Url);
         string reason = LogUtil.SanitizeForConsole(notify.Reason ?? "?", 32);
         string preview = LogUtil.SanitizeForConsole(notify.ErrorPreview ?? "", 80);
 
@@ -91,6 +103,25 @@ internal sealed partial class LocalIpcServer : IDisposable
             " elapsed_ms=" + notify.ElapsedMs +
             " evicted=" + evicted +
             " preview=" + preview);
+
+        // Upstream-environment signal for the server (never scored there):
+        // og hit the same wall we did, classified by the wrapper's og-stderr
+        // vocabulary -- which is exactly the server's og_failed detail set.
+        if (!string.IsNullOrEmpty(notify.Url))
+        {
+            string detail = OgFailedDetailFor(notify.Reason);
+            _ = _mesh.SendPlaybackFeedbackAsync(notify.Url!,
+                WireConstants.PlaybackFeedbackOgFailed, 0,
+                detail: detail, correlationIdOverride: notify.Rid);
+        }
     }
+
+    // The server validates og_failed detail against a closed set; anything the
+    // wrapper's classifier didn't recognize collapses to "unknown".
+    internal static string OgFailedDetailFor(string? wrapperReason) => wrapperReason switch
+    {
+        "cf_403" or "rate_limited" or "sign_in_required" or "content_not_found" => wrapperReason,
+        _ => "unknown",
+    };
 
 }

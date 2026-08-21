@@ -22,7 +22,7 @@ internal static partial class Program
         sb.Append("START pid=").Append(Environment.ProcessId);
         sb.Append(" ver=").Append(ver);
         sb.Append(" argc=").Append(args.Length);
-        sb.Append(" url-host=").Append(string.IsNullOrEmpty(url) ? "<none>" : ExtractHost(url));
+        sb.Append(" url-host=").Append(string.IsNullOrEmpty(url) ? "<none>" : LogUtil.BareHost(url));
         sb.Append(" player=").Append(player);
         sb.Append(" -f=").Append(formatArg ?? "<none>");
         // Args summary: drop any arg that's an absolute URL (host already

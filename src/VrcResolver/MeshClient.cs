@@ -154,6 +154,17 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private string? _serverVersion;
     private string? _ytDlpVersion;
 
+    // Set by a rate_limited(meshAction=resolve) frame; ResolveAsync short-circuits
+    // to a synthesized rate_limited fallback until it passes so the cooldown never
+    // costs wire traffic. Clamp keeps a bad server value from parking resolving.
+    private const int MaxRateLimitCooldownSeconds = 60;
+    private long _resolveRateLimitedUntilTicks;
+
+    private static bool HasFeature(string[]? features, string feature)
+        => features != null && Array.IndexOf(features, feature) >= 0;
+
+    private bool ServerHasFeature(string feature) => HasFeature(_serverFeatures, feature);
+
     public bool IsConnected => _ws?.State == WebSocketState.Open;
     public int ServerProtocolVersion => _serverProtocolVersion;
     public string? ServerNode => _serverNode;

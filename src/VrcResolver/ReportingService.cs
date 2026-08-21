@@ -131,14 +131,15 @@ internal static partial class ReportingService
         return reason switch
         {
             WireConstants.FallbackAllConfigsFailed => "AllStrategiesFailed",
-            WireConstants.FallbackDomainBlocked => "Blocked403",
             WireConstants.FallbackExtractorUnsupported => "Unknown",
             WireConstants.FallbackInternalError => "Unknown",
             WireConstants.ReasonUnityUnsupportedFormat => "Unknown",
             WireConstants.ReasonWarpDown => "NetworkError",
-            // Transient — don't report:
+            // Transient or server-refused — don't report:
             WireConstants.FallbackServerUnreachable => "",
             WireConstants.FallbackDiscoveryInProgress => "",
+            WireConstants.FallbackRateLimited => "",
+            WireConstants.FallbackProtocolError => "",
             _ => "",
         };
     }

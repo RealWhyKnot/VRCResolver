@@ -29,10 +29,11 @@ namespace VrcResolver;
 // Newline framing keeps both sides simple — no length prefixes, no
 // read-to-end hangs that would happen with raw stream deserialization.
 //
-// Per-connection budget is 15 s. On timeout/parse-error/MeshClient throwing
-// we synthesize a fallback_native frame with the appropriate reason rather
-// than dropping the connection, so the patched yt-dlp.exe always gets a
-// definitive answer it can act on.
+// Per-connection budget defaults to 15 s; a wrapper-declared
+// wrapper_deadline_ms overrides it (clamped, minus a safety margin). On
+// timeout/parse-error/MeshClient throwing we synthesize a fallback_native
+// frame with the appropriate reason rather than dropping the connection, so
+// the patched yt-dlp.exe always gets a definitive answer it can act on.
 [SupportedOSPlatform("windows")]
 internal sealed partial class LocalIpcServer : IDisposable
 {
@@ -81,6 +82,13 @@ internal sealed partial class LocalIpcServer : IDisposable
         // wrappers dial this until PatchManager swaps them; both loops
         // delegate to the same handler.
         _legacyAccepter = Task.Run(() => AcceptLoopAsync(LegacyCompat.LegacyPipeName, _cts.Token));
+    }
+
+    // Single accept loop on a caller-chosen pipe name so tests can exercise
+    // the real request handling end to end without claiming the global names.
+    internal void StartForTests(string pipeName)
+    {
+        _accepter = Task.Run(() => AcceptLoopAsync(pipeName, _cts.Token));
     }
 
     public async Task StopAsync()
@@ -136,6 +144,7 @@ internal sealed partial class LocalIpcServer : IDisposable
     {
         using var perReqCts = CancellationTokenSource.CreateLinkedTokenSource(outerCt);
         perReqCts.CancelAfter(PerRequestTimeout);
+        var deadlineUtc = DateTime.UtcNow + PerRequestTimeout;
         string id = "";
         string? cid = null;
         var swReq = Stopwatch.StartNew();
@@ -246,10 +255,21 @@ internal sealed partial class LocalIpcServer : IDisposable
                     WrapperBudgetFloorMs,
                     WrapperBudgetCeilingMs);
                 perReqCts.CancelAfter(TimeSpan.FromMilliseconds(effectiveMs));
+                deadlineUtc = DateTime.UtcNow.AddMilliseconds(effectiveMs);
                 Logger.WriteFileOnly("[ipc] honoring wrapper_deadline_ms id=" + id +
                     " wrapper_deadline_ms=" + wrapperBudgetMs +
                     " effective_ms=" + effectiveMs);
             }
+
+            // Verified codec claims: replace the wrapper's static AVPro
+            // accept_codecs with the capability-probe-filtered list, so the
+            // server only ever sees codecs this machine can decode. The
+            // request stays a multi-entry set (h264/aac baseline + audio
+            // codecs always survive); only unverified extension-backed video
+            // codecs are pruned. v1 callers that omitted the field keep
+            // their bytes untouched.
+            if (req.Player == WireConstants.PlayerAvPro && req.AcceptCodecs != null)
+                req.AcceptCodecs = WireConstants.BuildAcceptCodecs(CodecCapabilityProbe.VerifiedVideoCodecs);
 
             // Capture the host + player labels for the single per-resolve
             // summary line that fires at terminal-response time below.
@@ -263,7 +283,7 @@ internal sealed partial class LocalIpcServer : IDisposable
             // public-world workaround is being exercised. Same
             // per-process counter goes to the heartbeat line for
             // aggregate visibility.
-            string host = ExtractHost(req.Url);
+            string host = LogUtil.BareHost(req.Url);
             bool viaLhYt = IsLocalhostYoutubeUrl(req.Url);
             string playerLabel = FormatPlayerLabel(req);
             WatchdogStats.RecordResolve(viaLhYt);
@@ -290,7 +310,7 @@ internal sealed partial class LocalIpcServer : IDisposable
                 ConsoleUx.Write(LogComponent.Ipc,
                     "og-fallback (prior load_failure) id=" + id
                         + CidSuffix(cid)
-                        + " host=" + ExtractHost(req.Url));
+                        + " host=" + LogUtil.BareHost(req.Url));
                 return;
             }
 
@@ -313,7 +333,7 @@ internal sealed partial class LocalIpcServer : IDisposable
                     ConsoleUx.Write(LogComponent.Ipc,
                         "og-fallback (resolver paused) id=" + id
                             + CidSuffix(cid)
-                            + " host=" + ExtractHost(req.Url));
+                            + " host=" + LogUtil.BareHost(req.Url));
                     return;
                 }
             }
@@ -336,8 +356,15 @@ internal sealed partial class LocalIpcServer : IDisposable
                     viaCache = true;
                     WatchdogStats.RecordCacheHit();
                     Logger.WriteFileOnly("[resolve-cache] hit id=" + id +
-                        " host=" + ExtractHost(req.Url) +
+                        " host=" + LogUtil.BareHost(req.Url) +
                         " bytes=" + cached.Value.Frame.Length);
+                    // Feature playback_feedback_v2: tell the server a cached
+                    // resolve produced a play it never saw, so per-domain play
+                    // counts stop undercounting by the cache-hit rate.
+                    // Fire-and-forget; MeshClient drops it on older servers.
+                    _ = _mesh.SendPlaybackFeedbackAsync(req.Url,
+                        WireConstants.PlaybackFeedbackCachePlay, 0,
+                        correlationIdOverride: string.IsNullOrEmpty(cid) ? id : cid);
                 }
                 else
                 {
@@ -353,41 +380,48 @@ internal sealed partial class LocalIpcServer : IDisposable
                     // write the bytes straight to the pipe -- no JsonDocument
                     // re-encode on the hot path -- and use the extracted strings
                     // for the user-facing console summary.
+                    // The watchdog is the ONE retry owner (the wrapper only
+                    // retries a failed pipe connect): it alone sees mesh
+                    // connection state, the rate-limit cooldown, and the
+                    // health gate. Fresh id per attempt with correlation_id
+                    // stamped once is the server's documented contract --
+                    // per-attempt ids join on correlation_id in its logs and
+                    // its dedup is per-domain, not per-id. The correlation
+                    // stamp is gated on v2 opt-in so a strict-shape v1
+                    // caller's bytes stay v1 end to end.
+                    if (string.IsNullOrEmpty(req.CorrelationId) && MeshClient.CallerOptedIntoV2(req))
+                    {
+                        req.CorrelationId = req.Id;
+                        cid = req.CorrelationId;
+                    }
+
                     MeshResolveResult result = await _mesh.ResolveAsync(req, perReqCts.Token).ConfigureAwait(false);
 
-                    // Brief retry on transient reasons. The server may
-                    // have been mid-discovery (no strategies built yet
-                    // for this domain) or briefly unreachable; a second
-                    // attempt 2s later often succeeds with a real
-                    // strategy. Structural reasons (domain_blocked,
-                    // all_configs_failed, extractor_unsupported,
-                    // unity_unsupported_format) won't change on retry,
-                    // so we skip them and let the wrapper fall back to
-                    // og immediately.
-                    if (result.Action == WireConstants.ActionFallbackNative
-                        && IsRetryableFallback(result.Reason)
+                    // Retry transient reasons on the shared policy (the ONE
+                    // reason list + schedule). Structural reasons won't
+                    // change on retry; the wrapper falls back to og after a
+                    // single pipe roundtrip.
+                    int retriesSent = 0;
+                    while (result.Action == WireConstants.ActionFallbackNative
+                        && ResolveRetryPolicy.ShouldRetry(result.Reason, retriesSent,
+                            (long)(deadlineUtc - DateTime.UtcNow).TotalMilliseconds)
                         && !perReqCts.Token.IsCancellationRequested)
                     {
+                        int delayMs = ResolveRetryPolicy.NextDelayMs(retriesSent);
                         Logger.WriteFileOnly("[ipc] retry id=" + id + CidSuffix(cid)
                             + " reason=" + LogUtil.SanitizeForConsole(result.Reason ?? "?", 32)
-                            + " attempt=2");
-                        bool slept;
+                            + " attempt=" + (retriesSent + 2)
+                            + " delay_ms=" + delayMs);
                         try
                         {
-                            await Task.Delay(TimeSpan.FromSeconds(2), perReqCts.Token).ConfigureAwait(false);
-                            slept = true;
+                            await Task.Delay(delayMs, perReqCts.Token).ConfigureAwait(false);
                         }
-                        catch (OperationCanceledException) { slept = false; }
+                        catch (OperationCanceledException) { break; }
+                        if (perReqCts.Token.IsCancellationRequested) break;
 
-                        if (slept && !perReqCts.Token.IsCancellationRequested)
-                        {
-                            // Fresh request id so the server doesn't
-                            // dedupe against an in-flight entry for the
-                            // same id. The DTO carries everything else
-                            // verbatim from the first attempt.
-                            req.Id = Guid.NewGuid().ToString("N");
-                            result = await _mesh.ResolveAsync(req, perReqCts.Token).ConfigureAwait(false);
-                        }
+                        req.Id = Guid.NewGuid().ToString("N");
+                        retriesSent++;
+                        result = await _mesh.ResolveAsync(req, perReqCts.Token).ConfigureAwait(false);
                     }
 
                     await WriteFrameAsync(pipe, result.Frame, perReqCts.Token).ConfigureAwait(false);
@@ -409,7 +443,7 @@ internal sealed partial class LocalIpcServer : IDisposable
                                 bool defaultTtl = string.IsNullOrEmpty(parsed.ExpiresAt);
                                 _cache.Store(nodeHost, req.Url, req.Player, req.VrchatFormatArg, parsed);
                                 Logger.WriteFileOnly("[resolve-cache] stored id=" + id +
-                                    " host=" + ExtractHost(req.Url) +
+                                    " host=" + LogUtil.BareHost(req.Url) +
                                     (defaultTtl ? " ttl=default" : " ttl=server"));
                             }
                         }
@@ -504,10 +538,7 @@ internal sealed partial class LocalIpcServer : IDisposable
             // the resolve streak counts.
             if (_health != null && !viaCache)
             {
-                bool healthy = failReason == null
-                    && !(outcome == WireConstants.ActionFallbackNative
-                        && (serverReason == WireConstants.FallbackServerUnreachable
-                            || serverReason == WireConstants.FallbackInternalError));
+                bool healthy = IsHealthyOutcome(failReason, outcome, serverReason);
                 var gateShift = _health.RecordResolveOutcome(healthy, outcome == WireConstants.ActionResolved);
                 if (gateShift == ResolverHealthGate.Transition.Opened)
                     ConsoleUx.Warn(LogComponent.Ipc,
@@ -542,6 +573,16 @@ internal sealed partial class LocalIpcServer : IDisposable
             pipe.Dispose();
         }
     }
+
+    // healthy = a real server verdict, of any kind. Only synthesized
+    // unreachable/internal outcomes count against the resolve streak; a server
+    // that answers rate_limited / protocol_error / domain-shaped failures is
+    // alive and must not open the gate.
+    internal static bool IsHealthyOutcome(string? failReason, string outcome, string? serverReason)
+        => failReason == null
+           && !(outcome == WireConstants.ActionFallbackNative
+               && (serverReason == WireConstants.FallbackServerUnreachable
+                   || serverReason == WireConstants.FallbackInternalError));
 
     public void Dispose()
     {

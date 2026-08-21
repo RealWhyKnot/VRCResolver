@@ -30,6 +30,14 @@ internal sealed partial class MeshClient : IAsyncDisposable
         if (string.IsNullOrEmpty(req.Id))
             req.Id = Guid.NewGuid().ToString("N");
 
+        // Rate-limit cooldown: the server told us to back off; honoring it here
+        // costs one pipe roundtrip instead of a wire send the server will
+        // refuse. Checked before the socket state -- rate_limited is
+        // non-retryable and health-gate-neutral, which is the right answer for
+        // this window even if the socket dropped meanwhile.
+        if (Interlocked.Read(ref _resolveRateLimitedUntilTicks) > DateTime.UtcNow.Ticks)
+            return MakeFallbackResult(req.Id, WireConstants.FallbackRateLimited);
+
         var ws = _ws;
         if (ws is not { State: WebSocketState.Open })
             return MakeFallbackResult(req.Id, WireConstants.FallbackServerUnreachable);
@@ -130,7 +138,7 @@ internal sealed partial class MeshClient : IAsyncDisposable
     // flagged that a strict-shape v1 patched yt-dlp shouldn't suddenly
     // start receiving v2+ response fields it never opted into. v3 didn't
     // change this gate; the constant being stamped just bumped to 3.
-    private static bool CallerOptedIntoV2(ResolveRequest req) =>
+    internal static bool CallerOptedIntoV2(ResolveRequest req) =>
         req.ProtocolVersion.HasValue ||
         !string.IsNullOrEmpty(req.CorrelationId) ||
         req.AcceptProtocols != null ||

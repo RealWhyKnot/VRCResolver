@@ -10,15 +10,100 @@ public static class FirstPartyUrlPolicy
         "vtt", "srt",
     };
 
-    // Both host families are first-party: the server intentionally returns
-    // whyknot-family playback URLs for wire compatibility with pre-rename
-    // clients, so this client must recognize both as its own.
+    // Server-provided augmentation (welcome feature "welcome_hosts"). Union-only
+    // and validated: the hardcoded families/paths below always answer, and a
+    // server list can only ADD candidates -- which still pass every other relay
+    // guard. Whole-array swaps so concurrent readers see a consistent snapshot.
+    private static string[] s_serverHostFamilies = Array.Empty<string>();
+    private static string[] s_serverProxyPaths = Array.Empty<string>();
+
+    public const int MaxServerProvidedEntries = 8;
+
+    public static void SetServerProvided(string[]? hostFamilies, string[]? proxyPaths)
+    {
+        s_serverHostFamilies = SanitizeHostFamilies(hostFamilies);
+        s_serverProxyPaths = SanitizeProxyPaths(proxyPaths);
+    }
+
+    internal static void ResetServerProvidedForTests() => SetServerProvided(null, null);
+
+    // DNS-shaped apex families only: >=2 labels of [a-z0-9-], no IP literals,
+    // no scheme/path/port debris. Anything else is dropped, not rejected as a
+    // whole -- a partially-bad list still contributes its good entries.
+    private static string[] SanitizeHostFamilies(string[]? entries)
+    {
+        if (entries == null || entries.Length == 0) return Array.Empty<string>();
+        var result = new List<string>(Math.Min(entries.Length, MaxServerProvidedEntries));
+        foreach (var raw in entries)
+        {
+            if (result.Count >= MaxServerProvidedEntries) break;
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            string host = raw.Trim().TrimEnd('.').ToLowerInvariant();
+            if (host.Length is < 4 or > 253) continue;
+            if (System.Net.IPAddress.TryParse(host, out _)) continue;
+            var labels = host.Split('.');
+            if (labels.Length < 2) continue;
+            bool ok = true;
+            foreach (var label in labels)
+            {
+                if (label.Length is < 1 or > 63) { ok = false; break; }
+                foreach (var c in label)
+                {
+                    if (c is not ((>= 'a' and <= 'z') or (>= '0' and <= '9') or '-')) { ok = false; break; }
+                }
+                if (!ok) break;
+            }
+            if (ok) result.Add(host);
+        }
+        return result.ToArray();
+    }
+
+    // Proxy-path prefixes must stay under /api/ -- the relay only ever talks to
+    // the server's api surface, and a server bug must not widen that to "/".
+    private static string[] SanitizeProxyPaths(string[]? entries)
+    {
+        if (entries == null || entries.Length == 0) return Array.Empty<string>();
+        var result = new List<string>(Math.Min(entries.Length, MaxServerProvidedEntries));
+        foreach (var raw in entries)
+        {
+            if (result.Count >= MaxServerProvidedEntries) break;
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            string path = raw.Trim();
+            if (path.Length is < 6 or > 64) continue;
+            if (!path.StartsWith("/api/", StringComparison.Ordinal)) continue;
+            if (path.EndsWith("/", StringComparison.Ordinal)) continue;
+            if (path.Contains("..", StringComparison.Ordinal) || path.Contains("//", StringComparison.Ordinal)) continue;
+            bool ok = true;
+            foreach (var c in path)
+            {
+                if (c is not ((>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '/' or '-' or '_')) { ok = false; break; }
+            }
+            if (ok) result.Add(path);
+        }
+        return result.ToArray();
+    }
+
+    // Both hardcoded host families are first-party: the server intentionally
+    // returns whyknot-family playback URLs for wire compatibility with
+    // pre-rename clients, so this client must recognize both as its own.
     public static bool IsFirstPartyHost(string host)
     {
-        return host.Equals("vrcresolver.com", StringComparison.OrdinalIgnoreCase)
+        if (host.Equals("vrcresolver.com", StringComparison.OrdinalIgnoreCase)
             || host.EndsWith(".vrcresolver.com", StringComparison.OrdinalIgnoreCase)
             || host.Equals("whyknot.dev", StringComparison.OrdinalIgnoreCase)
-            || host.EndsWith(".whyknot.dev", StringComparison.OrdinalIgnoreCase);
+            || host.EndsWith(".whyknot.dev", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        foreach (var family in s_serverHostFamilies)
+        {
+            if (host.Equals(family, StringComparison.OrdinalIgnoreCase)
+                || host.EndsWith("." + family, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static bool IsFirstPartyPlaybackProxyUrl(string url)
@@ -81,9 +166,21 @@ public static class FirstPartyUrlPolicy
 
     private static bool IsPlaybackProxyPath(string path)
     {
-        return path.Equals("/api/proxy", StringComparison.OrdinalIgnoreCase)
+        if (path.Equals("/api/proxy", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/api/proxy/", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/popcorn/proxy", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("/api/popcorn/proxy/", StringComparison.OrdinalIgnoreCase);
+            || path.StartsWith("/api/popcorn/proxy/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        foreach (var prefix in s_serverProxyPaths)
+        {
+            if (path.Equals(prefix, StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }

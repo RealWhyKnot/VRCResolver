@@ -19,23 +19,36 @@ internal sealed partial class MeshClient : IAsyncDisposable
     //
     // Feature-gated on welcome.features containing "playback_feedback" so an
     // older server (before 2026.5.4.0-0AFF) doesn't see an unknown action.
-    public async Task SendPlaybackFeedbackAsync(string url, string kind, int msSinceOpen, int? deliveredHeight = null)
+    public async Task SendPlaybackFeedbackAsync(string url, string kind, int msSinceOpen, int? deliveredHeight = null, string? detail = null, string? correlationIdOverride = null)
     {
         var ws = _ws;
         if (ws is not { State: WebSocketState.Open }) return;
         if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(kind)) return;
 
         var features = _serverFeatures;
-        if (features == null || Array.IndexOf(features, WireConstants.ActionPlaybackFeedback) < 0)
+        if (!HasFeature(features, WireConstants.ActionPlaybackFeedback))
             return;
 
-        string? cid = LookupRecentCorrelationId(url);
+        // v2 kinds (and the detail field) exist only on servers advertising the
+        // v2 feature; older servers would protocol_error an unknown kind.
+        bool isV2Kind = kind == WireConstants.PlaybackFeedbackResolvedRejected
+            || kind == WireConstants.PlaybackFeedbackOgFailed
+            || kind == WireConstants.PlaybackFeedbackCachePlay;
+        if (isV2Kind && !HasFeature(features, WireConstants.FeaturePlaybackFeedbackV2))
+            return;
+        if (!HasFeature(features, WireConstants.FeaturePlaybackFeedbackV2))
+            detail = null;
+
+        // Callers that already hold the resolve's correlation id (the IPC
+        // cache-hit and wrapper-notify paths) pass it directly; the recent-cid
+        // map only knows RESOLVED urls, and those paths carry source urls.
+        string? cid = correlationIdOverride ?? LookupRecentCorrelationId(url);
 
         byte[] payload;
         try
         {
             payload = BuildPlaybackFeedbackPayload(
-                url, kind, msSinceOpen, _clientId, cid, DateTime.UtcNow, deliveredHeight);
+                url, kind, msSinceOpen, _clientId, cid, DateTime.UtcNow, deliveredHeight, detail);
         }
         catch { return; }
 
@@ -57,7 +70,8 @@ internal sealed partial class MeshClient : IAsyncDisposable
         string clientId,
         string? correlationId,
         DateTime timestampUtc,
-        int? deliveredHeight = null)
+        int? deliveredHeight = null,
+        string? detail = null)
     {
         // AOT migration: Dictionary<string, object?> + reflection-based
         // SerializeToUtf8Bytes replaced with the typed PlaybackFeedbackFrame
@@ -74,6 +88,7 @@ internal sealed partial class MeshClient : IAsyncDisposable
             ClientId = clientId,
             CorrelationId = string.IsNullOrEmpty(correlationId) ? null : correlationId,
             DeliveredHeight = deliveredHeight is > 0 ? deliveredHeight : null,
+            Detail = string.IsNullOrEmpty(detail) ? null : detail,
         };
         return JsonSerializer.SerializeToUtf8Bytes(frame, MeshJsonContext.Default.PlaybackFeedbackFrame);
     }

@@ -91,7 +91,7 @@ public class V3ProtocolTests
             ProtocolVersion = 3,
             Node = "node1",
             Engines = new[] { "yt-dlp" },
-            Features = new[] { WireConstants.FeatureV3Compression, WireConstants.FeatureWelcomeHashAck },
+            Features = new[] { "v3_compression", "welcome_hash_ack" },
             WelcomeHash = "fingerprint",
             ServerVersion = "2026.5.4.7-3F2A",
         };
@@ -100,7 +100,7 @@ public class V3ProtocolTests
         Assert.NotNull(parsed);
         Assert.Equal("fingerprint", parsed!.WelcomeHash);
         Assert.Equal(3, parsed.ProtocolVersion);
-        Assert.Contains(WireConstants.FeatureV3Compression, parsed.Features!);
+        Assert.Contains("v3_compression", parsed.Features!);
     }
 
     [Fact]
@@ -142,8 +142,6 @@ public class V3ProtocolTests
         Assert.Equal("client_hello", WireConstants.ActionClientHello);
         Assert.Equal("welcome_cached", WireConstants.ActionWelcomeCached);
         Assert.Equal("welcome_hash", WireConstants.FieldWelcomeHash);
-        Assert.Equal("v3_compression", WireConstants.FeatureV3Compression);
-        Assert.Equal("welcome_hash_ack", WireConstants.FeatureWelcomeHashAck);
         Assert.Equal(3, WireConstants.ClientProtocolVersion);
     }
 
@@ -157,13 +155,42 @@ public class V3ProtocolTests
         Assert.Equal("negotiated_format", WireConstants.FieldNegotiatedFormat);
         Assert.Equal("json", WireConstants.FormatJson);
         Assert.Equal("msgpack", WireConstants.FormatMsgpack);
-        Assert.Equal("msgpack_format", WireConstants.FeatureMsgpackFormat);
 
         // Preference list shape: msgpack first, json fallback. Server
         // picks the first format from this list that it supports.
         Assert.Equal(new[] { "msgpack", "json" }, WireConstants.AcceptFormatsPreference);
         // Sentinel for the v3.0-style behaviour: explicit json-only.
         Assert.Equal(new[] { "json" }, WireConstants.AcceptFormatsJsonOnly);
+    }
+
+    [Fact]
+    public void WireConstants_welcome_hosts_and_feedback_v2_strings_match_server_spec()
+    {
+        Assert.Equal("welcome_hosts", WireConstants.FeatureWelcomeHosts);
+        Assert.Equal("playback_feedback_v2", WireConstants.FeaturePlaybackFeedbackV2);
+        Assert.Equal("resolved_rejected", WireConstants.PlaybackFeedbackResolvedRejected);
+        Assert.Equal("og_failed", WireConstants.PlaybackFeedbackOgFailed);
+        Assert.Equal("cache_play", WireConstants.PlaybackFeedbackCachePlay);
+        Assert.Equal("protocol_error", WireConstants.ActionProtocolError);
+        Assert.Equal("rate_limited", WireConstants.ActionRateLimited);
+        Assert.Equal("rate_limited", WireConstants.FallbackRateLimited);
+        Assert.Equal("protocol_error", WireConstants.FallbackProtocolError);
+        // rate_limited fields are camelCase on the wire -- a v2-era outlier.
+        Assert.Equal("retryAfterSeconds", WireConstants.FieldRetryAfterSeconds);
+        Assert.Equal("meshAction", WireConstants.FieldMeshAction);
+    }
+
+    [Fact]
+    public void WelcomeFrame_welcome_hosts_fields_round_trip()
+    {
+        string json = "{\"action\":\"welcome\",\"protocol_version\":3,\"node\":\"node1\","
+            + "\"features\":[\"welcome_hosts\"],"
+            + "\"first_party_hosts\":[\"vrcresolver.com\",\"whyknot.dev\"],"
+            + "\"playback_proxy_paths\":[\"/api/proxy\",\"/api/popcorn/proxy\"]}";
+        var parsed = JsonSerializer.Deserialize<WelcomeFrame>(json);
+        Assert.NotNull(parsed);
+        Assert.Equal(new[] { "vrcresolver.com", "whyknot.dev" }, parsed!.FirstPartyHosts);
+        Assert.Equal(new[] { "/api/proxy", "/api/popcorn/proxy" }, parsed.PlaybackProxyPaths);
     }
 
     [Fact]

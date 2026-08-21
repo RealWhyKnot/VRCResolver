@@ -30,7 +30,7 @@ namespace VrcResolver;
 // "resolved" frame on the v3.1 hot path. Field order:
 //   0:Action 1:Id 2:Url 3:Engine 4:Config 5:Container
 //   6:VideoCodec 7:AudioCodec 8:Protocol 9:AudioChannels
-//   10:BytesEstimate 11:ExpiresAt
+//   10:BytesEstimate 11:ExpiresAt 12:ResolvedHeight
 //
 // The watchdog transcodes this DTO to JSON via MeshJsonContext's
 // ResolveResponse before publishing to the pending TCS — wrapper sees
@@ -52,16 +52,18 @@ internal sealed partial class MsgpackResolvedFrame
     [Key(9)] public int? AudioChannels { get; set; }
     [Key(10)] public long? BytesEstimate { get; set; }
     [Key(11)] public string? ExpiresAt { get; set; }
+    [Key(12)] public int? ResolvedHeight { get; set; }
 }
 
 // "fallback_native" frame. Field order:
-//   0:Action 1:Id 2:Reason
+//   0:Action 1:Id 2:Reason 3:PublicMessage
 [MessagePackObject(AllowPrivate = true)]
 internal sealed partial class MsgpackFallbackNativeFrame
 {
     [Key(0)] public string? Action { get; set; }
     [Key(1)] public string? Id { get; set; }
     [Key(2)] public string? Reason { get; set; }
+    [Key(3)] public string? PublicMessage { get; set; }
 }
 
 // "resolve_log" frame (server-side narration, file-only on the client).

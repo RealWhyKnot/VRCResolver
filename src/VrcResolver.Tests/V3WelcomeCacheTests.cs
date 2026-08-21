@@ -41,7 +41,7 @@ public class V3WelcomeCacheTests : IDisposable
             ProtocolVersion = 3,
             Node = "node1",
             Engines = new[] { "yt-dlp" },
-            Features = new[] { WireConstants.FeatureV3Compression },
+            Features = new[] { "v3_compression" },
             WarpActive = true,
             ServerVersion = "v1",
             YtDlpVersion = "yd1",
@@ -51,7 +51,7 @@ public class V3WelcomeCacheTests : IDisposable
             ProtocolVersion = 3,
             Node = "node2",
             Engines = new[] { "yt-dlp", "ffmpeg" },
-            Features = new[] { WireConstants.FeatureV3Compression, WireConstants.FeatureWelcomeHashAck },
+            Features = new[] { "v3_compression", "welcome_hash_ack" },
             WarpActive = false,
             ServerVersion = "v2",
             YtDlpVersion = "yd2",
@@ -203,5 +203,27 @@ public class V3WelcomeCacheTests : IDisposable
         // The .new tmp should have been cleaned up.
         Assert.False(File.Exists(_path + ".new"),
             "SaveFile catch should have deleted the .new tmp residue");
+    }
+
+    [Fact]
+    public void Store_persists_welcome_hosts_fields_for_cached_hydration()
+    {
+        // welcome_cached hydration reads these from the entry; the server's
+        // hash covers them, so a change forces a full welcome and this cache
+        // can never serve stale lists.
+        var cache = new WelcomeCache(_path);
+        cache.Store("us1.vrcresolver.com", new WelcomeFrame
+        {
+            ProtocolVersion = 3,
+            Node = "node1",
+            Features = new[] { "welcome_hosts" },
+            FirstPartyHosts = new[] { "vrcresolver.com", "whyknot.dev" },
+            PlaybackProxyPaths = new[] { "/api/proxy", "/api/popcorn/proxy" },
+        }, "hash1");
+
+        var entry = cache.Get("us1.vrcresolver.com");
+        Assert.NotNull(entry);
+        Assert.Equal(new[] { "vrcresolver.com", "whyknot.dev" }, entry!.FirstPartyHosts);
+        Assert.Equal(new[] { "/api/proxy", "/api/popcorn/proxy" }, entry.PlaybackProxyPaths);
     }
 }

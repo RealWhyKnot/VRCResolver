@@ -150,4 +150,89 @@ public class FirstPartyUrlPolicyTests
             "http://localhost.youtube.com:51234/play/a/manifest.m3u8?target=not-base64",
             out _));
     }
+
+    // Server-provided welcome_hosts augmentation: strict union. The hardcoded
+    // families always answer; a server list can only ADD validated entries.
+    [Fact]
+    public void ServerProvidedHosts_UnionWithHardcoded_NeverReplace()
+    {
+        try
+        {
+            FirstPartyUrlPolicy.SetServerProvided(new[] { "example-cdn.net" }, null);
+            Assert.True(FirstPartyUrlPolicy.IsFirstPartyHost("example-cdn.net"));
+            Assert.True(FirstPartyUrlPolicy.IsFirstPartyHost("node1.example-cdn.net"));
+            Assert.True(FirstPartyUrlPolicy.IsFirstPartyHost("vrcresolver.com"));
+            Assert.True(FirstPartyUrlPolicy.IsFirstPartyHost("proxy.whyknot.dev"));
+            Assert.False(FirstPartyUrlPolicy.IsFirstPartyHost("evil-example-cdn.net.attacker.io"));
+        }
+        finally
+        {
+            FirstPartyUrlPolicy.ResetServerProvidedForTests();
+        }
+    }
+
+    [Theory]
+    [InlineData("127.0.0.1")]
+    [InlineData("::1")]
+    [InlineData("localhost")]
+    [InlineData("https://example.com")]
+    [InlineData("bad host.com")]
+    [InlineData("")]
+    public void ServerProvidedHosts_InvalidEntries_AreDropped(string entry)
+    {
+        try
+        {
+            FirstPartyUrlPolicy.SetServerProvided(new[] { entry }, null);
+            Assert.False(FirstPartyUrlPolicy.IsFirstPartyHost(entry));
+        }
+        finally
+        {
+            FirstPartyUrlPolicy.ResetServerProvidedForTests();
+        }
+    }
+
+    [Fact]
+    public void ServerProvidedHosts_CapAtEightEntries()
+    {
+        try
+        {
+            var many = new string[12];
+            for (int i = 0; i < many.Length; i++) many[i] = "host" + i + ".example";
+            FirstPartyUrlPolicy.SetServerProvided(many, null);
+            Assert.True(FirstPartyUrlPolicy.IsFirstPartyHost("host7.example"));
+            Assert.False(FirstPartyUrlPolicy.IsFirstPartyHost("host8.example"));
+        }
+        finally
+        {
+            FirstPartyUrlPolicy.ResetServerProvidedForTests();
+        }
+    }
+
+    [Fact]
+    public void ServerProvidedPaths_MustStayUnderApi()
+    {
+        try
+        {
+            FirstPartyUrlPolicy.SetServerProvided(null,
+                new[] { "/api/next-proxy", "/anything", "/api/", "/api/x/../y", "/api/trail/" });
+            Assert.True(FirstPartyUrlPolicy.IsFirstPartyPlaybackProxyUrl(
+                "https://vrcresolver.com/api/next-proxy/manifest.m3u8"));
+            Assert.False(FirstPartyUrlPolicy.IsFirstPartyPlaybackProxyUrl(
+                "https://vrcresolver.com/anything/manifest.m3u8"));
+        }
+        finally
+        {
+            FirstPartyUrlPolicy.ResetServerProvidedForTests();
+        }
+    }
+
+    [Fact]
+    public void ServerProvidedReset_RestoresHardcodedOnlyBehavior()
+    {
+        FirstPartyUrlPolicy.SetServerProvided(new[] { "example-cdn.net" }, new[] { "/api/next-proxy" });
+        FirstPartyUrlPolicy.ResetServerProvidedForTests();
+        Assert.False(FirstPartyUrlPolicy.IsFirstPartyHost("example-cdn.net"));
+        Assert.False(FirstPartyUrlPolicy.IsFirstPartyPlaybackProxyUrl(
+            "https://vrcresolver.com/api/next-proxy/x.m3u8"));
+    }
 }

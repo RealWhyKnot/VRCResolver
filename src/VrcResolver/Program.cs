@@ -341,9 +341,16 @@ internal static class Program
         // prompt without having to remember to run the Updater manually.
         UpdateCheck.StartBackgroundCheck();
 
+        // Verify which extension-backed codecs this machine can actually
+        // decode BEFORE any resolve goes out -- the accept_codecs claim sent
+        // to the server is pruned to this set, and the server trusts explicit
+        // claims because of it. Synchronous by design: MFTEnumEx is a few ms.
+        CodecCapabilityProbe.Refresh();
+
         // Silent codec install (AV1 / HEVC / VP9) for AVPro decode support.
         // State cached so a successful install or recent failed attempt
-        // doesn't re-trigger on every boot.
+        // doesn't re-trigger on every boot. A confirmed install re-runs the
+        // capability probe so the codec becomes claimable this session.
         CodecInstaller.StartBackgroundCheck();
 
         // One-shot scrub of legacy bundled-fallback artifacts from an

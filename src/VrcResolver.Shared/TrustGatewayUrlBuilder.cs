@@ -23,10 +23,7 @@ public static class TrustGatewayUrlBuilder
             : SanitizeSession(session);
         if (effectiveSession.Length == 0) return false;
 
-        string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(targetUrl))
-            .Replace('+', '-')
-            .Replace('/', '_')
-            .TrimEnd('=');
+        string encoded = Base64UrlText.Encode(targetUrl);
         string ext = FirstPartyUrlPolicy.PlaybackProxyExtensionForTrustGateway(targetUrl);
         string suffix = string.IsNullOrEmpty(ext) ? "" : "." + ext;
 
@@ -48,24 +45,10 @@ public static class TrustGatewayUrlBuilder
         string? encoded = FindQueryValue(uri.Query, "target");
         if (string.IsNullOrWhiteSpace(encoded)) return false;
 
-        try
-        {
-            string b64 = encoded.Replace('-', '+').Replace('_', '/');
-            switch (b64.Length % 4)
-            {
-                case 2: b64 += "=="; break;
-                case 3: b64 += "="; break;
-            }
-
-            string decoded = Encoding.UTF8.GetString(Convert.FromBase64String(b64));
-            if (!Uri.TryCreate(decoded, UriKind.Absolute, out _)) return false;
-            targetUrl = decoded;
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        if (!Base64UrlText.TryDecode(encoded, out string decoded)) return false;
+        if (!Uri.TryCreate(decoded, UriKind.Absolute, out _)) return false;
+        targetUrl = decoded;
+        return true;
     }
 
     private static string SanitizeSession(string session)

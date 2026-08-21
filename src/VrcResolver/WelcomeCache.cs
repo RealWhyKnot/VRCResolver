@@ -65,6 +65,8 @@ internal sealed class WelcomeCache
             WarpActive = welcome.WarpActive,
             YtDlpVersion = welcome.YtDlpVersion,
             ServerVersion = welcome.ServerVersion,
+            FirstPartyHosts = welcome.FirstPartyHosts,
+            PlaybackProxyPaths = welcome.PlaybackProxyPaths,
             StoredAt = DateTime.UtcNow.ToString("o"),
         };
         SaveFile(file);
@@ -169,6 +171,11 @@ internal sealed class WelcomeCacheEntry
     [JsonPropertyName("warp_active")] public bool? WarpActive { get; set; }
     [JsonPropertyName("yt_dlp_version")] public string? YtDlpVersion { get; set; }
     [JsonPropertyName("server_version")] public string? ServerVersion { get; set; }
+    // welcome_hosts payload. Hash-covered on the server side, so a change
+    // rotates the hash and forces a full welcome -- hydrating from here on
+    // welcome_cached can never serve stale lists.
+    [JsonPropertyName("first_party_hosts")] public string[]? FirstPartyHosts { get; set; }
+    [JsonPropertyName("playback_proxy_paths")] public string[]? PlaybackProxyPaths { get; set; }
     // Diagnostic only — not part of the wire protocol.
     [JsonPropertyName("stored_at")] public string? StoredAt { get; set; }
 }

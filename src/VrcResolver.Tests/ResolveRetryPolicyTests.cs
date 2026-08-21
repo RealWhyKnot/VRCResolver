@@ -85,4 +85,18 @@ public class ResolveRetryPolicyTests
     {
         Assert.Equal(2000, ResolveRetryPolicy.MinBudgetForRetryMs);
     }
+
+    // Executable pin of the health-gate constraint: server control outcomes
+    // must never re-enter the retry loop. rate_limited retrying would add
+    // load the server just refused; protocol_error retrying resends the same
+    // rejected shape. Same rule for the local gate reasons.
+    [Theory]
+    [InlineData(WireConstants.FallbackRateLimited)]
+    [InlineData(WireConstants.FallbackProtocolError)]
+    [InlineData(WireConstants.OgFallbackReasonResolverUnhealthy)]
+    [InlineData(WireConstants.OgFallbackReasonResolvedUrlRejected)]
+    public void ServerControlAndGateReasons_AreNotRetryable(string reason)
+    {
+        Assert.False(ResolveRetryPolicy.ShouldRetry(reason, 0, 30_000));
+    }
 }

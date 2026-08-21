@@ -209,6 +209,37 @@ public class ProtocolRoundTripTests
     }
 
     [Fact]
+    public void PlaybackFeedback_v2_detail_is_carried_and_omitted_when_null()
+    {
+        byte[] withDetail = MeshClient.BuildPlaybackFeedbackPayload(
+            url: "https://example.com/video",
+            kind: WireConstants.PlaybackFeedbackResolvedRejected,
+            msSinceOpen: 0,
+            clientId: "client-xyz",
+            correlationId: "cid-42",
+            timestampUtc: DateTime.UtcNow,
+            detail: WireConstants.OgFallbackReasonResolvedUrlRejected);
+        using (var doc = JsonDocument.Parse(withDetail))
+        {
+            Assert.Equal("resolved_rejected", doc.RootElement.GetProperty("kind").GetString());
+            Assert.Equal("resolved_url_rejected", doc.RootElement.GetProperty("detail").GetString());
+        }
+
+        byte[] withoutDetail = MeshClient.BuildPlaybackFeedbackPayload(
+            url: "https://example.com/video",
+            kind: WireConstants.PlaybackFeedbackCachePlay,
+            msSinceOpen: 0,
+            clientId: "client-xyz",
+            correlationId: "cid-42",
+            timestampUtc: DateTime.UtcNow);
+        using (var doc = JsonDocument.Parse(withoutDetail))
+        {
+            Assert.Equal("cache_play", doc.RootElement.GetProperty("kind").GetString());
+            Assert.False(doc.RootElement.TryGetProperty("detail", out _));
+        }
+    }
+
+    [Fact]
     public void ResolveRequest_wrapper_deadline_ms_round_trips()
     {
         const string json = """

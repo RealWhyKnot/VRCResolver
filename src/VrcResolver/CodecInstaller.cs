@@ -7,38 +7,42 @@ using VrcResolver.Shared;
 namespace VrcResolver;
 
 // Silent video-codec auto-install. AVPro can't decode AV1 / HEVC / VP9
-// without the matching Microsoft Store extension; on a fresh Windows or
-// a locked-down corporate image those extensions are absent and AVPro
-// fails with a generic decode error. Restoring the legacy startup hook
-// so users with stripped Windows installs get the codecs without ever
-// noticing.
+// without a matching Media Foundation decoder; on a fresh Windows or a
+// locked-down corporate image those are absent and AVPro fails with a
+// generic decode error.
 //
 // Behaviour:
-//   - Fire-and-forget Task at boot (Run() returns immediately).
-//   - Per-codec state cached at %LOCALAPPDATA%Low\vrcresolver\codec-state.json
-//     so a successful install or a recent attempted-failed entry doesn't
-//     re-trigger every launch.
-//   - Each winget invocation has a 60 s budget; total budget is bounded
-//     by sequential per-codec timeouts.
-//   - Failures (winget missing, network outage, store auth) are silenced
-//     to console.WriteLine (one line) so the operator sees what happened
-//     without a stack trace dump.
+//   - Fire-and-forget Task at boot (StartBackgroundCheck returns immediately).
+//   - Per codec: a Media Foundation decoder probe FIRST (covers store, OEM,
+//     and hardware installs), then an AppX package probe, then winget against
+//     an ordered list of store ids -- HEVC's primary listing is the paid one,
+//     which winget cannot install without an existing entitlement, so the
+//     free device-manufacturer listing is tried second.
+//   - winget exit 0 alone never marks a codec installed; only a subsequent
+//     decoder/package probe hit does. On confirmed install the capability
+//     probe refreshes so the codec becomes claimable this session.
+//   - Failures are classified from winget's output; transient classes retry
+//     after a day, permanent ones (winget missing, purchase required) after a
+//     week. State cached at %LOCALAPPDATA%Low\vrcresolver\codec-state.json.
+//   - Failures are silenced to one console line per codec, with the class,
+//     so the operator sees what happened without a stack trace dump.
 [SupportedOSPlatform("windows")]
 internal static class CodecInstaller
 {
     private static readonly TimeSpan PerCodecTimeout = TimeSpan.FromSeconds(60);
-    // If we attempted and failed, don't keep retrying every launch — back
-    // off for a week. The user can manually clear codec-state.json to
-    // force a retry sooner.
-    private static readonly TimeSpan FailureRetryWindow = TimeSpan.FromDays(7);
+    internal static readonly TimeSpan TransientRetryWindow = TimeSpan.FromDays(1);
+    internal static readonly TimeSpan PermanentRetryWindow = TimeSpan.FromDays(7);
 
-    private sealed record Codec(string Name, string StoreId, string PackageFamilyName);
+    internal sealed record Codec(string Name, string PackageName, string ProbeCodec, string[] StoreIds);
 
-    private static readonly Codec[] Required =
+    internal static readonly Codec[] Required =
     {
-        new("AV1 Video Extension",   "9MVZQVXJBQ9V", "Microsoft.AV1VideoExtension"),
-        new("HEVC Video Extension",  "9NMZLZ57R3T7", "Microsoft.HEVCVideoExtension"),
-        new("VP9 Video Extensions",  "9N4D0MSV0403", "Microsoft.VP9VideoExtensions"),
+        new("AV1 Video Extension", "Microsoft.AV1VideoExtension", "av1",
+            new[] { "9MVZQVXJBQ9V" }),
+        new("HEVC Video Extensions", "Microsoft.HEVCVideoExtension", "h265",
+            new[] { "9NMZLZ57R3T7", "9N4WGH0Z6VHQ" }),
+        new("VP9 Video Extensions", "Microsoft.VP9VideoExtensions", "vp9",
+            new[] { "9N4D0MSV0403" }),
     };
 
     public static void StartBackgroundCheck()
@@ -58,26 +62,27 @@ internal static class CodecInstaller
         {
             var statePath = StatePath();
             var state = LoadState(statePath);
-            bool dirty = false;
+            var core = new Core(
+                mfProbe: codec => CodecCapabilityProbe.ProbeDecoder(codec) == true,
+                appxProbe: IsAppxInstalledAsync,
+                wingetInstall: WingetInstallAsync,
+                utcNow: () => DateTime.UtcNow);
 
-            foreach (var codec in Required)
+            bool dirty = await core.RunAsync(Required, state, outcome =>
             {
-                if (ShouldSkip(state, codec.StoreId))
-                    continue;
-
-                bool installed = await TryEnsureInstalledAsync(codec).ConfigureAwait(false);
-                state.Codecs[codec.StoreId] = new CodecEntry
+                if (outcome.Installed)
                 {
-                    Status = installed ? "installed" : "failed",
-                    LastAttemptUtc = DateTime.UtcNow,
-                    PackageFamilyName = codec.PackageFamilyName,
-                };
-                dirty = true;
-                if (installed)
-                    ConsoleUx.Success(LogComponent.Codec, codec.Name + " ready.");
+                    ConsoleUx.Success(LogComponent.Codec, outcome.Codec.Name + " ready ("
+                        + outcome.Detail + ").");
+                    CodecCapabilityProbe.Refresh();
+                }
                 else
-                    ConsoleUx.Warn(LogComponent.Codec, codec.Name + " install failed; will retry next week.");
-            }
+                {
+                    ConsoleUx.Warn(LogComponent.Codec, outcome.Codec.Name + " install failed ("
+                        + outcome.Detail + "); will retry "
+                        + (IsTransientFailure(outcome.Detail) ? "tomorrow" : "next week") + ".");
+                }
+            }).ConfigureAwait(false);
 
             if (dirty) SaveState(statePath, state);
         }
@@ -89,26 +94,127 @@ internal static class CodecInstaller
         }
     }
 
-    private static bool ShouldSkip(CodecState state, string storeId)
+    // Per-codec outcome handed to the report callback. Detail is either the
+    // verification source ("mf", "appx", "winget+mf", ...) or the failure class.
+    internal sealed record CodecOutcome(Codec Codec, bool Installed, string Detail);
+
+    // Failure classes. Transient ones retry after TransientRetryWindow;
+    // everything else waits out PermanentRetryWindow.
+    internal const string FailWingetMissing = "winget_missing";
+    internal const string FailNotEntitled = "not_entitled";
+    internal const string FailNotFound = "not_found";
+    internal const string FailSourceUnavailable = "msstore_source_unavailable";
+    internal const string FailTimeout = "timeout";
+    internal const string FailUnverifiedInstall = "install_unverified";
+    internal const string FailUnknown = "unknown";
+
+    internal static bool IsTransientFailure(string failureClass) => failureClass
+        is FailTimeout or FailUnverifiedInstall or FailUnknown;
+
+    internal sealed record WingetResult(bool Launched, bool TimedOut, int ExitCode, string Output);
+
+    // Map a winget run to a failure class. winget's texts vary by version, so
+    // the token match is deliberately loose and everything unmatched is
+    // "unknown" (transient -- retried sooner precisely because we can't tell).
+    internal static string ClassifyWingetFailure(WingetResult result)
     {
-        if (!state.Codecs.TryGetValue(storeId, out var entry)) return false;
-        if (entry.Status == "installed") return true;
-        if (entry.Status == "failed" && DateTime.UtcNow - entry.LastAttemptUtc < FailureRetryWindow) return true;
-        return false;
+        if (!result.Launched) return FailWingetMissing;
+        if (result.TimedOut) return FailTimeout;
+        string body = result.Output.ToLowerInvariant();
+        if (body.Contains("no package found")) return FailNotFound;
+        if (body.Contains("purchase") || body.Contains("not owned") || body.Contains("entitlement"))
+            return FailNotEntitled;
+        if (body.Contains("source") && (body.Contains("disabled") || body.Contains("agreement") || body.Contains("blocked")))
+            return FailSourceUnavailable;
+        return FailUnknown;
     }
 
-    private static async Task<bool> TryEnsureInstalledAsync(Codec codec)
+    // The decision engine, with every side effect injected so state
+    // transitions and classification routing are unit-testable. Returns true
+    // when the state was modified.
+    internal sealed class Core
     {
-        // Fast-path: AppxPackage probe via PowerShell. If the package
-        // is already present (e.g. shipped with the Windows image),
-        // skip the winget install entirely.
-        if (await IsAppxInstalledAsync(codec.PackageFamilyName).ConfigureAwait(false))
-            return true;
+        private readonly Func<string, bool> _mfProbe;
+        private readonly Func<string, Task<bool>> _appxProbe;
+        private readonly Func<string, Task<WingetResult>> _wingetInstall;
+        private readonly Func<DateTime> _utcNow;
 
-        return await WingetInstallAsync(codec.StoreId).ConfigureAwait(false);
+        public Core(
+            Func<string, bool> mfProbe,
+            Func<string, Task<bool>> appxProbe,
+            Func<string, Task<WingetResult>> wingetInstall,
+            Func<DateTime> utcNow)
+        {
+            _mfProbe = mfProbe;
+            _appxProbe = appxProbe;
+            _wingetInstall = wingetInstall;
+            _utcNow = utcNow;
+        }
+
+        public async Task<bool> RunAsync(
+            IReadOnlyList<Codec> codecs, CodecState state, Action<CodecOutcome>? report = null)
+        {
+            bool dirty = false;
+            foreach (var codec in codecs)
+            {
+                if (ShouldSkip(state, codec.StoreIds[0])) continue;
+
+                var outcome = await ResolveOneAsync(codec).ConfigureAwait(false);
+                state.Codecs[codec.StoreIds[0]] = new CodecEntry
+                {
+                    Status = outcome.Installed ? "installed" : "failed",
+                    FailureClass = outcome.Installed ? null : outcome.Detail,
+                    LastAttemptUtc = _utcNow(),
+                    PackageName = codec.PackageName,
+                };
+                dirty = true;
+                report?.Invoke(outcome);
+            }
+            return dirty;
+        }
+
+        private async Task<CodecOutcome> ResolveOneAsync(Codec codec)
+        {
+            // A present decoder ends it, whatever channel installed it.
+            if (_mfProbe(codec.ProbeCodec))
+                return new CodecOutcome(codec, Installed: true, "mf");
+            if (await _appxProbe(codec.PackageName).ConfigureAwait(false))
+                return new CodecOutcome(codec, Installed: true, "appx");
+
+            string lastClass = FailUnknown;
+            foreach (var storeId in codec.StoreIds)
+            {
+                var result = await _wingetInstall(storeId).ConfigureAwait(false);
+                if (result.Launched && !result.TimedOut && result.ExitCode == 0)
+                {
+                    // Verify -- winget exit 0 is a claim, not proof.
+                    if (_mfProbe(codec.ProbeCodec))
+                        return new CodecOutcome(codec, Installed: true, "winget+mf");
+                    if (await _appxProbe(codec.PackageName).ConfigureAwait(false))
+                        return new CodecOutcome(codec, Installed: true, "winget+appx");
+                    lastClass = FailUnverifiedInstall;
+                    continue;
+                }
+                lastClass = ClassifyWingetFailure(result);
+                // winget itself missing fails every subsequent id identically.
+                if (lastClass == FailWingetMissing) break;
+            }
+            return new CodecOutcome(codec, Installed: false, lastClass);
+        }
+
+        internal bool ShouldSkip(CodecState state, string key)
+        {
+            if (!state.Codecs.TryGetValue(key, out var entry)) return false;
+            if (entry.Status == "installed") return true;
+            if (entry.Status != "failed") return false;
+            var window = IsTransientFailure(entry.FailureClass ?? FailUnknown)
+                ? TransientRetryWindow
+                : PermanentRetryWindow;
+            return _utcNow() - entry.LastAttemptUtc < window;
+        }
     }
 
-    private static async Task<bool> IsAppxInstalledAsync(string packageFamilyName)
+    private static async Task<bool> IsAppxInstalledAsync(string packageName)
     {
         try
         {
@@ -118,7 +224,7 @@ internal static class CodecInstaller
                 ArgumentList =
                 {
                     "-NoProfile", "-ExecutionPolicy", "Bypass",
-                    "-Command", "Get-AppxPackage -Name '" + packageFamilyName + "' | Select-Object -ExpandProperty Name",
+                    "-Command", "Get-AppxPackage -Name '" + packageName + "' | Select-Object -ExpandProperty Name",
                 },
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -139,7 +245,7 @@ internal static class CodecInstaller
         }
     }
 
-    private static async Task<bool> WingetInstallAsync(string storeId)
+    private static async Task<WingetResult> WingetInstallAsync(string storeId)
     {
         try
         {
@@ -158,26 +264,30 @@ internal static class CodecInstaller
                 RedirectStandardError = true,
             };
             using var proc = Process.Start(psi);
-            if (proc == null) return false;
+            if (proc == null) return new WingetResult(false, false, -1, "");
+            var stdout = proc.StandardOutput.ReadToEndAsync();
+            var stderr = proc.StandardError.ReadToEndAsync();
             using var cts = new CancellationTokenSource(PerCodecTimeout);
             try { await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException)
             {
                 try { proc.Kill(true); } catch { /* best-effort */ }
-                return false;
+                return new WingetResult(true, true, -1, "");
             }
-            return proc.ExitCode == 0;
+            string output = (await stdout.ConfigureAwait(false)) + "\n" + (await stderr.ConfigureAwait(false));
+            if (output.Length > 8 * 1024) output = output[..(8 * 1024)];
+            Logger.WriteFileOnly("[codec] winget " + storeId + " exit=" + proc.ExitCode
+                + " out=" + LogUtil.SanitizeForConsole(output, 400));
+            return new WingetResult(true, false, proc.ExitCode, output);
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            // winget not installed (older Windows, stripped image). One-line
-            // diagnostic happens at the caller via the "install failed"
-            // branch; no need to escalate here.
-            return false;
+            // winget not installed (older Windows, stripped image).
+            return new WingetResult(false, false, -1, "");
         }
-        catch
+        catch (Exception ex)
         {
-            return false;
+            return new WingetResult(true, false, -1, ex.GetType().Name);
         }
     }
 
@@ -188,7 +298,7 @@ internal static class CodecInstaller
         return Path.Combine(dir, "codec-state.json");
     }
 
-    private static CodecState LoadState(string path)
+    internal static CodecState LoadState(string path)
     {
         try
         {
@@ -202,7 +312,7 @@ internal static class CodecInstaller
         }
     }
 
-    private static void SaveState(string path, CodecState state)
+    internal static void SaveState(string path, CodecState state)
     {
         try
         {
@@ -213,9 +323,10 @@ internal static class CodecInstaller
         catch { /* best-effort */ }
     }
 
-    // AOT migration: promoted from private nested to internal nested so
-    // MeshJsonContext can reference the types via [JsonSerializable]
-    // and emit source-gen formatters.
+    // AOT: referenced from MeshJsonContext via [JsonSerializable]. The JSON
+    // field names are the on-disk state contract -- package_family_name has
+    // always held the package NAME (what Get-AppxPackage -Name matches), so
+    // the property is named for what it is while the wire name stays put.
     internal sealed class CodecState
     {
         [JsonPropertyName("codecs")]
@@ -225,7 +336,8 @@ internal static class CodecInstaller
     internal sealed class CodecEntry
     {
         [JsonPropertyName("status")] public string Status { get; set; } = "";
+        [JsonPropertyName("failure_class")] public string? FailureClass { get; set; }
         [JsonPropertyName("last_attempt_utc")] public DateTime LastAttemptUtc { get; set; }
-        [JsonPropertyName("package_family_name")] public string PackageFamilyName { get; set; } = "";
+        [JsonPropertyName("package_family_name")] public string PackageName { get; set; } = "";
     }
 }

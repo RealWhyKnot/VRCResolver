@@ -76,7 +76,7 @@ internal static partial class Program
         try
         {
             string url = ExtractUrl(args);
-            string? formatArg = ExtractDashFValue(args);
+            string? formatArg = ResolveRequestProfile.ExtractDashFValue(args);
             string player = ResolveRequestProfile.InferPlayer(formatArg);
 
             LogStartBanner(args, url, formatArg, player);
@@ -105,8 +105,8 @@ internal static partial class Program
                     string toEmit = TryWrapForTrustGateway(url, probeRelay: true);
                     TryWriteUrlToStdout(toEmit);
                     bool wrapped = !string.Equals(toEmit, url, StringComparison.Ordinal);
-                    Log("direct first-party playback URL host=" + ExtractHost(url)
-                        + " emitted-host=" + ExtractHost(toEmit)
+                    Log("direct first-party playback URL host=" + LogUtil.BareHost(url)
+                        + " emitted-host=" + LogUtil.BareHost(toEmit)
                         + " bytes=" + toEmit.Length
                         + " trust_gateway=" + (wrapped ? "wrapped" : "passthrough"));
                     exitCode = 0;
@@ -132,7 +132,7 @@ internal static partial class Program
                     if (!string.IsNullOrEmpty(result.resolved)
                         && !ResolvedUrlGuard.IsSafeToEmit(result.resolved))
                     {
-                        Log("resolved URL fails emit guard (host=" + ExtractHost(result.resolved!) + ") -- falling back");
+                        Log("resolved URL fails emit guard (host=" + LogUtil.BareHost(result.resolved!) + ") -- falling back");
                         result = (null, WireConstants.OgFallbackReasonResolvedUrlRejected, null);
                     }
 
@@ -148,7 +148,7 @@ internal static partial class Program
                         string toEmit = TryWrapForTrustGateway(result.resolved!);
                         TryWriteUrlToStdout(toEmit);
                         bool wrapped = !ReferenceEquals(toEmit, result.resolved);
-                        Log("emitted resolved URL to stdout host=" + ExtractHost(toEmit)
+                        Log("emitted resolved URL to stdout host=" + LogUtil.BareHost(toEmit)
                             + " bytes=" + toEmit.Length
                             + " trust_gateway=" + (wrapped ? "wrapped" : "passthrough"));
                         exitCode = 0;
@@ -209,14 +209,14 @@ internal static partial class Program
                 : WireConstants.AvProMaxAudioChannels,
         };
 
-        // Retry loop: on discovery_in_progress or server_unreachable the
-        // wrapper retries up to ResolveRetryPolicy.MaxRetries additional times
-        // before falling back to og. The named pipe is re-established per
-        // attempt because the watchdog closes its end after writing the
-        // terminal frame; the request id stays the same across retries so the
-        // server can deduplicate or correlate logs across attempts.
+        // The watchdog owns resolve retries now (it sees mesh state, the
+        // rate-limit cooldown, and the health gate; the server's contract
+        // wants fresh per-attempt ids, which only the watchdog stamps). The
+        // wrapper keeps exactly one retry: a failed pipe CONNECT, so a
+        // watchdog mid-restart (updater swap, crash recovery) doesn't turn
+        // every resolve in that window into a straight og punt.
         var swRequest = Stopwatch.StartNew();
-        int retriesSent = 0;
+        int connectRetriesSent = 0;
         while (true)
         {
             using var ctsConnect = new CancellationTokenSource(PipeConnectTimeout);
@@ -228,24 +228,26 @@ internal static partial class Program
             try
             {
                 await pipe.ConnectAsync(ctsConnect.Token).ConfigureAwait(false);
-                if (retriesSent == 0)
+                if (connectRetriesSent == 0)
                     Log("pipe connect OK elapsed_ms=" + swPipe.ElapsedMilliseconds);
                 else
-                    Log("pipe reconnect OK retry=" + retriesSent + " elapsed_ms=" + swPipe.ElapsedMilliseconds);
-            }
-            catch (OperationCanceledException)
-            {
-                Log("pipe connect TIMED OUT after " + swPipe.ElapsedMilliseconds + " ms (watchdog not running?)");
-                return (null, WireConstants.OgFallbackReasonPipeConnectFailed, null);
-            }
-            catch (System.IO.FileNotFoundException)
-            {
-                Log("pipe connect ENOENT (watchdog not running)");
-                return (null, WireConstants.OgFallbackReasonPipeConnectFailed, null);
+                    Log("pipe reconnect OK retry=" + connectRetriesSent + " elapsed_ms=" + swPipe.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
-                Log("pipe connect failed: " + ex.GetType().Name + ": " + ex.Message);
+                Log(ex switch
+                {
+                    OperationCanceledException => "pipe connect TIMED OUT after " + swPipe.ElapsedMilliseconds + " ms (watchdog not running?)",
+                    System.IO.FileNotFoundException => "pipe connect ENOENT (watchdog not running)",
+                    _ => "pipe connect failed: " + ex.GetType().Name + ": " + ex.Message,
+                });
+                if (connectRetriesSent == 0 && totalDeadlineMs - swPipe.ElapsedMilliseconds > 2000)
+                {
+                    connectRetriesSent++;
+                    Log("pipe connect retry in 750 ms");
+                    await Task.Delay(750).ConfigureAwait(false);
+                    continue;
+                }
                 return (null, WireConstants.OgFallbackReasonPipeConnectFailed, null);
             }
 
@@ -304,45 +306,27 @@ internal static partial class Program
                 // .f4v URL while the player is AVPro, AVPro will silently fail
                 // playback. Exec og instead -- yt-dlp can often pick a working
                 // format itself when the server's strategy was wrong.
-                if (player == WireConstants.PlayerAvPro && !IsAvProCompatibleUrl(resp.Url))
+                if (player == WireConstants.PlayerAvPro && !ResolvedUrlGuard.IsAvProCompatibleUrl(resp.Url))
                 {
                     Log("response action=resolved id=" + (resp.Id ?? "?")[..Math.Min(8, (resp.Id ?? "?").Length)] +
-                        " but URL fails AVPro shape check (host=" + ExtractHost(resp.Url) + ") -- falling back");
+                        " but URL fails AVPro shape check (host=" + LogUtil.BareHost(resp.Url) + ") -- falling back");
                     return (null, WireConstants.OgFallbackReasonAvProIncompatible, null);
                 }
-                Log("response action=resolved id=" + (resp.Id ?? "?")[..Math.Min(8, (resp.Id ?? "?").Length)] + " url-host=" + ExtractHost(resp.Url));
+                Log("response action=resolved id=" + (resp.Id ?? "?")[..Math.Min(8, (resp.Id ?? "?").Length)] + " url-host=" + LogUtil.BareHost(resp.Url));
                 return (resp.Url, null, null);
             }
 
             if (resp.Action == WireConstants.ActionFallbackNative)
             {
-                long elapsedSinceRequestMs = swRequest.ElapsedMilliseconds;
-                long remainingBudgetMs = totalDeadlineMs - swPipe.ElapsedMilliseconds;
                 Log("response action=fallback_native id=" + (resp.Id ?? "?")[..Math.Min(8, (resp.Id ?? "?").Length)]
                     + " reason=" + (resp.Reason ?? "?")
-                    + " elapsed_ms_since_request_sent=" + elapsedSinceRequestMs
-                    + " remaining_budget_ms=" + remainingBudgetMs);
+                    + " elapsed_ms_since_request_sent=" + swRequest.ElapsedMilliseconds
+                    + " remaining_budget_ms=" + (totalDeadlineMs - swPipe.ElapsedMilliseconds));
 
-                if (ResolveRetryPolicy.ShouldRetry(resp.Reason, retriesSent, remainingBudgetMs))
-                {
-                    int delayMs = ResolveRetryPolicy.NextDelayMs(retriesSent);
-                    retriesSent++;
-                    Log("wrapper_retry_attempt attempt=" + retriesSent
-                        + " delay_ms=" + delayMs
-                        + " elapsed_ms_since_request_sent=" + elapsedSinceRequestMs
-                        + " remaining_budget_ms=" + remainingBudgetMs);
-                    try { await Task.Delay(delayMs, ctsResolve.Token).ConfigureAwait(false); }
-                    catch (OperationCanceledException)
-                    {
-                        Log("retry delay cancelled (deadline elapsed)");
-                        return (null, WireConstants.OgFallbackReasonPipeResolveFailed, null);
-                    }
-                    // Reuse same request id for server dedup/correlation.
-                    continue;
-                }
-
-                // Capture the server's public_message (when present) so the watchdog can
-                // surface a yellow line explaining why we punted -- DRM-detected,
+                // Terminal: the watchdog already retried transient reasons on
+                // the shared policy before answering. Capture the server's
+                // public_message (when present) so the watchdog can surface a
+                // yellow line explaining why we punted -- DRM-detected,
                 // sign-in required, etc.
                 return (null, WireConstants.OgFallbackReasonServerFallbackNative, resp.PublicMessage);
             }
@@ -668,47 +652,4 @@ internal static partial class Program
         return "";
     }
 
-    // Returns the value following "-f" or "--format", or null if absent.
-    // Matches the form `-f <selector>` and `--format <selector>`; does NOT
-    // attempt to handle `--format=<selector>` (VRChat uses the spaced form).
-    private static string? ExtractDashFValue(string[] args)
-    {
-        for (int i = 0; i < args.Length - 1; i++)
-        {
-            if (args[i] == "-f" || args[i] == "--format")
-                return args[i + 1];
-        }
-        return null;
-    }
-
-    // Bare host or "?" if the input isn't a parseable absolute URL. Used
-    // for log lines where the full URL would carry user-identifying tokens
-    // (YouTube video ids, twitch streams, etc.).
-    private static string ExtractHost(string url)
-    {
-        if (string.IsNullOrEmpty(url)) return "?";
-        try
-        {
-            if (Uri.TryCreate(url, UriKind.Absolute, out var u)) return u.Host;
-        }
-        catch { /* best-effort */ }
-        return "?";
-    }
-
-    // Blacklist check: reject the formats AVPro can't decode (rtmp/rtmps
-    // schemes, .flv/.f4v containers). Trust by default -- this is a
-    // backstop against a server-side regression, not an allowlist of
-    // every legitimate CDN URL shape.
-    private static bool IsAvProCompatibleUrl(string url)
-    {
-        if (string.IsNullOrEmpty(url)) return false;
-        string lower = url.ToLowerInvariant();
-        if (lower.StartsWith("rtmp://", StringComparison.Ordinal)
-            || lower.StartsWith("rtmps://", StringComparison.Ordinal)) return false;
-        int q = lower.IndexOf('?');
-        string pathLower = q >= 0 ? lower.Substring(0, q) : lower;
-        if (pathLower.EndsWith(".flv", StringComparison.Ordinal)
-            || pathLower.EndsWith(".f4v", StringComparison.Ordinal)) return false;
-        return true;
-    }
 }

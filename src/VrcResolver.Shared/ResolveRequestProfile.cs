@@ -42,4 +42,18 @@ public static class ResolveRequestProfile
             ? WireConstants.PlayerUnity
             : WireConstants.PlayerAvPro;
     }
+
+    // Returns the value following "-f" or "--format", or null if absent.
+    // Matches the form `-f <selector>` and `--format <selector>`; does NOT
+    // attempt to handle `--format=<selector>` (VRChat uses the spaced form).
+    // Sits beside TryGetHeightCap, which consumes its output.
+    public static string? ExtractDashFValue(string[] args)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] == "-f" || args[i] == "--format")
+                return args[i + 1];
+        }
+        return null;
+    }
 }

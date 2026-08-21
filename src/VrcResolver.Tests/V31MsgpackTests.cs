@@ -118,16 +118,17 @@ public class V31MsgpackTests
             AudioChannels = null,
             BytesEstimate = null,
             ExpiresAt = null,
+            ResolvedHeight = null,
         };
         byte[] mp = MessagePackSerializer.Serialize(src);
 
-        // Layout we expect (12-element fixarray):
-        //   0x9C                fixarray, n=12
+        // Layout we expect (13-element fixarray):
+        //   0x9D                fixarray, n=13
         //   0xa1 0x52           "R"     (Action,  index 0)
         //   0xa1 0x49           "I"     (Id,      index 1)
         //   0xa1 0x55           "U"     (Url,     index 2)
-        //   0xc0 × 9            nil     (indexes 3..11)
-        Assert.Equal(0x9C, mp[0]);                    // fixarray, n=12
+        //   0xc0 × 10           nil     (indexes 3..12)
+        Assert.Equal(0x9D, mp[0]);                    // fixarray, n=13
         Assert.Equal(0xA1, mp[1]); Assert.Equal((byte)'R', mp[2]);  // [0] Action
         Assert.Equal(0xA1, mp[3]); Assert.Equal((byte)'I', mp[4]);  // [1] Id
         Assert.Equal(0xA1, mp[5]); Assert.Equal((byte)'U', mp[6]);  // [2] Url
@@ -141,17 +142,19 @@ public class V31MsgpackTests
         Assert.Equal(0xC0, mp[13]);  // [9]  AudioChannels
         Assert.Equal(0xC0, mp[14]);  // [10] BytesEstimate
         Assert.Equal(0xC0, mp[15]);  // [11] ExpiresAt
-        Assert.Equal(16, mp.Length);  // fixarray header + 3 fixstrs (2B each) + 9 nils
+        Assert.Equal(0xC0, mp[16]);  // [12] ResolvedHeight
+        Assert.Equal(17, mp.Length);  // fixarray header + 3 fixstrs (2B each) + 10 nils
     }
 
     [Fact]
     public void MsgpackFallbackNativeFrame_field_order_is_pinned()
     {
-        // Same wire-tag-fragility guard for the 3-field DTO. Layout:
-        //   0x93                fixarray, n=3
+        // Same wire-tag-fragility guard for the 4-field DTO. Layout:
+        //   0x94                fixarray, n=4
         //   0xa1 0x46           "F"  (Action, index 0)
         //   0xa1 0x49           "I"  (Id,     index 1)
         //   0xa1 0x52           "R"  (Reason, index 2)
+        //   0xc0                nil  (PublicMessage, index 3)
         var src = new MsgpackFallbackNativeFrame
         {
             Action = "F",
@@ -160,11 +163,12 @@ public class V31MsgpackTests
         };
         byte[] mp = MessagePackSerializer.Serialize(src);
 
-        Assert.Equal(0x93, mp[0]);                      // fixarray, n=3
+        Assert.Equal(0x94, mp[0]);                      // fixarray, n=4
         Assert.Equal(0xA1, mp[1]); Assert.Equal((byte)'F', mp[2]);  // [0] Action
         Assert.Equal(0xA1, mp[3]); Assert.Equal((byte)'I', mp[4]);  // [1] Id
         Assert.Equal(0xA1, mp[5]); Assert.Equal((byte)'R', mp[6]);  // [2] Reason
-        Assert.Equal(7, mp.Length);
+        Assert.Equal(0xC0, mp[7]);                      // [3] PublicMessage
+        Assert.Equal(8, mp.Length);
     }
 
     [Fact]
@@ -189,9 +193,9 @@ public class V31MsgpackTests
 
         var extended = new byte[v31Bytes.Length + 2];   // +1 fixstr-0, +1 nil
         v31Bytes.CopyTo(extended.AsSpan());
-        extended[0] = 0x9E;                              // fixarray-14
-        extended[v31Bytes.Length] = 0xA0;                // [12] fixstr-0 ("")
-        extended[v31Bytes.Length + 1] = 0xC0;            // [13] nil
+        extended[0] = 0x9F;                              // fixarray-15
+        extended[v31Bytes.Length] = 0xA0;                // [13] fixstr-0 ("")
+        extended[v31Bytes.Length + 1] = 0xC0;            // [14] nil
 
         // Per Q6 the extras are silently skipped.
         var round = MessagePackSerializer.Deserialize<MsgpackResolvedFrame>(extended);
@@ -199,6 +203,63 @@ public class V31MsgpackTests
         Assert.Equal("resolved", round!.Action);
         Assert.Equal("id1", round.Id);
         Assert.Equal("https://example.com", round.Url);
+    }
+
+    [Fact]
+    public void MsgpackResolvedFrame_tolerates_short_array_from_older_server()
+    {
+        // Old-server compat: a pre-resolved_height server emits a 12-element
+        // resolved array. The 13-key DTO must leave the missing tail null
+        // instead of throwing.
+        var full = new MsgpackResolvedFrame
+        {
+            Action = "resolved",
+            Id = "id1",
+            Url = "https://example.com",
+        };
+        byte[] bytes = MessagePackSerializer.Serialize(full);
+        // Shrink: drop the last element ([12] nil) and rewrite the header.
+        var shortBytes = bytes.AsSpan(0, bytes.Length - 1).ToArray();
+        shortBytes[0] = 0x9C;  // fixarray-12
+
+        var round = MessagePackSerializer.Deserialize<MsgpackResolvedFrame>(shortBytes);
+        Assert.NotNull(round);
+        Assert.Equal("id1", round!.Id);
+        Assert.Null(round.ResolvedHeight);
+    }
+
+    [Fact]
+    public void MsgpackFallbackNativeFrame_tolerates_short_array_from_older_server()
+    {
+        var full = new MsgpackFallbackNativeFrame
+        {
+            Action = "fallback_native",
+            Id = "id1",
+            Reason = "warp_down",
+        };
+        byte[] bytes = MessagePackSerializer.Serialize(full);
+        var shortBytes = bytes.AsSpan(0, bytes.Length - 1).ToArray();
+        shortBytes[0] = 0x93;  // fixarray-3
+
+        var round = MessagePackSerializer.Deserialize<MsgpackFallbackNativeFrame>(shortBytes);
+        Assert.NotNull(round);
+        Assert.Equal("warp_down", round!.Reason);
+        Assert.Null(round.PublicMessage);
+    }
+
+    [Fact]
+    public void MsgpackFallbackNativeFrame_carries_public_message()
+    {
+        var src = new MsgpackFallbackNativeFrame
+        {
+            Action = "fallback_native",
+            Id = "id1",
+            Reason = "drm_detected",
+            PublicMessage = "Content is DRM-protected and can't be played.",
+        };
+        byte[] bytes = MessagePackSerializer.Serialize(src);
+        var round = MessagePackSerializer.Deserialize<MsgpackFallbackNativeFrame>(bytes);
+        Assert.Equal("Content is DRM-protected and can't be played.", round!.PublicMessage);
     }
 
     [Fact]

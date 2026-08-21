@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Runtime.Versioning;
 using System.Text;
 using VrcResolver;
+using VrcResolver.Shared;
 using Xunit;
 
 namespace VrcResolver.Tests;
@@ -69,14 +70,7 @@ public class LocalRelayServerTests
         Assert.DoesNotContain("=", encoded);
         Assert.DoesNotContain(" ", encoded);
 
-        string b64 = encoded.Replace('-', '+').Replace('_', '/');
-        switch (b64.Length % 4)
-        {
-            case 2: b64 += "=="; break;
-            case 3: b64 += "="; break;
-        }
-
-        string decoded = Encoding.UTF8.GetString(Convert.FromBase64String(b64));
+        Assert.True(Base64UrlText.TryDecode(encoded, out string decoded));
         Assert.Equal(url, decoded);
     }
 

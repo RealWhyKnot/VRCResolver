@@ -133,13 +133,15 @@ internal sealed partial class MeshClient
                         Logger.WriteFileOnly("[mesh][v3.1] negotiated_format=" + _negotiatedFormat
                             + " isMsgpack=" + _isMsgpackFormat);
 
-                        // Spec marks engines + features required on welcome.
-                        // Surface a warning if either is null so a server-side
-                        // regression that drops the field is diagnosable.
-                        if (welcome.Engines == null)
-                            ConsoleUx.Warn(LogComponent.Mesh, "welcome missing required field: engines");
                         if (welcome.Features == null)
                             ConsoleUx.Warn(LogComponent.Mesh, "welcome missing required field: features");
+
+                        // Feature welcome_hosts: adopt the server's host/path lists so the
+                        // relay policy stops depending on this build's hardcoded set. The
+                        // policy validates and UNIONS -- a hostile or broken list can only
+                        // add candidate hosts that still have to pass every other guard.
+                        if (HasFeature(welcome.Features, WireConstants.FeatureWelcomeHosts))
+                            FirstPartyUrlPolicy.SetServerProvided(welcome.FirstPartyHosts, welcome.PlaybackProxyPaths);
 
                         string features = welcome.Features != null && welcome.Features.Length > 0
                             ? "[" + string.Join(",", welcome.Features) + "]"
@@ -230,6 +232,8 @@ internal sealed partial class MeshClient
                     _warpActive = cached?.WarpActive ?? entry.WarpActive;
                     _serverVersion = entry.ServerVersion;
                     _ytDlpVersion = entry.YtDlpVersion;
+                    if (HasFeature(entry.Features, WireConstants.FeatureWelcomeHosts))
+                        FirstPartyUrlPolicy.SetServerProvided(entry.FirstPartyHosts, entry.PlaybackProxyPaths);
 
                     // v3.1: server's negotiated format is per-connection,
                     // never cached — read from the dynamic fields the
@@ -260,6 +264,82 @@ internal sealed partial class MeshClient
                 LogResolveLogFrame(doc.RootElement);
                 doc.Dispose();
                 return;
+            case WireConstants.ActionRateLimited:
+                {
+                    // Server refused an action over budget. Before this handler the
+                    // frame was default-discarded, the pending TCS timed out into
+                    // server_unreachable (retryable AND health-gate-unhealthy) and
+                    // the retry loop added MORE load. rate_limited is non-retryable
+                    // and healthy by construction: the server answered.
+                    string meshAction = "";
+                    if (doc.RootElement.TryGetProperty(WireConstants.FieldMeshAction, out var maEl)
+                        && maEl.ValueKind == JsonValueKind.String)
+                        meshAction = maEl.GetString() ?? "";
+                    string? limitedId = null;
+                    if (doc.RootElement.TryGetProperty("id", out var rlIdEl) && rlIdEl.ValueKind == JsonValueKind.String)
+                        limitedId = rlIdEl.GetString();
+                    int retryAfterSeconds = 0;
+                    if (doc.RootElement.TryGetProperty(WireConstants.FieldRetryAfterSeconds, out var raEl)
+                        && raEl.ValueKind == JsonValueKind.Number)
+                        raEl.TryGetInt32(out retryAfterSeconds);
+                    doc.Dispose();
+
+                    ConsoleUx.Warn(LogComponent.Mesh, "server rate-limited "
+                        + LogUtil.SanitizeForConsole(meshAction, 32)
+                        + " -- pausing for " + Math.Clamp(retryAfterSeconds, 1, MaxRateLimitCooldownSeconds) + "s");
+
+                    if (meshAction == WireConstants.ActionResolve)
+                    {
+                        int cooldown = Math.Clamp(retryAfterSeconds, 1, MaxRateLimitCooldownSeconds);
+                        Interlocked.Exchange(ref _resolveRateLimitedUntilTicks,
+                            DateTime.UtcNow.AddSeconds(cooldown).Ticks);
+                        if (!string.IsNullOrEmpty(limitedId))
+                        {
+                            _inflightCids.TryRemove(limitedId!, out _);
+                            if (_pending.TryRemove(limitedId!, out var limitedTcs))
+                                limitedTcs.TrySetResult(MakeFallbackResult(limitedId!, WireConstants.FallbackRateLimited));
+                        }
+                        else
+                        {
+                            // Old servers omit the id; everything pending is a resolve
+                            // and every one of them was just refused.
+                            FailAllPending(WireConstants.FallbackRateLimited);
+                        }
+                    }
+                    return;
+                }
+            case WireConstants.ActionProtocolError:
+                {
+                    // Server rejected a frame shape. Fail the named request fast
+                    // (non-retryable, health-gate-neutral); without an id this may
+                    // concern a fire-and-forget frame (playback_feedback), so only
+                    // log -- never nuke unrelated pending resolves.
+                    string peReason = "";
+                    if (doc.RootElement.TryGetProperty("reason", out var peReasonEl)
+                        && peReasonEl.ValueKind == JsonValueKind.String)
+                        peReason = peReasonEl.GetString() ?? "";
+                    string peField = "";
+                    if (doc.RootElement.TryGetProperty("field", out var peFieldEl)
+                        && peFieldEl.ValueKind == JsonValueKind.String)
+                        peField = peFieldEl.GetString() ?? "";
+                    string? peId = null;
+                    if (doc.RootElement.TryGetProperty("id", out var peIdEl) && peIdEl.ValueKind == JsonValueKind.String)
+                        peId = peIdEl.GetString();
+                    doc.Dispose();
+
+                    ConsoleUx.Warn(LogComponent.Mesh, "server protocol_error reason="
+                        + LogUtil.SanitizeForConsole(peReason, 48)
+                        + (peField.Length > 0 ? " field=" + LogUtil.SanitizeForConsole(peField, 48) : "")
+                        + (peId != null ? " id=" + LogUtil.SanitizeForConsole(peId, 32) : ""));
+
+                    if (!string.IsNullOrEmpty(peId))
+                    {
+                        _inflightCids.TryRemove(peId!, out _);
+                        if (_pending.TryRemove(peId!, out var peTcs))
+                            peTcs.TrySetResult(MakeFallbackResult(peId!, WireConstants.FallbackProtocolError));
+                    }
+                    return;
+                }
             case WireConstants.ActionPong:
                 _lastPongUtc = DateTime.UtcNow;
                 doc.Dispose();

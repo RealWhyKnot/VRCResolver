@@ -1,5 +1,5 @@
 using System.Runtime.Versioning;
-using System.Text;
+using VrcResolver.Shared;
 
 namespace VrcResolver;
 
@@ -128,29 +128,7 @@ internal sealed class LocalRelayTargetResolver
     }
 
     private static string DecodeTargetParam(string targetParam)
-    {
-        string b64 = targetParam.Replace('-', '+').Replace('_', '/');
-        switch (b64.Length % 4)
-        {
-            case 2: b64 += "=="; break;
-            case 3: b64 += "="; break;
-        }
+        => Base64UrlText.TryDecode(targetParam, out string decoded) ? decoded : "";
 
-        try
-        {
-            byte[] bytes = Convert.FromBase64String(b64);
-            return Encoding.UTF8.GetString(bytes);
-        }
-        catch
-        {
-            return "";
-        }
-    }
-
-    public static string EncodeTargetParam(string url)
-    {
-        byte[] bytes = Encoding.UTF8.GetBytes(url);
-        return Convert.ToBase64String(bytes)
-            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
-    }
+    public static string EncodeTargetParam(string url) => Base64UrlText.Encode(url);
 }

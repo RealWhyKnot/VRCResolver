@@ -61,6 +61,7 @@ internal sealed partial class MeshClient
                         AudioChannels = mp.AudioChannels,
                         BytesEstimate = mp.BytesEstimate,
                         ExpiresAt = mp.ExpiresAt,
+                        ResolvedHeight = mp.ResolvedHeight,
                     };
                     byte[] jsonFrame = JsonSerializer.SerializeToUtf8Bytes(resp, MeshJsonContext.Default.ResolveResponse);
 
@@ -100,6 +101,7 @@ internal sealed partial class MeshClient
                         Action = WireConstants.ActionFallbackNative,
                         Id = mp.Id ?? "",
                         Reason = mp.Reason,
+                        PublicMessage = mp.PublicMessage,
                     };
                     byte[] jsonFrame = JsonSerializer.SerializeToUtf8Bytes(resp, MeshJsonContext.Default.ResolveResponse);
 

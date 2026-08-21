@@ -32,4 +32,22 @@ public static class ResolvedUrlGuard
 
         return true;
     }
+
+    // Blacklist check: reject the formats AVPro can't decode (rtmp/rtmps
+    // schemes, .flv/.f4v containers). Trust by default -- this is a backstop
+    // against a server-side regression, not an allowlist of every legitimate
+    // CDN URL shape. The emit-shape guard's sibling: both stand between a
+    // resolved URL and VRChat's player.
+    public static bool IsAvProCompatibleUrl(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return false;
+        string lower = url.ToLowerInvariant();
+        if (lower.StartsWith("rtmp://", StringComparison.Ordinal)
+            || lower.StartsWith("rtmps://", StringComparison.Ordinal)) return false;
+        int q = lower.IndexOf('?');
+        string pathLower = q >= 0 ? lower.Substring(0, q) : lower;
+        if (pathLower.EndsWith(".flv", StringComparison.Ordinal)
+            || pathLower.EndsWith(".f4v", StringComparison.Ordinal)) return false;
+        return true;
+    }
 }

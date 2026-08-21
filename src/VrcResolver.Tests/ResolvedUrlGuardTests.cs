@@ -84,4 +84,22 @@ public class ResolvedUrlGuardTests
     {
         Assert.False(RelayLiveness.IsListening(port));
     }
+
+    // The wrapper's AVPro backstop, now in Shared where tests reach it.
+    // Blacklist semantics: trust by default, reject only the shapes AVPro
+    // demonstrably cannot decode.
+    [Theory]
+    [InlineData("rtmp://live.example.com/stream", false)]
+    [InlineData("rtmps://live.example.com/stream", false)]
+    [InlineData("https://cdn.example.com/video.flv", false)]
+    [InlineData("https://cdn.example.com/video.f4v", false)]
+    [InlineData("https://cdn.example.com/video.flv?token=abc", false)]
+    [InlineData("https://cdn.example.com/video.mp4?name=x.flv", true)]
+    [InlineData("https://cdn.example.com/master.m3u8", true)]
+    [InlineData("https://cdn.example.com/video.mp4", true)]
+    [InlineData("", false)]
+    public void IsAvProCompatibleUrl_RejectsOnlyKnownBadShapes(string url, bool expected)
+    {
+        Assert.Equal(expected, ResolvedUrlGuard.IsAvProCompatibleUrl(url));
+    }
 }

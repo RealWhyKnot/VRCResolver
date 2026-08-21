@@ -63,6 +63,26 @@ public static class WireConstants
     public const string PlaybackFeedbackSilentStall = "silent_stall";
     public const string PlaybackFeedbackPlaying = "playing";
 
+    // playback_feedback_v2 kinds. Sent only when the welcome advertised
+    // FeaturePlaybackFeedbackV2 so an older server never sees an unknown kind.
+    // resolved_rejected: our own emit guard refused the server's URL (detail
+    // carries the wrapper's reject reason). og_failed: og also failed (detail
+    // carries the og-stderr classification). cache_play: a play served from
+    // the local resolve cache without touching the mesh, so the server's play
+    // counts stop undercounting.
+    public const string PlaybackFeedbackResolvedRejected = "resolved_rejected";
+    public const string PlaybackFeedbackOgFailed = "og_failed";
+    public const string PlaybackFeedbackCachePlay = "cache_play";
+
+    // Server -> client control frames the client handles explicitly. Both are
+    // always JSON-Text regardless of the negotiated wire format.
+    public const string ActionProtocolError = "protocol_error";
+    public const string ActionRateLimited = "rate_limited";
+    // rate_limited uses camelCase field names on the wire (a v2-era outlier
+    // kept for old JS clients); "id" is the same in either casing.
+    public const string FieldRetryAfterSeconds = "retryAfterSeconds";
+    public const string FieldMeshAction = "meshAction";
+
     // v3.2: wrapper -> watchdog one-shot notification. The patched yt-dlp
     // wrapper sends one of these on a fresh pipe connection just before
     // it execs vanilla yt-dlp-og.exe (or emits empty stdout if og is
@@ -128,16 +148,13 @@ public static class WireConstants
     public const string FormatJson = "json";
     public const string FormatMsgpack = "msgpack";
 
-    // v3 advisory feature strings that may appear in welcome.features. The
-    // client doesn't gate on them — feature presence reflects what the
-    // server promises, not what the client must verify.
-    public const string FeatureV3Compression = "v3_compression";
-    public const string FeatureWelcomeHashAck = "welcome_hash_ack";
-    // v3.1: server advertises this when it can speak msgpack on the hot
-    // path. Client gates the binary-frame dispatch on the welcome's
-    // negotiated_format == "msgpack" (server picks per-connection from
-    // our accept_formats list); the feature string is informational.
-    public const string FeatureMsgpackFormat = "msgpack_format";
+    // Feature strings the client actually gates behaviour on. Servers without
+    // the string simply never trigger the gated path.
+    // welcome_hosts: welcome carries first_party_hosts + playback_proxy_paths.
+    public const string FeatureWelcomeHosts = "welcome_hosts";
+    // playback_feedback_v2: server accepts the resolved_rejected / og_failed /
+    // cache_play kinds and the optional detail field.
+    public const string FeaturePlaybackFeedbackV2 = "playback_feedback_v2";
     // v3.1 client preference order for post-welcome wire format. Sent
     // verbatim as the client_hello.accept_formats field. The first
     // element is the most-preferred format; server picks the first
@@ -167,11 +184,16 @@ public static class WireConstants
 
     // Fallback reasons (existing v1)
     public const string FallbackAllConfigsFailed = "all_configs_failed";
-    public const string FallbackDomainBlocked = "domain_blocked";
     public const string FallbackExtractorUnsupported = "extractor_unsupported";
     public const string FallbackInternalError = "internal_error";
     public const string FallbackDiscoveryInProgress = "discovery_in_progress";
     public const string FallbackServerUnreachable = "server_unreachable";
+
+    // Client-synthesized fallback reasons for server control frames. Neither is
+    // retryable (ResolveRetryPolicy) and neither counts as unhealthy for the
+    // health gate: the server answered — it is alive, just refusing this one.
+    public const string FallbackRateLimited = "rate_limited";
+    public const string FallbackProtocolError = "protocol_error";
 
     // v2 fallback reasons. Both must NOT trigger a native-yt-dlp retry on the
     // patched-binary side: native would hit the same wall.
@@ -183,7 +205,12 @@ public static class WireConstants
     public const string ReasonWarpDown = "warp_down";
 
     // Default request profiles (server applies these when client omits the
-    // matching field). Mirrored here for client-side logging clarity.
+    // matching field). Paired byte-for-byte with the server's
+    // FormatSelectorBuilder defaults — a change here must land there in the
+    // same release, or omitted-field behavior silently diverges from
+    // sent-field behavior. The watchdog prunes AvProAcceptCodecs down to what
+    // the machine's decoders actually support before the request goes out;
+    // the server trusts explicit claims because of that verification.
     public static readonly string[] AvProAcceptProtocols = { "http", "hls", "dash" };
     public static readonly string[] UnityAcceptProtocols = { "http" };
     public static readonly string[] AvProAcceptCodecs =
@@ -191,6 +218,28 @@ public static class WireConstants
     public static readonly string[] UnityAcceptCodecs = { "h264", "aac" };
     public const int AvProMaxAudioChannels = 8;
     public const int UnityMaxAudioChannels = 2;
+
+    // The extension-backed video codecs in AvProAcceptCodecs — decodable only
+    // when the matching Media Foundation extension is installed, so these are
+    // the ones the capability probe verifies and BuildAcceptCodecs may prune.
+    // h264/aac are the Windows baseline and are never probed or pruned.
+    public static readonly string[] ExtensionBackedVideoCodecs = { "h265", "vp9", "av1" };
+
+    // Filter AvProAcceptCodecs down to verified local capability. Order is
+    // preserved (the server reads the list as a preference). A null verified
+    // set means the probe could not run — claim nothing extension-backed.
+    public static string[] BuildAcceptCodecs(IReadOnlySet<string>? verifiedVideoCodecs)
+    {
+        var result = new List<string>(AvProAcceptCodecs.Length);
+        foreach (var codec in AvProAcceptCodecs)
+        {
+            bool extensionBacked = Array.IndexOf(ExtensionBackedVideoCodecs, codec) >= 0;
+            if (extensionBacked && (verifiedVideoCodecs == null || !verifiedVideoCodecs.Contains(codec)))
+                continue;
+            result.Add(codec);
+        }
+        return result.ToArray();
+    }
 }
 
 public sealed class ResolveRequest
@@ -214,7 +263,7 @@ public sealed class ResolveRequest
     [JsonPropertyName("vrchat_format_arg")] public string? VrchatFormatArg { get; set; }
 
     // v3.3: wrapper informs the server of how many ms remain before the
-    // wrapper itself must exec og fallback (18s budget minus connection +
+    // wrapper itself must exec og fallback (28s budget minus connection +
     // IPC setup). Server may extend its discovery wait up to ~60s when the
     // wrapper still has budget to wait. Null = absent = server uses its
     // own defaults. JsonIgnoreCondition.WhenWritingNull keeps old servers
@@ -248,6 +297,7 @@ public sealed class ResolveResponse
     [JsonPropertyName("audio_channels")] public int? AudioChannels { get; set; }
     [JsonPropertyName("bytes_estimate")] public long? BytesEstimate { get; set; }
     [JsonPropertyName("expires_at")] public string? ExpiresAt { get; set; }
+    [JsonPropertyName("resolved_height")] public int? ResolvedHeight { get; set; }
 
     // Operator-facing one-liner surfaced via og_fallback_notify when the server says
     // fallback_native. Null when the server didn't attach a public_message. Old clients
@@ -283,6 +333,11 @@ public sealed class WelcomeFrame
     // the connection's lifetime. Null/absent means "json" (v3.0
     // behaviour). Values: "json" or "msgpack".
     [JsonPropertyName("negotiated_format")] public string? NegotiatedFormat { get; set; }
+    // Feature welcome_hosts: first-party host-family suffixes and playback-proxy
+    // path prefixes, so this side stops hardcoding them. Consumed only when the
+    // features list carries FeatureWelcomeHosts; absent on older servers.
+    [JsonPropertyName("first_party_hosts")] public string[]? FirstPartyHosts { get; set; }
+    [JsonPropertyName("playback_proxy_paths")] public string[]? PlaybackProxyPaths { get; set; }
 
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
@@ -354,6 +409,11 @@ public sealed class PlaybackFeedbackFrame
     public string? CorrelationId { get; set; }
     [JsonPropertyName("delivered_height"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? DeliveredHeight { get; set; }
+    // playback_feedback_v2: closed token per kind (resolved_rejected -> the
+    // wrapper's reject reason, og_failed -> the og-stderr classification).
+    // Only sent when the welcome advertised FeaturePlaybackFeedbackV2.
+    [JsonPropertyName("detail"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Detail { get; set; }
 }
 
 // Wrapper -> watchdog one-shot notification frame, sent on a fresh pipe

@@ -33,4 +33,19 @@ public sealed class ResolveRequestProfileTests
     {
         Assert.Equal(expected, ResolveRequestProfile.InferPlayer(formatArg));
     }
+
+    [Fact]
+    public void ExtractDashFValue_MatchesSpacedFormsOnly()
+    {
+        Assert.Equal("best[height<=1080]",
+            ResolveRequestProfile.ExtractDashFValue(new[] { "-f", "best[height<=1080]", "https://x" }));
+        Assert.Equal("best",
+            ResolveRequestProfile.ExtractDashFValue(new[] { "--format", "best", "https://x" }));
+        Assert.Null(ResolveRequestProfile.ExtractDashFValue(new[] { "https://x" }));
+        // Flag in last position has no value to take.
+        Assert.Null(ResolveRequestProfile.ExtractDashFValue(new[] { "https://x", "-f" }));
+        // The `--format=<selector>` form is deliberately unhandled (VRChat
+        // uses the spaced form).
+        Assert.Null(ResolveRequestProfile.ExtractDashFValue(new[] { "--format=best", "https://x" }));
+    }
 }

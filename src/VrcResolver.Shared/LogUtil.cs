@@ -54,6 +54,24 @@ public static class LogUtil
         return SanitizeForConsole(url, 120);
     }
 
+    // Bare host (leading "www." stripped) or "?" -- for log lines where the
+    // full URL would carry user-identifying tokens (video ids, stream names).
+    public static string BareHost(string? url)
+    {
+        if (string.IsNullOrEmpty(url)) return "?";
+        try
+        {
+            if (Uri.TryCreate(url, UriKind.Absolute, out var u))
+            {
+                string h = u.Host;
+                if (h.StartsWith("www.", StringComparison.OrdinalIgnoreCase)) h = h[4..];
+                return h;
+            }
+        }
+        catch { /* best-effort */ }
+        return "?";
+    }
+
     // First N UTF-8 bytes of a payload, sanitized for console display.
     // Useful for "this frame failed to parse - here's what it looked like".
     public static string PayloadPreview(byte[] payload, int maxBytes = 120)

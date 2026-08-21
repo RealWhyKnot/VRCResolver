@@ -250,11 +250,7 @@ public class ResolveCacheTests : IDisposable
         Assert.Equal(playbackUrl, VrcLogMonitor.CanonicalPlaybackObservationUrl(localUrl));
         Assert.Equal(playbackUrl, VrcLogMonitor.CanonicalPlaybackObservationUrl(playbackUrl));
 
-        string nonFirstPartyTarget = Convert.ToBase64String(
-                System.Text.Encoding.UTF8.GetBytes("https://cdn.example.com/video.m3u8"))
-            .Replace('+', '-')
-            .Replace('/', '_')
-            .TrimEnd('=');
+        string nonFirstPartyTarget = Base64UrlText.Encode("https://cdn.example.com/video.m3u8");
         string forgedLocal = "http://localhost.youtube.com:51234/play/session/manifest.m3u8?target="
             + nonFirstPartyTarget;
         Assert.Equal(forgedLocal, VrcLogMonitor.CanonicalPlaybackObservationUrl(forgedLocal));
