@@ -87,7 +87,7 @@ public static class TrustGatewayUrlBuilder
         return written == 0 ? "" : new string(buffer[..written]);
     }
 
-    private static bool IsLocalTrustGatewayHost(string host)
+    public static bool IsLocalTrustGatewayHost(string host)
     {
         return host.Equals("localhost.youtube.com", StringComparison.OrdinalIgnoreCase)
             || host.Equals("localhost", StringComparison.OrdinalIgnoreCase)

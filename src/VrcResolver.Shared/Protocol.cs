@@ -90,6 +90,14 @@ public static class WireConstants
     // catches the obvious cases via URL shape (no network call) and
     // execs og instead of handing VRChat an unplayable URL.
     public const string OgFallbackReasonAvProIncompatible = "avpro_incompatible";
+    // The resolved URL failed the emit-shape guard (non-http scheme, loopback
+    // or private-range IP literal, localhost host). Never handed to VRChat;
+    // the wrapper execs og instead. See ResolvedUrlGuard.
+    public const string OgFallbackReasonResolvedUrlRejected = "resolved_url_rejected";
+    // Watchdog-side health gate is open: recent resolves or playbacks failed
+    // in a row, so resolve requests short-circuit straight to og until a
+    // probe succeeds. Local pipe vocabulary only — never sent to the server.
+    public const string OgFallbackReasonResolverUnhealthy = "resolver_unhealthy";
     // og itself failed (CF 403 / 429 / sign-in-required). Wrapper sends
     // this notify on the same pipe channel as ActionOgFallbackNotify so
     // the watchdog can evict any stale cache entry for the URL and

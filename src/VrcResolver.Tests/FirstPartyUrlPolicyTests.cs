@@ -127,6 +127,19 @@ public class FirstPartyUrlPolicyTests
         Assert.Equal(expected, TrustGatewayUrlBuilder.IsAllowedGatewayScheme(scheme));
     }
 
+    [Theory]
+    [InlineData("localhost.youtube.com", true)]
+    [InlineData("LOCALHOST.YOUTUBE.COM", true)]
+    [InlineData("localhost", true)]
+    [InlineData("127.0.0.1", true)]
+    [InlineData("notlocalhost.youtube.com", false)]
+    [InlineData("localhost.youtube.com.evil.com", false)]
+    [InlineData("youtube.com", false)]
+    public void TrustGatewayUrlBuilder_LocalGatewayHostListIsExact(string host, bool expected)
+    {
+        Assert.Equal(expected, TrustGatewayUrlBuilder.IsLocalTrustGatewayHost(host));
+    }
+
     [Fact]
     public void TrustGatewayUrlBuilder_ExtractTargetRejectsNonGatewayUrls()
     {
