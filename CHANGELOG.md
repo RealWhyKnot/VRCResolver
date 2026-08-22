@@ -11,6 +11,12 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
+_No notable changes since the last release._
+
+---
+
+## [v2026.8.21.0](https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.8.21.0) - 2026-08-21
+
 ### Added
 - **watchdog:** Resolver health gate pauses mesh resolving after repeated failures (40b6c52)
 - **shared:** Blocked-address policy, resolved-url emit guard, relay liveness probe (8b42d4b)
@@ -21,6 +27,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 - Bump the minor-and-patch group with 1 update (#72) (773dad4)
 - style(shared): ascii punctuation in new comments (849afb7)
 - **watchdog:** Group sources into subfolders (a2c53ed)
+- Bump xunit.runner.visualstudio from 3.1.5 to 4.0.0 (#73) (3eef23c)
 
 ### Fixed
 - **mesh:** Fail pending resolves on clean close and lost sends, bound ipc fallback write (167d2f5)
