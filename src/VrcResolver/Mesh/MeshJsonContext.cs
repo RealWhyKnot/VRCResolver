@@ -47,6 +47,7 @@ namespace VrcResolver;
 [JsonSerializable(typeof(TerminalAppSettings))]
 [JsonSerializable(typeof(RelayAppSettings))]
 [JsonSerializable(typeof(MaintenanceAppSettings))]
+[JsonSerializable(typeof(PlaybackAppSettings))]
 // ReportingService outbound /report frames (anonymous failure
 // telemetry; gated by VRCRESOLVER_ANONYMOUS_REPORTING).
 [JsonSerializable(typeof(ReportingService.ReportPayload))]

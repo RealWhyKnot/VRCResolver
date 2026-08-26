@@ -50,7 +50,7 @@ public class ResolveCacheTests : IDisposable
     public void Lookup_on_missing_file_returns_null()
     {
         var cache = new ResolveCache(_path);
-        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, "req-1"));
+        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, "req-1"));
     }
 
     [Fact]
@@ -59,9 +59,9 @@ public class ResolveCacheTests : IDisposable
         var cache = new ResolveCache(_path);
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddHours(2).ToString("o"));
 
-        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "(mp4/best)[height<=?1080]", resp);
+        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "(mp4/best)[height<=?1080]", 1080, resp);
 
-        var hit = cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "(mp4/best)[height<=?1080]", "req-2");
+        var hit = cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "(mp4/best)[height<=?1080]", 1080, "req-2");
         Assert.NotNull(hit);
         Assert.Equal(WireConstants.ActionResolved, hit.Value.Action);
 
@@ -79,9 +79,9 @@ public class ResolveCacheTests : IDisposable
     {
         var cache = new ResolveCache(_path);
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddHours(1).ToString("o"));
-        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt", resp);
+        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt", 1080, resp);
 
-        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "unity", "fmt", "r"));
+        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "unity", "fmt", 1080, "r"));
     }
 
     [Fact]
@@ -89,9 +89,9 @@ public class ResolveCacheTests : IDisposable
     {
         var cache = new ResolveCache(_path);
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddHours(1).ToString("o"));
-        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt-A", resp);
+        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt-A", 1080, resp);
 
-        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt-B", "r"));
+        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt-B", 1080, "r"));
     }
 
     [Fact]
@@ -99,9 +99,9 @@ public class ResolveCacheTests : IDisposable
     {
         var cache = new ResolveCache(_path);
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddHours(1).ToString("o"));
-        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt", resp);
+        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt", 1080, resp);
 
-        Assert.Null(cache.Lookup("eu1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt", "r"));
+        Assert.Null(cache.Lookup("eu1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt", 1080, "r"));
     }
 
     [Fact]
@@ -114,7 +114,7 @@ public class ResolveCacheTests : IDisposable
             Reason = "discovery_in_progress",
             ExpiresAt = DateTime.UtcNow.AddHours(1).ToString("o"),
         };
-        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, resp);
+        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, resp);
 
         Assert.Equal(0, cache.Count);
     }
@@ -128,13 +128,13 @@ public class ResolveCacheTests : IDisposable
         // entry stays serveable for ~4.5 minutes.
         var cache = new ResolveCache(_path);
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", expiresAt: null);
-        string? effective = cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, resp);
+        string? effective = cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, resp);
 
         Assert.NotNull(effective);
         Assert.Equal(1, cache.Count);
 
         // Cache hit confirms the entry is queryable.
-        var hit = cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, "r");
+        var hit = cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, "r");
         Assert.NotNull(hit);
     }
 
@@ -149,11 +149,11 @@ public class ResolveCacheTests : IDisposable
         // Easier: store with a future expiry, then mutate the file to backdate.
         // Even easier: rely on the 30s safety margin. Set expiry only 5s in the future.
         resp.ExpiresAt = DateTime.UtcNow.AddSeconds(5).ToString("o");
-        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, resp);
+        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, resp);
         Assert.Equal(1, cache.Count);
 
         // 5s < 30s safety margin -> treated as expired by Lookup.
-        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, "r"));
+        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, "r"));
 
         // And evicted lazily on the same lookup pass.
         Assert.Equal(0, cache.Count);
@@ -166,19 +166,19 @@ public class ResolveCacheTests : IDisposable
         string url = "https://www.youtube.com/watch?v=stale";
         string future = DateTime.UtcNow.AddHours(1).ToString("o");
 
-        cache.Store("us1.vrcresolver.com", url, "avpro", "fmt-A", MakeResolved(url, future));
-        cache.Store("us1.vrcresolver.com", url, "avpro", "fmt-B", MakeResolved(url, future));
-        cache.Store("us1.vrcresolver.com", url, "unity", null, MakeResolved(url, future));
-        cache.Store("us1.vrcresolver.com", "https://other.example.com/x", "avpro", null, MakeResolved("other", future));
+        cache.Store("us1.vrcresolver.com", url, "avpro", "fmt-A", 1080, MakeResolved(url, future));
+        cache.Store("us1.vrcresolver.com", url, "avpro", "fmt-B", 1080, MakeResolved(url, future));
+        cache.Store("us1.vrcresolver.com", url, "unity", null, 1080, MakeResolved(url, future));
+        cache.Store("us1.vrcresolver.com", "https://other.example.com/x", "avpro", null, 1080, MakeResolved("other", future));
         Assert.Equal(4, cache.Count);
 
         int evicted = cache.EvictByUrl(url);
         Assert.Equal(3, evicted);
         Assert.Equal(1, cache.Count);
 
-        Assert.Null(cache.Lookup("us1.vrcresolver.com", url, "avpro", "fmt-A", "r"));
-        Assert.Null(cache.Lookup("us1.vrcresolver.com", url, "avpro", "fmt-B", "r"));
-        Assert.NotNull(cache.Lookup("us1.vrcresolver.com", "https://other.example.com/x", "avpro", null, "r"));
+        Assert.Null(cache.Lookup("us1.vrcresolver.com", url, "avpro", "fmt-A", 1080, "r"));
+        Assert.Null(cache.Lookup("us1.vrcresolver.com", url, "avpro", "fmt-B", 1080, "r"));
+        Assert.NotNull(cache.Lookup("us1.vrcresolver.com", "https://other.example.com/x", "avpro", null, 1080, "r"));
     }
 
     [Fact]
@@ -198,11 +198,11 @@ public class ResolveCacheTests : IDisposable
             ExpiresAt = future,
         };
 
-        cache.Store("us1.vrcresolver.com", sourceUrl, "avpro", null, resp);
+        cache.Store("us1.vrcresolver.com", sourceUrl, "avpro", null, 1080, resp);
         int evicted = cache.EvictByUrl(playbackUrl);
 
         Assert.Equal(1, evicted);
-        Assert.Null(cache.Lookup("us1.vrcresolver.com", sourceUrl, "avpro", null, "r"));
+        Assert.Null(cache.Lookup("us1.vrcresolver.com", sourceUrl, "avpro", null, 1080, "r"));
     }
 
     [Fact]
@@ -220,7 +220,7 @@ public class ResolveCacheTests : IDisposable
             Protocol = "hls",
             ExpiresAt = DateTime.UtcNow.AddHours(1).ToString("o"),
         };
-        cache.Store("us1.vrcresolver.com", sourceUrl, "avpro", null, resp);
+        cache.Store("us1.vrcresolver.com", sourceUrl, "avpro", null, 1080, resp);
 
         Assert.True(cache.TryGetSourceUrlForResolved(playbackUrl, out string recovered));
         Assert.Equal(sourceUrl, recovered);
@@ -267,7 +267,7 @@ public class ResolveCacheTests : IDisposable
         for (int i = 0; i < 502; i++)
         {
             string url = "https://example.com/v=" + i;
-            cache.Store("us1.vrcresolver.com", url, "avpro", null, MakeResolved(url, future));
+            cache.Store("us1.vrcresolver.com", url, "avpro", null, 1080, MakeResolved(url, future));
             // The microsecond-resolution DateTime.UtcNow can collide on
             // adjacent stores; bump explicitly so the eviction order is
             // deterministic.
@@ -276,9 +276,9 @@ public class ResolveCacheTests : IDisposable
         Assert.Equal(500, cache.Count);
 
         // Oldest two (i=0 and i=1) should be gone; newest (i=501) should be present.
-        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://example.com/v=0", "avpro", null, "r"));
-        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://example.com/v=1", "avpro", null, "r"));
-        Assert.NotNull(cache.Lookup("us1.vrcresolver.com", "https://example.com/v=501", "avpro", null, "r"));
+        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://example.com/v=0", "avpro", null, 1080, "r"));
+        Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://example.com/v=1", "avpro", null, 1080, "r"));
+        Assert.NotNull(cache.Lookup("us1.vrcresolver.com", "https://example.com/v=501", "avpro", null, 1080, "r"));
     }
 
     [Fact]
@@ -286,12 +286,12 @@ public class ResolveCacheTests : IDisposable
     {
         var first = new ResolveCache(_path);
         var resp = MakeResolved("https://www.youtube.com/watch?v=persist", DateTime.UtcNow.AddHours(2).ToString("o"));
-        first.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=persist", "avpro", "fmt", resp);
+        first.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=persist", "avpro", "fmt", 1080, resp);
         first.FlushNow();
         Assert.True(File.Exists(_path));
 
         var second = new ResolveCache(_path);
-        var hit = second.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=persist", "avpro", "fmt", "r-after-restart");
+        var hit = second.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=persist", "avpro", "fmt", 1080, "r-after-restart");
         Assert.NotNull(hit);
         string json = System.Text.Encoding.UTF8.GetString(hit.Value.Frame);
         Assert.Contains("\"id\":\"r-after-restart\"", json);
@@ -322,8 +322,8 @@ public class ResolveCacheTests : IDisposable
         Assert.Equal(0, cache.Count);
         // And still functional after a corrupt load.
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddHours(1).ToString("o"));
-        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, resp);
-        Assert.NotNull(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, "r"));
+        cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, resp);
+        Assert.NotNull(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, "r"));
     }
 
     [Fact]
@@ -339,5 +339,20 @@ public class ResolveCacheTests : IDisposable
         Assert.False(File.Exists(_path));
         var aside = Directory.GetFiles(_tempDir, "resolve_cache.json.oversized-*");
         Assert.Single(aside);
+    }
+    [Fact]
+    public void DifferentMaxHeightsDoNotShareAnEntry()
+    {
+        var cache = new ResolveCache(_path);
+        const string url = "https://www.youtube.com/watch?v=q";
+        var resp = MakeResolved(url, DateTime.UtcNow.AddHours(1).ToString("o"));
+
+        cache.Store("us1.vrcresolver.com", url, "avpro", null, 1080, resp);
+
+        // Turning high quality on changes nothing else about a request whose caller sent no
+        // -f, so without height in the key the 1080 URL would be served back forever.
+        Assert.Null(cache.Lookup("us1.vrcresolver.com", url, "avpro", null, 2160, "r"));
+        Assert.NotNull(cache.Lookup("us1.vrcresolver.com", url, "avpro", null, 1080, "r"));
     }
+
 }

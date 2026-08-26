@@ -48,7 +48,7 @@ public sealed class VrcLogMonitorTests
         const string sourceUrl = "https://virtualfilm.institute/watch?v=abc";
         const string playbackUrl = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=abc";
 
-        cache.Store("us1.vrcresolver.com", sourceUrl, "avpro", null, MakeResolved(playbackUrl));
+        cache.Store("us1.vrcresolver.com", sourceUrl, "avpro", null, 1080, MakeResolved(playbackUrl));
 
         monitor.ProcessNewContent(
             "[AVProVideo] Opening " + playbackUrl + "\n"
@@ -68,7 +68,7 @@ public sealed class VrcLogMonitorTests
         const string sourceUrl = "https://virtualfilm.institute/watch?v=abc";
         const string playbackUrl = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=abc";
 
-        cache.Store("us1.vrcresolver.com", sourceUrl, "avpro", null, MakeResolved(playbackUrl));
+        cache.Store("us1.vrcresolver.com", sourceUrl, "avpro", null, 1080, MakeResolved(playbackUrl));
 
         var recovery = monitor.MarkPlaybackFailureForTests(playbackUrl);
 

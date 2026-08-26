@@ -18,6 +18,9 @@ internal sealed class AppSettings
     [JsonPropertyName("maintenance")]
     public MaintenanceAppSettings Maintenance { get; set; } = new();
 
+    [JsonPropertyName("playback")]
+    public PlaybackAppSettings Playback { get; set; } = new();
+
     public AppSettings Clone()
     {
         return new AppSettings
@@ -26,6 +29,7 @@ internal sealed class AppSettings
             Terminal = (Terminal ?? new TerminalAppSettings()).Clone(),
             Relay = (Relay ?? new RelayAppSettings()).Clone(),
             Maintenance = (Maintenance ?? new MaintenanceAppSettings()).Clone(),
+            Playback = (Playback ?? new PlaybackAppSettings()).Clone(),
         }.Normalize();
     }
 
@@ -35,10 +39,12 @@ internal sealed class AppSettings
         Terminal ??= new TerminalAppSettings();
         Relay ??= new RelayAppSettings();
         Maintenance ??= new MaintenanceAppSettings();
+        Playback ??= new PlaybackAppSettings();
 
         Terminal.Normalize();
         Relay.Normalize();
         Maintenance.Normalize();
+        Playback.Normalize();
         return this;
     }
 }
@@ -118,6 +124,25 @@ internal sealed class MaintenanceAppSettings
         UpdateCheck = UpdateCheck,
         CodecAutoInstall = CodecAutoInstall,
         IncludePrereleases = IncludePrereleases,
+    };
+
+    public void Normalize()
+    {
+    }
+}
+
+internal sealed class PlaybackAppSettings
+{
+    // Take the best rung the source offers instead of the cap VRChat asked for. Off by
+    // default: it costs bandwidth, and above 1080 most ladders are VP9/AV01, which only
+    // plays if this machine has a decoder for them. There is no way to pick a quality from
+    // inside VRChat, so this is the one place the choice can be made.
+    [JsonPropertyName("high_quality")]
+    public bool HighQuality { get; set; }
+
+    public PlaybackAppSettings Clone() => new()
+    {
+        HighQuality = HighQuality,
     };
 
     public void Normalize()

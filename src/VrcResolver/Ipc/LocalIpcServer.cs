@@ -271,6 +271,10 @@ internal sealed partial class LocalIpcServer : IDisposable
             if (req.Player == WireConstants.PlayerAvPro && req.AcceptCodecs != null)
                 req.AcceptCodecs = WireConstants.BuildAcceptCodecs(CodecCapabilityProbe.VerifiedVideoCodecs);
 
+            if (ResolveRequestProfile.ApplyHighQuality(req, AppSettingsStore.Shared.Snapshot().Playback.HighQuality))
+                Logger.WriteFileOnly("[ipc] high quality on; requesting up to "
+                    + WireConstants.HighQualityMaxHeight + "p id=" + id);
+
             // Capture the host + player labels for the single per-resolve
             // summary line that fires at terminal-response time below.
             // The earlier two-line layout (cyan request line at arrival
@@ -347,7 +351,7 @@ internal sealed partial class LocalIpcServer : IDisposable
                 // round-trip + server-side lookup. Cache cap = 500
                 // entries; staleness is closed via VrcLogMonitor's
                 // silent_stall hook calling EvictByUrl.
-                CachedResolve? cached = _cache?.Lookup(nodeHost, req.Url, req.Player, req.VrchatFormatArg, req.Id ?? "");
+                CachedResolve? cached = _cache?.Lookup(nodeHost, req.Url, req.Player, req.VrchatFormatArg, req.MaxHeight, req.Id ?? "");
                 if (cached.HasValue)
                 {
                     await WriteFrameAsync(pipe, cached.Value.Frame, perReqCts.Token).ConfigureAwait(false);
@@ -441,7 +445,7 @@ internal sealed partial class LocalIpcServer : IDisposable
                             if (parsed != null)
                             {
                                 bool defaultTtl = string.IsNullOrEmpty(parsed.ExpiresAt);
-                                _cache.Store(nodeHost, req.Url, req.Player, req.VrchatFormatArg, parsed);
+                                _cache.Store(nodeHost, req.Url, req.Player, req.VrchatFormatArg, req.MaxHeight, parsed);
                                 Logger.WriteFileOnly("[resolve-cache] stored id=" + id +
                                     " host=" + LogUtil.BareHost(req.Url) +
                                     (defaultTtl ? " ttl=default" : " ttl=server"));

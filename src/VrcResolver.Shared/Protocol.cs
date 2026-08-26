@@ -219,6 +219,11 @@ public static class WireConstants
     public const int AvProMaxAudioChannels = 8;
     public const int UnityMaxAudioChannels = 2;
 
+    // Ceiling used when the user turns high quality on. 4K matches what AVPro is documented
+    // to handle; taller rungs are VP9/AV01-only on every ladder we see, so asking for more
+    // buys failed playback rather than a sharper picture.
+    public const int HighQualityMaxHeight = 2160;
+
     // The extension-backed video codecs in AvProAcceptCodecs — decodable only
     // when the matching Media Foundation extension is installed, so these are
     // the ones the capability probe verifies and BuildAcceptCodecs may prune.
@@ -270,6 +275,12 @@ public sealed class ResolveRequest
     // unaffected when this field is not set by an old client.
     [JsonPropertyName("wrapper_deadline_ms"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? WrapperDeadlineMs { get; set; }
+
+    // The user asked for the best rung available rather than the cap VRChat sent. Kept
+    // separate from maxHeight because VRChat itself sends height<=4096 on plenty of requests
+    // without anyone having chosen anything, so a large cap cannot be read as intent.
+    [JsonPropertyName("prefer_highest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? PreferHighest { get; set; }
 
     // Forward-compat: any field name we don't statically know (e.g., a v3 field)
     // round-trips through the watchdog from pipe -> WS without loss. Both

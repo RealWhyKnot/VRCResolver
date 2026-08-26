@@ -102,6 +102,25 @@ internal static class AppSettingsRegistry
             restartRequired: true,
             completionValues: ["on", "off"],
             aliases: ["video-updates", "codec-install", "maintenance.codec-install"]),
+
+        new AppSettingDefinition(
+            "high-quality",
+            "Play the best rung a video offers instead of the quality VRChat asked for. Uses more bandwidth, and above 1080p most sources need a VP9 or AV1 decoder.",
+            ["on", "off"],
+            static s => FormatBool(s.Playback.HighQuality),
+            static (AppSettings s, string value, out string error) =>
+            {
+                if (!TryParseBool(value, out bool parsed, out error)) return false;
+                s.Playback.HighQuality = parsed;
+                return true;
+            },
+            static s =>
+            {
+                s.Playback.HighQuality = s_defaults.Playback.HighQuality;
+            },
+            restartRequired: false,
+            completionValues: ["on", "off"],
+            aliases: ["hq", "quality", "playback.high-quality"]),
     ];
 
     public static bool TryFind(string key, out AppSettingDefinition? setting)

@@ -144,6 +144,7 @@ internal sealed partial class MeshClient : IAsyncDisposable
         req.AcceptProtocols != null ||
         req.AcceptCodecs != null ||
         req.MaxAudioChannels.HasValue ||
+        req.PreferHighest.HasValue ||
         !string.IsNullOrEmpty(req.VrchatFormatArg);
 
     // Server-emitted fallback_native — recorded for grep but no longer

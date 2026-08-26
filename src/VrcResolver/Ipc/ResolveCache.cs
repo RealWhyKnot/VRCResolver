@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -90,11 +91,11 @@ internal sealed class ResolveCache
 
     // Returns the cached frame ready to write to the pipe (with the
     // request's id stamped in), or null on cache miss / expired entry.
-    public CachedResolve? Lookup(string node, string url, string? player, string? formatArg, string requestId)
+    public CachedResolve? Lookup(string node, string url, string? player, string? formatArg, int? maxHeight, string requestId)
     {
         if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(node)) return null;
         EnsureLoaded();
-        string key = MakeKey(node, url, player, formatArg);
+        string key = MakeKey(node, url, player, formatArg, maxHeight);
         ResolveCacheEntry? entry;
         lock (_lock)
         {
@@ -128,7 +129,7 @@ internal sealed class ResolveCache
     // Returns the effective expires_at written to the entry, or null if
     // the response was rejected. Diagnostic only -- callers don't need
     // to inspect.
-    public string? Store(string node, string url, string? player, string? formatArg, ResolveResponse response)
+    public string? Store(string node, string url, string? player, string? formatArg, int? maxHeight, ResolveResponse response)
     {
         if (response == null) return null;
         if (!string.Equals(response.Action, WireConstants.ActionResolved, StringComparison.Ordinal)) return null;
@@ -142,7 +143,7 @@ internal sealed class ResolveCache
             : DateTime.UtcNow.Add(DefaultExpiryTtl).ToString("o");
 
         EnsureLoaded();
-        string key = MakeKey(node, url, player, formatArg);
+        string key = MakeKey(node, url, player, formatArg, maxHeight);
         string fetchedAt = DateTime.UtcNow.ToString("o");
         lock (_lock)
         {
@@ -318,7 +319,7 @@ internal sealed class ResolveCache
     // tokens, or yt-dlp -f selectors -- prevents an adversarial url
     // containing a literal separator from colliding with a different
     // (url, format) combination.
-    private static string MakeKey(string node, string url, string? player, string? formatArg)
+    private static string MakeKey(string node, string url, string? player, string? formatArg, int? maxHeight)
     {
         const char Sep = '';
         Span<byte> hash = stackalloc byte[32];
@@ -326,6 +327,10 @@ internal sealed class ResolveCache
         sb.Append(node).Append(Sep);
         sb.Append(url).Append(Sep);
         sb.Append(player ?? "").Append(Sep);
+        // Height belongs in the key: turning high quality on changes nothing else about a
+        // request whose caller sent no -f, so without it the cache keeps handing back the
+        // lower-quality URL resolved before the setting was flipped.
+        sb.Append(maxHeight?.ToString(CultureInfo.InvariantCulture) ?? "").Append(Sep);
         sb.Append(formatArg ?? "");
         byte[] bytes = Encoding.UTF8.GetBytes(sb.ToString());
         SHA256.HashData(bytes, hash);
