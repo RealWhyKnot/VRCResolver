@@ -4,6 +4,7 @@ internal sealed class TerminalOverlayLine
 {
     private int _renderedLength;
     private string _lastRendered = "";
+    private int _lastCursorColumn = -1;
     private bool _visible;
 
     public int RenderedLength => _renderedLength;
@@ -91,19 +92,29 @@ internal sealed class TerminalOverlayLine
         if (frame == null) throw new ArgumentNullException(nameof(frame));
         if (writeFrame == null) throw new ArgumentNullException(nameof(writeFrame));
 
-        if (_visible && string.Equals(_lastRendered, frame.PlainText, StringComparison.Ordinal))
+        // The caret column has to be part of the comparison, not just the text. Typing into a
+        // ghost suggestion keeps the rendered text identical -- "sta" + "tus " and "stat" + "us "
+        // are the same string -- so comparing text alone suppresses every repaint and the line
+        // appears frozen while the user types.
+        if (_visible
+            && string.Equals(_lastRendered, frame.PlainText, StringComparison.Ordinal)
+            && _lastCursorColumn == frame.CursorColumn)
+        {
             return false;
+        }
 
         Clear(writer);
         if (frame.PlainText.Length == 0)
         {
             _lastRendered = frame.PlainText;
+            _lastCursorColumn = frame.CursorColumn;
             return false;
         }
 
         writeFrame(writer, frame.Runs);
         _renderedLength = frame.PlainText.Length;
         _lastRendered = frame.PlainText;
+        _lastCursorColumn = frame.CursorColumn;
         _visible = true;
         return true;
     }

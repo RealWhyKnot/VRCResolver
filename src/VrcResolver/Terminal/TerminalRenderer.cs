@@ -18,8 +18,6 @@ internal sealed class TerminalRenderer
     private readonly Action<string, string>? _recordOutput;
     private readonly Overlay _overlay;
     private IDisposable? _overlayRegistration;
-    private bool _cursorWasVisible = true;
-    private bool _cursorHidden;
 
     public TerminalRenderer(
         Func<WatchdogActivitySnapshot> snapshot,
@@ -51,16 +49,15 @@ internal sealed class TerminalRenderer
     public void AttachOverlay()
     {
         _overlayRegistration ??= ConsoleUx.UseOverlay(_overlay);
-        _cursorHidden = TerminalCapabilities.TrySetCursorVisible(false, out _cursorWasVisible);
+        // The caret is left visible on purpose. It used to be hidden because input was
+        // append-only and the caret never moved, but the prompt now supports mid-line editing,
+        // and an invisible caret in a line you can move around inside is worse than a flicker.
     }
 
     public void DetachOverlay()
     {
         _overlayRegistration?.Dispose();
         _overlayRegistration = null;
-        if (_cursorHidden)
-            TerminalCapabilities.RestoreCursorVisible(_cursorWasVisible);
-        _cursorHidden = false;
     }
 
     public void RenderOverlay()
