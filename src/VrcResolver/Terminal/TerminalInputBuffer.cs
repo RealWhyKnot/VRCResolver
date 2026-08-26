@@ -10,6 +10,7 @@ internal sealed class TerminalInputBuffer
     private readonly StringBuilder _buffer = new();
     private readonly List<string> _history;
     private int _historyCursor;
+    private int _cursor;
 
     public TerminalInputBuffer(IEnumerable<string>? history = null)
     {
@@ -27,12 +28,27 @@ internal sealed class TerminalInputBuffer
         lock (_lock) return _buffer.ToString();
     }
 
+    // Caret offset in characters from the start of the line. The overlay redraws the whole
+    // line every frame, so this is what tells it where to leave the hardware cursor.
+    public int Cursor
+    {
+        get { lock (_lock) return _cursor; }
+    }
+
+    public bool AtEnd
+    {
+        get { lock (_lock) return _cursor >= _buffer.Length; }
+    }
+
     public void Append(char ch)
     {
         lock (_lock)
         {
             if (_buffer.Length < MaxInputChars)
-                _buffer.Append(ch);
+            {
+                _buffer.Insert(_cursor, ch);
+                _cursor++;
+            }
             _historyCursor = _history.Count;
         }
     }
@@ -41,9 +57,47 @@ internal sealed class TerminalInputBuffer
     {
         lock (_lock)
         {
-            if (_buffer.Length > 0)
-                _buffer.Length--;
+            if (_cursor > 0)
+            {
+                _buffer.Remove(_cursor - 1, 1);
+                _cursor--;
+            }
         }
+    }
+
+    public void Delete()
+    {
+        lock (_lock)
+        {
+            if (_cursor < _buffer.Length)
+                _buffer.Remove(_cursor, 1);
+        }
+    }
+
+    public void MoveLeft()
+    {
+        lock (_lock)
+        {
+            if (_cursor > 0) _cursor--;
+        }
+    }
+
+    public void MoveRight()
+    {
+        lock (_lock)
+        {
+            if (_cursor < _buffer.Length) _cursor++;
+        }
+    }
+
+    public void MoveHome()
+    {
+        lock (_lock) _cursor = 0;
+    }
+
+    public void MoveEnd()
+    {
+        lock (_lock) _cursor = _buffer.Length;
     }
 
     public void Clear()
@@ -51,6 +105,7 @@ internal sealed class TerminalInputBuffer
         lock (_lock)
         {
             _buffer.Clear();
+            _cursor = 0;
             _historyCursor = _history.Count;
         }
     }
@@ -61,6 +116,7 @@ internal sealed class TerminalInputBuffer
         {
             string value = _buffer.ToString();
             _buffer.Clear();
+            _cursor = 0;
             _historyCursor = _history.Count;
             return value;
         }
@@ -73,6 +129,7 @@ internal sealed class TerminalInputBuffer
             _buffer.Clear();
             if (!string.IsNullOrEmpty(value))
                 _buffer.Append(value.Length <= MaxInputChars ? value : value[^MaxInputChars..]);
+            _cursor = _buffer.Length;
             _historyCursor = _history.Count;
         }
     }
@@ -114,6 +171,7 @@ internal sealed class TerminalInputBuffer
                 _buffer.Clear();
             else
                 ReplaceWithHistoryLocked();
+            _cursor = _buffer.Length;
         }
     }
 
@@ -121,5 +179,6 @@ internal sealed class TerminalInputBuffer
     {
         _buffer.Clear();
         _buffer.Append(_history[_historyCursor]);
+        _cursor = _buffer.Length;
     }
 }

@@ -19,6 +19,7 @@ internal sealed class InteractiveTerminal : IDisposable
     private int _spinnerIndex;
     private int _started;
     private string _lastSuggestionInput = "";
+    private volatile string _ghost = "";
     private volatile bool _stopped;
 
     public InteractiveTerminal(Action requestShutdown, Func<bool> meshConnected)
@@ -46,7 +47,9 @@ internal sealed class InteractiveTerminal : IDisposable
             spinnerIndex: () => Volatile.Read(ref _spinnerIndex),
             input: _input.Text,
             settings: AppSettingsStore.Shared.Snapshot,
-            recordOutput: _session.RecordOutput);
+            recordOutput: _session.RecordOutput,
+            inputCursor: () => _input.Cursor,
+            inputGhost: () => _ghost);
     }
 
     public void Start()
@@ -130,7 +133,7 @@ internal sealed class InteractiveTerminal : IDisposable
             {
                 case ConsoleKey.U:
                     _input.Clear();
-                    _lastSuggestionInput = "";
+                    ResetSuggestion();
                     Redraw();
                     return;
                 case ConsoleKey.L:
@@ -141,7 +144,7 @@ internal sealed class InteractiveTerminal : IDisposable
                     return;
                 case ConsoleKey.C:
                     _input.Clear();
-                    _lastSuggestionInput = "";
+                    ResetSuggestion();
                     _renderer.Warn("input cancelled.");
                     return;
             }
@@ -154,25 +157,58 @@ internal sealed class InteractiveTerminal : IDisposable
                 return;
             case ConsoleKey.Backspace:
                 _input.Backspace();
-                _lastSuggestionInput = "";
+                RefreshSuggestion();
+                Redraw();
+                return;
+            case ConsoleKey.Delete:
+                _input.Delete();
+                RefreshSuggestion();
                 Redraw();
                 return;
             case ConsoleKey.Escape:
                 _input.Clear();
-                _lastSuggestionInput = "";
+                ResetSuggestion();
                 Redraw();
                 return;
             case ConsoleKey.Tab:
                 CompleteInput(showSuggestionsWhenAmbiguous: true);
                 return;
+            case ConsoleKey.LeftArrow:
+                _input.MoveLeft();
+                ResetSuggestion();
+                Redraw();
+                return;
+            case ConsoleKey.RightArrow:
+                // At the end of the line with a ghost showing, right-arrow accepts it; that is
+                // the only thing right-arrow could mean there, and it saves reaching for tab.
+                if (_input.AtEnd && _ghost.Length > 0)
+                    CompleteInput(showSuggestionsWhenAmbiguous: false);
+                else
+                {
+                    _input.MoveRight();
+                    ResetSuggestion();
+                    Redraw();
+                }
+
+                return;
+            case ConsoleKey.Home:
+                _input.MoveHome();
+                ResetSuggestion();
+                Redraw();
+                return;
+            case ConsoleKey.End:
+                _input.MoveEnd();
+                RefreshSuggestion();
+                Redraw();
+                return;
             case ConsoleKey.UpArrow:
                 _input.PreviousHistory();
-                _lastSuggestionInput = "";
+                ResetSuggestion();
                 Redraw();
                 return;
             case ConsoleKey.DownArrow:
                 _input.NextHistory();
-                _lastSuggestionInput = "";
+                ResetSuggestion();
                 Redraw();
                 return;
         }
@@ -180,15 +216,29 @@ internal sealed class InteractiveTerminal : IDisposable
         if (!char.IsControl(key.KeyChar))
         {
             _input.Append(key.KeyChar);
-            _lastSuggestionInput = "";
+            RefreshSuggestion();
             Redraw();
         }
+    }
+
+    // Ghost text is only meaningful at the end of the line -- mid-line it would render after
+    // text the user is still editing around and read as part of the input.
+    private void RefreshSuggestion()
+    {
+        _lastSuggestionInput = "";
+        _ghost = _input.AtEnd ? _commands.Suggest(_input.Text()) : "";
+    }
+
+    private void ResetSuggestion()
+    {
+        _lastSuggestionInput = "";
+        _ghost = "";
     }
 
     private async Task SubmitInputAsync(CancellationToken ct)
     {
         string commandText = _input.Take().Trim();
-        _lastSuggestionInput = "";
+        ResetSuggestion();
         if (commandText.Length == 0)
         {
             Redraw();
@@ -202,7 +252,7 @@ internal sealed class InteractiveTerminal : IDisposable
         var parsed = TerminalCommandLine.Parse(commandText);
         if (!_commands.TryGet(parsed.Verb, out TerminalCommand? command))
         {
-            _renderer.Warn("unknown command: " + parsed.Verb + " (type /help)");
+            _renderer.RenderUnknownCommand(parsed.Verb, _commands.NearestCommands(parsed.Verb));
             return;
         }
 
@@ -234,7 +284,7 @@ internal sealed class InteractiveTerminal : IDisposable
         if (!string.IsNullOrEmpty(completion.Replacement))
         {
             _input.Set(completion.Replacement);
-            _lastSuggestionInput = "";
+            RefreshSuggestion();
             Redraw();
             return;
         }

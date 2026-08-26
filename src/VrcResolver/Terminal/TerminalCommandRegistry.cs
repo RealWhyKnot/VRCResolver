@@ -2,8 +2,12 @@ namespace VrcResolver;
 
 internal sealed class TerminalCommandRegistry
 {
+    // A verb further than this from every known command is a typo worth no guess at all.
+    private const int MaxSuggestionScore = 3;
+
     private readonly Dictionary<string, TerminalCommand> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<TerminalCommand> _primaryCommands = new();
+    private TerminalCommand[] _helpTargets = Array.Empty<TerminalCommand>();
 
     public IReadOnlyList<TerminalCommand> All => _primaryCommands;
 
@@ -13,10 +17,23 @@ internal sealed class TerminalCommandRegistry
 
         registry.Add(
             "help",
-            "Show available terminal commands.",
-            static (ctx, _, _) =>
+            "Show available terminal commands, or details for one of them.",
+            static (ctx, args, _) =>
             {
-                ctx.Renderer.RenderHelp(ctx.Commands.All);
+                string wanted = TerminalCommandLine.NormalizeVerb(args ?? "");
+                if (wanted.Length == 0)
+                {
+                    ctx.Renderer.RenderHelp(ctx.Commands.All);
+                }
+                else if (ctx.Commands.TryGet(wanted, out TerminalCommand? target) && target != null)
+                {
+                    ctx.Renderer.RenderCommandHelp(target);
+                }
+                else
+                {
+                    ctx.Renderer.RenderUnknownCommand(wanted, ctx.Commands.NearestCommands(wanted));
+                }
+
                 return Task.CompletedTask;
             },
             "?");
@@ -104,7 +121,19 @@ internal sealed class TerminalCommandRegistry
             },
             "exit");
 
+        registry._helpTargets = registry._primaryCommands.ToArray();
+        registry.SetCompleter("settings", CompleteSettings);
+        registry.SetCompleter("help", registry.CompleteHelp);
+
         return registry;
+    }
+
+    public void SetCompleter(string name, TerminalArgumentCompleter completer)
+    {
+        if (completer == null) throw new ArgumentNullException(nameof(completer));
+        if (!TryGet(name, out TerminalCommand? command) || command == null)
+            throw new ArgumentException("Unknown command: " + name, nameof(name));
+        command.Completer = completer;
     }
 
     public void Add(
@@ -152,10 +181,113 @@ internal sealed class TerminalCommandRegistry
         string verb = TerminalCommandLine.NormalizeVerb(tokens[0]);
         if (!TryGet(verb, out TerminalCommand? command) || command == null)
             return TerminalCompletion.Empty;
-        if (!string.Equals(command.Name, "settings", StringComparison.OrdinalIgnoreCase))
-            return TerminalCompletion.Empty;
 
-        return CompleteSettings(slash, tokens, endsWithSpace);
+        return command.Completer?.Invoke(slash, tokens, endsWithSpace) ?? TerminalCompletion.Empty;
+    }
+
+    // The dimmed remainder shown after the caret as the user types. Offered only when the
+    // completion is unambiguous: a ghost that picks between several commands reads as a
+    // decision the terminal has already made.
+    public string Suggest(string input)
+    {
+        input ??= "";
+        if (input.Length == 0 || char.IsWhiteSpace(input[^1])) return "";
+
+        TerminalCompletion completion = Complete(input);
+        string candidate = completion.Replacement;
+        if (candidate.Length == 0 && completion.Suggestions.Count == 1)
+            candidate = completion.Suggestions[0].Text;
+        if (candidate.Length <= input.Length) return "";
+
+        return candidate.StartsWith(input, StringComparison.OrdinalIgnoreCase)
+            ? candidate.Substring(input.Length)
+            : "";
+    }
+
+    // Ranked nearest matches for a verb that matched nothing. Prefix and subsequence hits
+    // rank above edit distance, so a truncation and a transposition both land on the
+    // command the user meant.
+    public IReadOnlyList<TerminalCompletionItem> NearestCommands(string verb, int max = 3)
+    {
+        verb = TerminalCommandLine.NormalizeVerb(verb ?? "");
+        if (verb.Length == 0 || max <= 0) return Array.Empty<TerminalCompletionItem>();
+
+        var scored = new List<(TerminalCommand Command, int Score)>();
+        foreach (TerminalCommand command in _primaryCommands)
+        {
+            int best = MatchScore(verb, command.Name);
+            foreach (string alias in command.Aliases)
+                best = Math.Min(best, MatchScore(verb, alias));
+
+            if (best <= MaxSuggestionScore) scored.Add((command, best));
+        }
+
+        return scored
+            .OrderBy(s => s.Score)
+            .ThenBy(s => s.Command.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(max)
+            .Select(s => new TerminalCompletionItem(s.Command.Name, s.Command.Description))
+            .ToArray();
+    }
+
+    private static int MatchScore(string verb, string candidate)
+    {
+        if (candidate.StartsWith(verb, StringComparison.OrdinalIgnoreCase)) return 0;
+        if (IsSubsequence(verb, candidate)) return 1;
+        return EditDistance(verb, candidate);
+    }
+
+    private static bool IsSubsequence(string needle, string haystack)
+    {
+        int i = 0;
+        foreach (char c in haystack)
+        {
+            if (i < needle.Length && char.ToLowerInvariant(c) == char.ToLowerInvariant(needle[i]))
+                i++;
+        }
+
+        return i == needle.Length;
+    }
+
+    private static int EditDistance(string a, string b)
+    {
+        int[] previous = new int[b.Length + 1];
+        int[] current = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) previous[j] = j;
+
+        for (int i = 1; i <= a.Length; i++)
+        {
+            current[0] = i;
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cost = char.ToLowerInvariant(a[i - 1]) == char.ToLowerInvariant(b[j - 1]) ? 0 : 1;
+                current[j] = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + cost);
+            }
+
+            (previous, current) = (current, previous);
+        }
+
+        return previous[b.Length];
+    }
+
+    private TerminalCompletion CompleteHelp(bool slash, string[] tokens, bool endsWithSpace)
+    {
+        string prefix = tokens.Length > 1 && !endsWithSpace
+            ? TerminalCommandLine.NormalizeVerb(tokens[^1])
+            : "";
+        string commandPrefix = (slash ? "/" : "") + "help ";
+
+        var matches = _helpTargets
+            .Where(c => c.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (matches.Length == 1)
+            return new TerminalCompletion(commandPrefix + matches[0].Name, Array.Empty<TerminalCompletionItem>());
+
+        return new TerminalCompletion(
+            "",
+            matches.Select(c => new TerminalCompletionItem(c.Name, c.Description)).ToArray());
     }
 
     private TerminalCompletion CompleteCommand(bool slash, string token)
@@ -300,6 +432,10 @@ internal sealed class TerminalCommand
     public string Description { get; }
     public IReadOnlyList<string> Aliases { get; }
 
+    // Set once at registration. Null means the command takes no completable arguments, which
+    // is the honest answer for most of them.
+    public TerminalArgumentCompleter? Completer { get; set; }
+
     public Task ExecuteAsync(TerminalCommandContext context, string arguments, CancellationToken ct)
     {
         return _handler(context, arguments, ct);
@@ -341,3 +477,5 @@ internal readonly record struct TerminalCompletion(
 }
 
 internal readonly record struct TerminalCompletionItem(string Text, string Description);
+
+internal delegate TerminalCompletion TerminalArgumentCompleter(bool slash, string[] tokens, bool endsWithSpace);

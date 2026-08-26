@@ -14,7 +14,9 @@ internal static class TerminalStatusFormatter
         string input,
         bool statusLineEnabled = true,
         bool animationsEnabled = true,
-        bool unicodeSymbols = true)
+        bool unicodeSymbols = true,
+        string ghost = "",
+        int cursor = -1)
     {
         return Format(
             snapshot,
@@ -26,7 +28,9 @@ internal static class TerminalStatusFormatter
             input,
             statusLineEnabled,
             animationsEnabled,
-            unicodeSymbols).PlainText;
+            unicodeSymbols,
+            ghost,
+            cursor).PlainText;
     }
 
     public static TerminalFrame Format(
@@ -39,14 +43,17 @@ internal static class TerminalStatusFormatter
         string input,
         bool statusLineEnabled = true,
         bool animationsEnabled = true,
-        bool unicodeSymbols = true)
+        bool unicodeSymbols = true,
+        string ghost = "",
+        int cursor = -1)
     {
         width = NormalizeWidth(width);
         input ??= "";
+        ghost ??= "";
 
         string prompt = "vrcr> ";
         if (!statusLineEnabled)
-            return PromptOnly(prompt, input, width);
+            return PromptOnly(prompt, input, ghost, cursor, width);
 
         TerminalGlyphSet glyphs = TerminalGlyphSet.For(unicodeSymbols);
         bool relayAnimating = snapshot.RelayActive(nowUtc, TerminalRefreshPolicy.AnimationWindow);
@@ -68,14 +75,17 @@ internal static class TerminalStatusFormatter
             includeTotals: width >= 100,
             includeSparkline: width >= 116);
 
-        var runs = new List<TerminalTextRun>(statusRuns.Count + 3);
+        var runs = new List<TerminalTextRun>(statusRuns.Count + 4);
         runs.AddRange(statusRuns);
         runs.Add(new TerminalTextRun("  ", ConsoleColor.DarkGray));
         runs.Add(new TerminalTextRun(prompt, ConsoleColor.White));
         if (input.Length > 0)
             runs.Add(new TerminalTextRun(input, ConsoleColor.Gray));
+        if (ghost.Length > 0)
+            runs.Add(new TerminalTextRun(ghost, TerminalStyle.Dim));
 
-        var full = new TerminalFrame(runs);
+        int caret = CaretColumn(PlainText(statusRuns).Length + 2 + prompt.Length, input, cursor);
+        var full = new TerminalFrame(runs) { CursorColumn = caret };
         if (full.PlainText.Length <= width)
             return full;
 
@@ -94,7 +104,18 @@ internal static class TerminalStatusFormatter
             includeSparkline: false);
 
         string fitted = Fit(PlainText(statusRuns), prompt, input, width);
-        return TerminalFrame.Plain(fitted, ConsoleColor.DarkGray);
+        var narrow = TerminalFrame.Plain(fitted, ConsoleColor.DarkGray);
+        narrow.CursorColumn = fitted.Length;
+        return narrow;
+    }
+
+    // Where the hardware caret belongs on the rendered line. The overlay repaints the whole
+    // line every frame, so without this the caret always sits after the last character and
+    // mid-line editing would happen somewhere the user cannot see.
+    private static int CaretColumn(int inputStartColumn, string input, int cursor)
+    {
+        if (cursor < 0) return -1;
+        return inputStartColumn + Math.Clamp(cursor, 0, input.Length);
     }
 
     private static List<TerminalTextRun> BuildStatusRuns(
@@ -180,10 +201,22 @@ internal static class TerminalStatusFormatter
         return runs;
     }
 
-    private static TerminalFrame PromptOnly(string prompt, string input, int width)
+    private static TerminalFrame PromptOnly(string prompt, string input, string ghost, int cursor, int width)
     {
         string line = Fit("", prompt, input, width);
-        return TerminalFrame.Plain(line, ConsoleColor.Gray);
+        if (ghost.Length > 0 && line.Length + ghost.Length <= NormalizeWidth(width))
+        {
+            var runs = new[]
+            {
+                new TerminalTextRun(line, TerminalStyle.Plain),
+                new TerminalTextRun(ghost, TerminalStyle.Dim),
+            };
+            return new TerminalFrame(runs) { CursorColumn = CaretColumn(prompt.Length, input, cursor) };
+        }
+
+        var plain = TerminalFrame.Plain(line, ConsoleColor.Gray);
+        plain.CursorColumn = CaretColumn(prompt.Length, input, cursor);
+        return plain;
     }
 
     private static int NormalizeWidth(int width)

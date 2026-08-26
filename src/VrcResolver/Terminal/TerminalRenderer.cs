@@ -10,6 +10,8 @@ internal sealed class TerminalRenderer
     private readonly Func<bool> _meshConnected;
     private readonly Func<int> _spinnerIndex;
     private readonly Func<string> _input;
+    private readonly Func<int> _inputCursor;
+    private readonly Func<string> _inputGhost;
     private readonly Func<AppSettings> _settings;
     private readonly Func<bool> _animationsAvailable;
     private readonly Func<bool> _unicodeAvailable;
@@ -28,13 +30,17 @@ internal sealed class TerminalRenderer
         Func<AppSettings>? settings = null,
         Func<bool>? animationsAvailable = null,
         Func<bool>? unicodeAvailable = null,
-        Action<string, string>? recordOutput = null)
+        Action<string, string>? recordOutput = null,
+        Func<int>? inputCursor = null,
+        Func<string>? inputGhost = null)
     {
         _snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
         _bandwidth = bandwidth ?? WatchdogStats.GetBandwidthSnapshot;
         _meshConnected = meshConnected ?? throw new ArgumentNullException(nameof(meshConnected));
         _spinnerIndex = spinnerIndex ?? throw new ArgumentNullException(nameof(spinnerIndex));
         _input = input ?? throw new ArgumentNullException(nameof(input));
+        _inputCursor = inputCursor ?? (() => -1);
+        _inputGhost = inputGhost ?? (() => "");
         _settings = settings ?? AppSettingsStore.Shared.Snapshot;
         _animationsAvailable = animationsAvailable ?? TerminalCapabilities.UseAnimations;
         _unicodeAvailable = unicodeAvailable ?? TerminalCapabilities.UseUnicode;
@@ -128,6 +134,33 @@ internal sealed class TerminalRenderer
     public void RenderHelp(IReadOnlyList<TerminalCommand> commands)
     {
         RenderFrames("commands", TerminalBlocks.CommandPalette(commands, UsableWidth(), Glyphs()));
+        Info("tab completes as you type; help <command> explains one.");
+    }
+
+    public void RenderCommandHelp(TerminalCommand command)
+    {
+        var rows = new List<(string, string)>
+        {
+            ("command", command.Name),
+            ("about", command.Description),
+        };
+        if (command.Aliases.Count > 0)
+            rows.Add(("also", string.Join(", ", command.Aliases)));
+        rows.Add(("arguments", command.Completer == null ? "none" : "tab completes them"));
+
+        WriteBlock("help", rows);
+    }
+
+    public void RenderUnknownCommand(string verb, IReadOnlyList<TerminalCompletionItem> nearest)
+    {
+        Warn("unknown command: " + verb);
+        if (nearest.Count == 0)
+        {
+            Info("type help for the full list.");
+            return;
+        }
+
+        RenderFrames("did you mean", TerminalBlocks.CompletionPalette(nearest, UsableWidth(), Glyphs()));
     }
 
     public void RenderCompletions(string input, IReadOnlyList<TerminalCompletionItem> items)
@@ -220,6 +253,10 @@ internal sealed class TerminalRenderer
             ("peak speed", bandwidth.HasTraffic ? WatchdogDisplay.FormatBytesPerSecond(bandwidth.PeakBytesPerSecond) : "none yet",
                 TerminalEffectEngine.Sparkline(bandwidth.HistoryBytesPerSecond, 12, Glyphs())),
             ("terminal", settings.Terminal.StatusLine ? "live prompt" : "prompt only", DescribeTerminal(settings)),
+            ("quality", settings.Playback.HighQuality ? "highest available" : "as VRChat asks",
+                settings.Playback.HighQuality
+                    ? "up to 4K where the source has it -- settings high-quality off to revert"
+                    : "settings high-quality on to take the best rung a source offers"),
         });
     }
 
@@ -256,7 +293,7 @@ internal sealed class TerminalRenderer
             ("settings reset <name>", "reset one setting"),
             ("settings reset all", "reset every setting"),
             ("example", "settings status-line off"),
-            ("example", "settings video-support-updates on"),
+            ("example", "settings high-quality on"),
         });
     }
 
@@ -387,9 +424,28 @@ internal sealed class TerminalRenderer
                 _owner._input(),
                 settings.Terminal.StatusLine,
                 settings.Terminal.Animations && _owner._animationsAvailable(),
-                _owner._unicodeAvailable());
+                _owner._unicodeAvailable(),
+                _owner._inputGhost(),
+                _owner._inputCursor());
 
             _line.RenderIfChanged(Console.Out, frame, WriteRuns);
+            ParkCaret(frame.CursorColumn);
+        }
+
+        // The line never wraps (Fit clamps it to the window width), so the caret only ever
+        // moves along the row the overlay just painted.
+        private static void ParkCaret(int column)
+        {
+            if (column < 0) return;
+            try
+            {
+                if (column >= Console.BufferWidth) return;
+                Console.SetCursorPosition(column, Console.CursorTop);
+            }
+            catch
+            {
+                /* redirected or non-positionable host */
+            }
         }
     }
 }
