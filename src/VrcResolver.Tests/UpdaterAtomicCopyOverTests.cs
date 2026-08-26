@@ -151,9 +151,8 @@ public class UpdaterAtomicCopyOverTests : IDisposable
         Assert.Equal(nested, root);
     }
 
-    // Rename transition: a payload keyed by the pre-rename watchdog exe
-    // name must still resolve (an old zip re-run, or the transitional
-    // release which ships a WKVRCProxy.exe launcher).
+    // A payload keyed by the pre-rename watchdog exe name must still resolve:
+    // an old release zip can be re-run at any time.
     [Fact]
     public void ResolvePayloadRoot_accepts_pre_rename_watchdog_exe_name()
     {

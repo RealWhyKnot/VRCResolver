@@ -6,6 +6,5 @@
     <Project Path="src/VrcResolver.Uninstaller/VrcResolver.Uninstaller.csproj" />
     <Project Path="src/VrcResolver.Tests/VrcResolver.Tests.csproj" />
     <Project Path="src/VrcResolver.YtDlp/VrcResolver.YtDlp.csproj" />
-    <Project Path="src/VrcResolver.Compat/VrcResolver.Compat.csproj" />
   </Folder>
 </Solution>

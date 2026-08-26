@@ -4,16 +4,12 @@ namespace VrcResolver;
 
 internal static class UpdaterRepair
 {
-    // Staged-updater pairs applied at watchdog startup. The legacy pair
-    // exists for the rename transition: the transitional release ships a
-    // WKVRCProxy.Updater.next.exe launcher in its payload (the old updater
-    // cannot overwrite its own running WKVRCProxy.Updater.exe), and this
-    // repair swaps it in on first launch so a stale old-named updater on
-    // disk becomes a forwarder to the current one.
+    // Staged-updater pairs applied at watchdog startup: the running updater
+    // cannot overwrite itself, so the new one arrives under a .next name and
+    // is swapped in here on the following launch.
     private static readonly (string Staged, string Target)[] Pairs =
     {
         ("vrcresolver.Updater.next.exe", "vrcresolver.Updater.exe"),
-        ("WKVRCProxy.Updater.next.exe", "WKVRCProxy.Updater.exe"),
     };
 
     public static bool ApplyIfPresent(string installDir)

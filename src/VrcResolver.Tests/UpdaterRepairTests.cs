@@ -32,34 +32,16 @@ public class UpdaterRepairTests : IDisposable
         Assert.Empty(Directory.GetFiles(_root, "*.old-*"));
     }
 
-    // Rename transition: the transitional release stages a launcher under
-    // the pre-rename staged-updater name; the repair must swap it over the
-    // stale pre-rename updater exe too.
+    // The pre-rename launcher is no longer shipped, so a stale one on disk is
+    // left alone rather than swapped over.
     [Fact]
-    public void ApplyIfPresent_also_applies_pre_rename_staged_pair()
+    public void ApplyIfPresent_ignores_pre_rename_names()
     {
         File.WriteAllText(Path.Combine(_root, "WKVRCProxy.Updater.exe"), "OLD-REAL-UPDATER");
         File.WriteAllText(Path.Combine(_root, "WKVRCProxy.Updater.next.exe"), "LAUNCHER");
 
-        bool applied = UpdaterRepair.ApplyIfPresent(_root);
-
-        Assert.True(applied);
-        Assert.Equal("LAUNCHER", File.ReadAllText(Path.Combine(_root, "WKVRCProxy.Updater.exe")));
-        Assert.False(File.Exists(Path.Combine(_root, "WKVRCProxy.Updater.next.exe")));
-        Assert.Empty(Directory.GetFiles(_root, "*.old-*"));
-    }
-
-    [Fact]
-    public void ApplyIfPresent_applies_both_pairs_in_one_pass()
-    {
-        File.WriteAllText(Path.Combine(_root, "vrcresolver.Updater.exe"), "OLD");
-        File.WriteAllText(Path.Combine(_root, "vrcresolver.Updater.next.exe"), "NEW");
-        File.WriteAllText(Path.Combine(_root, "WKVRCProxy.Updater.exe"), "OLD-REAL-UPDATER");
-        File.WriteAllText(Path.Combine(_root, "WKVRCProxy.Updater.next.exe"), "LAUNCHER");
-
-        Assert.True(UpdaterRepair.ApplyIfPresent(_root));
-        Assert.Equal("NEW", File.ReadAllText(Path.Combine(_root, "vrcresolver.Updater.exe")));
-        Assert.Equal("LAUNCHER", File.ReadAllText(Path.Combine(_root, "WKVRCProxy.Updater.exe")));
+        Assert.False(UpdaterRepair.ApplyIfPresent(_root));
+        Assert.Equal("OLD-REAL-UPDATER", File.ReadAllText(Path.Combine(_root, "WKVRCProxy.Updater.exe")));
     }
 
     [Fact]

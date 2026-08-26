@@ -2,7 +2,7 @@
 
 VRChat plays videos through yt-dlp. Stock yt-dlp is slow, breaks whenever YouTube changes something, and returns URLs that AVPro blocks in public worlds. VRCResolver replaces VRChat's `Tools/yt-dlp.exe` with a patched build that resolves videos through vrcresolver.com and serves them from a local address AVPro trusts. If anything fails, it falls back to VRChat's original yt-dlp, so playback is never worse than stock.
 
-Formerly WKVRCProxy. Old installs update automatically.
+Formerly WKVRCProxy.
 
 **[Report a bug](https://github.com/RealWhyKnot/VRCResolver/issues/new?template=bug_report.yml)**
 

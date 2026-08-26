@@ -155,21 +155,12 @@ else {
 dotnet publish "src/VrcResolver.Uninstaller/VrcResolver.Uninstaller.csproj" @AotPubArgs
 if ($LASTEXITCODE -ne 0) { throw "VrcResolver.Uninstaller publish failed" }
 
-# --- Transitional rename launchers ---
-# Ships this release cycle only (see src/VrcResolver.Compat). The old
-# updater keys the payload off WKVRCProxy.exe and relaunches that name; the
-# copies under the old updater names get swapped in by UpdaterRepair so a
-# stale old-named updater on disk becomes a forwarder. Drop this block once
-# the installed fleet has crossed the rename.
-dotnet publish "src/VrcResolver.Compat/VrcResolver.Compat.csproj" @AotPubArgs
-if ($LASTEXITCODE -ne 0) { throw "VrcResolver.Compat publish failed" }
-$CompatExe = Join-Path $BuildDir "WKVRCProxy.exe"
-if (Test-Path $CompatExe) {
-    Copy-Item $CompatExe (Join-Path $BuildDir "WKVRCProxy.Updater.exe") -Force
-    Copy-Item $CompatExe (Join-Path $BuildDir "WKVRCProxy.Updater.next.exe") -Force
-}
-else {
-    throw "WKVRCProxy.exe launcher missing after publish"
+# Clear the pre-rename launchers out of an existing output directory. The
+# rename transition is over and they are no longer built; without this a dist
+# from an older build keeps serving them up.
+foreach ($StaleName in @("WKVRCProxy.exe", "WKVRCProxy.Updater.exe", "WKVRCProxy.Updater.next.exe")) {
+    $StalePath = Join-Path $BuildDir $StaleName
+    if (Test-Path $StalePath) { Remove-Item $StalePath -Force }
 }
 
 # --- Stage tools/ subdir in dist ---
