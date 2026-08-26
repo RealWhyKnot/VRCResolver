@@ -11,7 +11,9 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
-_No notable changes since the last release._
+### Added
+- **terminal:** Complete as you type, suggest on typos, and edit mid-line (ea3d61a)
+- **client:** Add a high quality option for the best rung a source offers (d7c4a1b)
 
 ---
 
