@@ -15,6 +15,9 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **terminal:** Complete as you type, suggest on typos, and edit mid-line (ea3d61a)
 - **client:** Add a high quality option for the best rung a source offers (d7c4a1b)
 
+### Fixed
+- **terminal:** Repaint the prompt while typing into a suggestion (fc13a5f)
+
 ---
 
 ## [v2026.8.21.0](https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.8.21.0) - 2026-08-21
