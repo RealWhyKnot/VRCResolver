@@ -4,29 +4,6 @@ using VrcResolver.Shared;
 
 namespace VrcResolver;
 
-// Watches VRChat's output_log_*.txt for AVPro playback events. The mesh
-// dispatcher can't see whether VRChat's player actually played a URL it
-// returned — only the watchdog has that visibility (it tails the same
-// log VRChat writes). VrcLogMonitor restores the legacy feedback path:
-// observe failures + stalls, forward as `playback_feedback` mesh frames
-// so the server-side strategy quality scoring can demote whichever
-// strategy/config produced a URL AVPro couldn't actually load.
-//
-// Two failure shapes:
-//   load_failure — `[AVProVideo] Opening <url>` followed by
-//                  `[AVProVideo] Error: Loading failed` within 10 s.
-//                  This is the loud failure (AVPro tried, surfaced an
-//                  error). Correlated by URL + recency.
-//   silent_stall — Opening line followed by 12 s of NOTHING
-//                  (no error, no `Using playback path:` success marker,
-//                  no world-script `Now Playing:` / `Load Url:` line).
-//                  Captures worlds that don't surface their failures via
-//                  AVPro (e.g. a world that catches the exception in its
-//                  Udon graph and drops it on the floor).
-//
-// Cancellations: a new Opening supersedes any pending stall watchdog.
-// A `Loading failed` (whether correlated or not) cancels the stall
-// watchdog so we don't double-report. A success marker cancels too.
 [SupportedOSPlatform("windows")]
 internal sealed partial class VrcLogMonitor : IDisposable
 {
@@ -50,9 +27,6 @@ internal sealed partial class VrcLogMonitor : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private Task? _loop;
 
-    // Most recent Opening line we've seen. The Loading-failed line that
-    // arrives within the correlation window is matched to this; older
-    // Openings are cleared when consumed or superseded.
     private string? _lastOpeningUrl;
     private DateTime _lastOpeningAt;
     private string? _activePlaybackUrl;
@@ -75,10 +49,6 @@ internal sealed partial class VrcLogMonitor : IDisposable
         _health = health;
     }
 
-    // A playback observation feeds the health gate only when the URL is one
-    // we served: a first-party playback proxy shape, or a resolved URL the
-    // cache can map back to its source. og-produced URLs match neither, so
-    // og successes can never close the gate and og failures never open it.
     private bool IsAttributedToUs(string canonicalUrl)
     {
         if (string.IsNullOrEmpty(canonicalUrl)) return false;
@@ -105,7 +75,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
         CancelPlayingFeedbackLoop();
         if (_loop != null)
         {
-            try { await _loop.ConfigureAwait(false); } catch { /* ignore */ }
+            try { await _loop.ConfigureAwait(false); } catch { }
         }
     }
 
@@ -123,10 +93,6 @@ internal sealed partial class VrcLogMonitor : IDisposable
             {
                 if (!Directory.Exists(vrcDir))
                 {
-                    // VRChat not installed yet, or installed somewhere
-                    // non-default. Re-poll periodically — VrcPathLocator
-                    // already handles the path resolution side; we just
-                    // wait for the dir to materialize.
                     try { await Task.Delay(5000, ct).ConfigureAwait(false); } catch { return; }
                     continue;
                 }
@@ -139,7 +105,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
                         .OrderByDescending(f => f.LastWriteTime)
                         .FirstOrDefault();
                 }
-                catch { /* dir disappeared mid-enumeration; retry */ }
+                catch { }
 
                 if (latest != null)
                 {
@@ -160,13 +126,10 @@ internal sealed partial class VrcLogMonitor : IDisposable
                             lastSize = fs.Position;
                             ProcessNewContent(newContent);
                         }
-                        catch (IOException) { /* file rotated / locked; retry next tick */ }
+                        catch (IOException) { }
                     }
                     else if (latest.Length < lastSize)
                     {
-                        // Log file rotated mid-run — VRChat truncated or
-                        // replaced the file. Reset offset and re-read from
-                        // the new start on next tick.
                         lastSize = 0;
                     }
                 }
@@ -216,7 +179,6 @@ internal sealed partial class VrcLogMonitor : IDisposable
                 string activeUrl = _activePlaybackUrl!;
                 DateTime activeAt = _activePlaybackAt == default ? DateTime.UtcNow : _activePlaybackAt;
                 RememberDeliveredHeight(activeUrl, observedHeight);
-                // Frames are flowing -- the strongest playing signal we get.
                 ConfirmPlayback(activeUrl);
                 StartPlayingFeedbackLoop(activeUrl, activeAt);
                 _ = _mesh.SendPlaybackFeedbackAsync(
@@ -235,17 +197,13 @@ internal sealed partial class VrcLogMonitor : IDisposable
                     string observed = _lastOpeningUrl;
                     string failed = CanonicalPlaybackObservationUrl(observed);
                     int ms = (int)(DateTime.UtcNow - _lastOpeningAt).TotalMilliseconds;
-                    _lastOpeningUrl = null; // consume
+                    _lastOpeningUrl = null;
                     int? deliveredHeight = TryGetDeliveredHeight(failed, out int height) ? height : null;
                     _ = _mesh.SendPlaybackFeedbackAsync(
                         failed,
                         WireConstants.PlaybackFeedbackLoadFailure,
                         ms,
                         deliveredHeight);
-                    // v3.2: AVPro hard-failed on a URL we just served.
-                    // If it was cached, the cached entry is poison --
-                    // evict so the next resolve goes back to mesh and
-                    // gets a fresh URL.
                     var fallback = MarkPlaybackFailure(failed);
 
                     ConsoleUx.Warn(LogComponent.VrcLog, "load_failure ms=" + ms + " url=" + LogUtil.RedactUrl(failed)
@@ -259,16 +217,10 @@ internal sealed partial class VrcLogMonitor : IDisposable
                 continue;
             }
 
-            // Success markers — any one of these proves AVPro accepted
-            // the URL and started loading it; the stall watchdog should
-            // be cancelled to avoid a false-positive silent_stall report.
             if (line.Contains("[AVProVideo] Using playback path:")
                 || line.Contains("Now Playing:")
                 || line.Contains("Load Url:"))
             {
-                // Only the AVPro line is proof OUR url was accepted; the
-                // world-script markers can announce a different video and
-                // stay stall-cancellers only.
                 if (line.Contains("[AVProVideo] Using playback path:")
                     && _activePlaybackUrl is string acceptedUrl)
                 {
@@ -291,19 +243,12 @@ internal sealed partial class VrcLogMonitor : IDisposable
             _stallUrl = url;
             _stallAt = now;
         }
-        try { oldCts?.Cancel(); oldCts?.Dispose(); } catch { /* superseded */ }
+        try { oldCts?.Cancel(); oldCts?.Dispose(); } catch { }
 
         _ = Task.Run(async () =>
         {
             try { await Task.Delay(SilentStallWindow, newCts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
-            // Race: a concurrent CancelStallWatchdog / supersession may
-            // Cancel + Dispose this CTS while Task.Delay's awaiter is
-            // mid-flight. Cancel fires the registered callback synchronously
-            // and queues the OCE continuation, but Dispose runs immediately
-            // after — by the time the continuation pulls newCts.Token it
-            // can hit a disposed source and throw ObjectDisposedException
-            // instead of OCE. Treat both as "task superseded, exit quietly".
             catch (ObjectDisposedException) { return; }
 
             string? activeUrl;
@@ -316,7 +261,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
                 _stallCts = null;
                 _stallUrl = null;
             }
-            try { newCts.Dispose(); } catch { /* ignore */ }
+            try { newCts.Dispose(); } catch { }
             if (activeUrl == null) return;
 
             int ms = (int)(DateTime.UtcNow - activeAt).TotalMilliseconds;
@@ -330,11 +275,6 @@ internal sealed partial class VrcLogMonitor : IDisposable
             CancelPlayingFeedbackLoop();
             _activePlaybackUrl = null;
             _activePlaybackAt = default;
-            // v3.2: AVPro fell silent on a URL we just served. If it was
-            // cached, the cached entry is poison -- evict so the next
-            // resolve goes back to mesh and gets a fresh URL. Arm the same
-            // transient og hint as load_failure so black-screen stalls get
-            // one native retry instead of looping through the same mesh URL.
             var fallback = MarkPlaybackFailure(reportedUrl);
             ConsoleUx.Warn(LogComponent.VrcLog, "silent_stall ms=" + ms + " url=" + LogUtil.RedactUrl(reportedUrl)
                 + (fallback.Evicted > 0 ? " evicted=" + fallback.Evicted : "")
@@ -348,10 +288,6 @@ internal sealed partial class VrcLogMonitor : IDisposable
     {
         bool ogHintArmed = false;
 
-        // Attribution and reverse lookup must both happen before eviction.
-        // EvictByUrl removes the cached resolved-url entry that ties this
-        // playback to us and recovers the original source URL for the
-        // wrapper's next invocation.
         bool attributed = IsAttributedToUs(reportedUrl);
         if (_ogFallbackHint != null
             && _cache != null
@@ -548,7 +484,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
             _stallCts = null;
             _stallUrl = null;
         }
-        try { cts?.Cancel(); cts?.Dispose(); } catch { /* ignore */ }
+        try { cts?.Cancel(); cts?.Dispose(); } catch { }
     }
 
     public void Dispose()

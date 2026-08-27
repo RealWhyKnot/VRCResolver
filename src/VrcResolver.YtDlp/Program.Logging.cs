@@ -6,9 +6,6 @@ namespace VrcResolver.YtDlp;
 
 internal static partial class Program
 {
-    // Truncate + escape a free-form string for inclusion in a single log
-    // line. Newlines are converted to literal "\n" so a multi-line yt-dlp
-    // stderr block doesn't fragment the log.
     private static string Preview(string s, int maxLen)
     {
         string trimmed = s.Length > maxLen ? s[..maxLen] + "...(truncated)" : s;
@@ -25,10 +22,6 @@ internal static partial class Program
         sb.Append(" url-host=").Append(string.IsNullOrEmpty(url) ? "<none>" : LogUtil.BareHost(url));
         sb.Append(" player=").Append(player);
         sb.Append(" -f=").Append(formatArg ?? "<none>");
-        // Args summary: drop any arg that's an absolute URL (host already
-        // logged separately) and any arg that looks like a multi-K-char
-        // host-allowlist (--exp-allow / --wild-allow) — those run into
-        // thousands of chars and aren't useful in the per-line log.
         sb.Append(" flags=[");
         bool first = true;
         for (int i = 0; i < args.Length; i++)
@@ -54,24 +47,6 @@ internal static partial class Program
         Log(sb.ToString());
     }
 
-    // Best-effort single-file diagnostic. Log lands at
-    //   %LOCALAPPDATA%Low\vrcresolver\logs\yt-dlp-wrapper.log
-    // — must live under LocalLow because the wrapper runs at Low integrity
-    // (inherited from VRChat's Tools dir which sits in LocalLow). A
-    // Low-integrity process cannot write to Medium-integrity dirs, so the
-    // earlier %LOCALAPPDATA% path silently failed for every VRChat-invoked
-    // call. Watchdog reads from this same LocalLow path so log surfaces
-    // are unified across components. Failures are still swallowed — a
-    // yt-dlp invocation that can't log shouldn't break the resolve pipeline.
-    //
-    // Single FileStream cached for the lifetime of the invocation (~10-15
-    // Log calls per resolve). Earlier impl re-opened the file on every call
-    // via File.AppendAllText + Directory.CreateDirectory, costing 5-50 ms
-    // of avoidable I/O per resolve. Lazy-init on first call so a wrapper
-    // run that never logs (impossible today, but cheap to handle) doesn't
-    // touch disk. CloseLog() is invoked from Main's finally so the stream
-    // flushes before process exit; an exit that bypasses the finally still
-    // produces a useful tail because we Flush after every WriteLine.
     private static readonly object s_logLock = new();
     private static StreamWriter? s_logWriter;
     private static bool s_logInitFailed;
@@ -89,7 +64,7 @@ internal static partial class Program
                 w.Flush();
             }
         }
-        catch { /* best-effort */ }
+        catch { }
     }
 
     private static StreamWriter? OpenLogWriter()
@@ -106,9 +81,6 @@ internal static partial class Program
         }
         catch
         {
-            // Disk full / permissions / unexpected layout. Set the failure
-            // flag so the next Log() doesn't keep retrying syscalls each
-            // call — that's the exact loss the refactor is meant to avoid.
             s_logInitFailed = true;
             return null;
         }
@@ -118,8 +90,8 @@ internal static partial class Program
     {
         lock (s_logLock)
         {
-            try { s_logWriter?.Flush(); } catch { /* best-effort */ }
-            try { s_logWriter?.Dispose(); } catch { /* best-effort */ }
+            try { s_logWriter?.Flush(); } catch { }
+            try { s_logWriter?.Dispose(); } catch { }
             s_logWriter = null;
         }
     }

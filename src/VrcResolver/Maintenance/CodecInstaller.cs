@@ -6,26 +6,6 @@ using VrcResolver.Shared;
 
 namespace VrcResolver;
 
-// Silent video-codec auto-install. AVPro can't decode AV1 / HEVC / VP9
-// without a matching Media Foundation decoder; on a fresh Windows or a
-// locked-down corporate image those are absent and AVPro fails with a
-// generic decode error.
-//
-// Behaviour:
-//   - Fire-and-forget Task at boot (StartBackgroundCheck returns immediately).
-//   - Per codec: a Media Foundation decoder probe FIRST (covers store, OEM,
-//     and hardware installs), then an AppX package probe, then winget against
-//     an ordered list of store ids -- HEVC's primary listing is the paid one,
-//     which winget cannot install without an existing entitlement, so the
-//     free device-manufacturer listing is tried second.
-//   - winget exit 0 alone never marks a codec installed; only a subsequent
-//     decoder/package probe hit does. On confirmed install the capability
-//     probe refreshes so the codec becomes claimable this session.
-//   - Failures are classified from winget's output; transient classes retry
-//     after a day, permanent ones (winget missing, purchase required) after a
-//     week. State cached at %LOCALAPPDATA%Low\vrcresolver\codec-state.json.
-//   - Failures are silenced to one console line per codec, with the class,
-//     so the operator sees what happened without a stack trace dump.
 [SupportedOSPlatform("windows")]
 internal static class CodecInstaller
 {
@@ -88,18 +68,12 @@ internal static class CodecInstaller
         }
         catch (Exception ex)
         {
-            // Silenced to a single line. Codec install is non-critical;
-            // a failure here must never propagate to the user as a stack.
             ConsoleUx.Warn(LogComponent.Codec, "background check failed: " + ex.Message);
         }
     }
 
-    // Per-codec outcome handed to the report callback. Detail is either the
-    // verification source ("mf", "appx", "winget+mf", ...) or the failure class.
     internal sealed record CodecOutcome(Codec Codec, bool Installed, string Detail);
 
-    // Failure classes. Transient ones retry after TransientRetryWindow;
-    // everything else waits out PermanentRetryWindow.
     internal const string FailWingetMissing = "winget_missing";
     internal const string FailNotEntitled = "not_entitled";
     internal const string FailNotFound = "not_found";
@@ -113,9 +87,6 @@ internal static class CodecInstaller
 
     internal sealed record WingetResult(bool Launched, bool TimedOut, int ExitCode, string Output);
 
-    // Map a winget run to a failure class. winget's texts vary by version, so
-    // the token match is deliberately loose and everything unmatched is
-    // "unknown" (transient -- retried sooner precisely because we can't tell).
     internal static string ClassifyWingetFailure(WingetResult result)
     {
         if (!result.Launched) return FailWingetMissing;
@@ -129,9 +100,6 @@ internal static class CodecInstaller
         return FailUnknown;
     }
 
-    // The decision engine, with every side effect injected so state
-    // transitions and classification routing are unit-testable. Returns true
-    // when the state was modified.
     internal sealed class Core
     {
         private readonly Func<string, bool> _mfProbe;
@@ -175,7 +143,6 @@ internal static class CodecInstaller
 
         private async Task<CodecOutcome> ResolveOneAsync(Codec codec)
         {
-            // A present decoder ends it, whatever channel installed it.
             if (_mfProbe(codec.ProbeCodec))
                 return new CodecOutcome(codec, Installed: true, "mf");
             if (await _appxProbe(codec.PackageName).ConfigureAwait(false))
@@ -187,7 +154,6 @@ internal static class CodecInstaller
                 var result = await _wingetInstall(storeId).ConfigureAwait(false);
                 if (result.Launched && !result.TimedOut && result.ExitCode == 0)
                 {
-                    // Verify -- winget exit 0 is a claim, not proof.
                     if (_mfProbe(codec.ProbeCodec))
                         return new CodecOutcome(codec, Installed: true, "winget+mf");
                     if (await _appxProbe(codec.PackageName).ConfigureAwait(false))
@@ -196,7 +162,6 @@ internal static class CodecInstaller
                     continue;
                 }
                 lastClass = ClassifyWingetFailure(result);
-                // winget itself missing fails every subsequent id identically.
                 if (lastClass == FailWingetMissing) break;
             }
             return new CodecOutcome(codec, Installed: false, lastClass);
@@ -271,7 +236,7 @@ internal static class CodecInstaller
             try { await proc.WaitForExitAsync(cts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException)
             {
-                try { proc.Kill(true); } catch { /* best-effort */ }
+                try { proc.Kill(true); } catch { }
                 return new WingetResult(true, true, -1, "");
             }
             string output = (await stdout.ConfigureAwait(false)) + "\n" + (await stderr.ConfigureAwait(false));
@@ -282,7 +247,6 @@ internal static class CodecInstaller
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            // winget not installed (older Windows, stripped image).
             return new WingetResult(false, false, -1, "");
         }
         catch (Exception ex)
@@ -320,13 +284,9 @@ internal static class CodecInstaller
             File.WriteAllText(tmp, JsonSerializer.Serialize(state, MeshJsonContext.Default.CodecState));
             File.Move(tmp, path, overwrite: true);
         }
-        catch { /* best-effort */ }
+        catch { }
     }
 
-    // AOT: referenced from MeshJsonContext via [JsonSerializable]. The JSON
-    // field names are the on-disk state contract -- package_family_name has
-    // always held the package NAME (what Get-AppxPackage -Name matches), so
-    // the property is named for what it is while the wire name stays put.
     internal sealed class CodecState
     {
         [JsonPropertyName("codecs")]

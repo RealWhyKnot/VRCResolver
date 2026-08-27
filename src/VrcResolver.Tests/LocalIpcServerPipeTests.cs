@@ -12,11 +12,6 @@ using Xunit;
 
 namespace VrcResolver.Tests;
 
-// End-to-end pipe-level coverage of LocalIpcServer's pre-mesh short-circuits:
-// every path here answers BEFORE MeshClient.ResolveAsync would run, so a real
-// never-started MeshClient (passive ctor) is safe to construct. Unique pipe
-// names per test keep parallel-safe isolation and stay clear of the global
-// names a live watchdog might hold.
 [SupportedOSPlatform("windows")]
 public class LocalIpcServerPipeTests
 {

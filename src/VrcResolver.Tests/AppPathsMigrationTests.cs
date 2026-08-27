@@ -3,8 +3,6 @@ using Xunit;
 
 namespace VrcResolver.Tests;
 
-// Rename-transition state migration. Exercises the internal seams with
-// temp dirs so no test touches the real LocalLow/ProgramData roots.
 public class AppPathsMigrationTests : IDisposable
 {
     private readonly string _root;
@@ -17,7 +15,7 @@ public class AppPathsMigrationTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(_root, recursive: true); } catch { }
     }
 
     private string Dir(string name)
@@ -45,8 +43,6 @@ public class AppPathsMigrationTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(newRoot, "logs")));
         Assert.True(File.Exists(Path.Combine(newRoot, AppPaths.RenameMigrationMarker)));
 
-        // Source stays: an un-repatched wrapper may still read staged files
-        // from the old root until the Tools swap happens.
         Assert.True(File.Exists(Path.Combine(legacy, "settings.json")));
         Assert.True(File.Exists(Path.Combine(legacy, "logs", "watchdog-1.log")));
     }
@@ -71,7 +67,7 @@ public class AppPathsMigrationTests : IDisposable
         Assert.False(AppPaths.RenamedRootAlreadyPopulated(empty));
 
         string populated = Dir("populated");
-        Assert.False(AppPaths.RenamedRootAlreadyPopulated(populated)); // exists but empty
+        Assert.False(AppPaths.RenamedRootAlreadyPopulated(populated));
         File.WriteAllText(Path.Combine(populated, "anything.txt"), "x");
         Assert.True(AppPaths.RenamedRootAlreadyPopulated(populated));
 
@@ -90,8 +86,6 @@ public class AppPathsMigrationTests : IDisposable
         AppPaths.CopyLegacyRoot(legacy, newRoot);
         Assert.True(AppPaths.RenamedRootAlreadyPopulated(newRoot));
 
-        // A second migration attempt is skipped by the gate; even if run
-        // directly it must not clobber newer state.
         File.WriteAllText(Path.Combine(newRoot, "client_id.txt"), "id-2");
         AppPaths.CopyLegacyRoot(legacy, newRoot);
         Assert.Equal("id-2", File.ReadAllText(Path.Combine(newRoot, "client_id.txt")));
@@ -108,7 +102,6 @@ public class AppPathsMigrationTests : IDisposable
         Assert.Equal("51234", File.ReadAllText(Path.Combine(newRoot, "localhost-youtube-relay-ports.txt")));
         Assert.True(File.Exists(Path.Combine(legacy, "localhost-youtube-relay-ports.txt")));
 
-        // Non-empty destination means a later run is a no-op.
         File.WriteAllText(Path.Combine(legacy, "extra.txt"), "late");
         AppPaths.MigrateProgramData(legacy, newRoot);
         Assert.False(File.Exists(Path.Combine(newRoot, "extra.txt")));

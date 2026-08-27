@@ -40,16 +40,11 @@ public class LocalRelayServerTests
                 + LocalRelayTargetResolver.EncodeTargetParam(
                     "https://proxy.whyknot.dev/api/proxy/manifest.m3u8?q=abc");
 
-            // A browser fetch carries Origin; the relay must refuse before
-            // any upstream work even though the target itself is allowed.
             using var browserReq = new HttpRequestMessage(HttpMethod.Get, playUrl);
             browserReq.Headers.TryAddWithoutValidation("Origin", "http://example.com");
             using var browserResp = await http.SendAsync(browserReq);
             Assert.Equal(HttpStatusCode.Forbidden, browserResp.StatusCode);
 
-            // Without Origin the pipeline is reachable (404 = path gate,
-            // proving the listener is alive and the reject above was the
-            // origin check, not a dead server).
             using var mediaResp = await http.GetAsync("http://127.0.0.1:" + port + "/not-play");
             Assert.Equal(HttpStatusCode.NotFound, mediaResp.StatusCode);
         }
@@ -206,8 +201,6 @@ public class LocalRelayServerTests
     [InlineData("https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=abc", true)]
     [InlineData("https://vrcresolver.com/api/proxy/lazy-hls/wk_abc/index.m3u8", true)]
     [InlineData("https://us1.vrcresolver.com/api/popcorn/proxy/manifest.m3u8?clientId=c&index=1", true)]
-    // The server still emits playback URLs under the pre-rename domain for
-    // wire compatibility; the relay must keep accepting that family.
     [InlineData("https://node1.whyknot.dev/api/proxy/manifest.m3u8?q=abc", true)]
     [InlineData("https://whyknot.dev/api/proxy/lazy-hls/wk_abc/index.m3u8", true)]
     [InlineData("https://us1.vrcresolver.com/api/restream/shared-status", false)]
@@ -409,27 +402,16 @@ public class LocalRelayServerTests
     }
 
     [Theory]
-    // Plain m3u8 / mpd extensions always classify as manifests.
     [InlineData("/play/a/manifest.m3u8", "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=abc", "text/plain", true)]
     [InlineData("/play/a/index.m3u8", "https://us1.vrcresolver.com/api/proxy/index.m3u8", "application/vnd.apple.mpegurl", true)]
     [InlineData("/play/a/manifest.mpd", "https://us1.vrcresolver.com/api/proxy/manifest.mpd", "application/dash+xml", true)]
-    // Query strings don't break the extension probe.
     [InlineData("/play/a/manifest.m3u8?token=abc", "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?token=abc", "application/vnd.apple.mpegurl", true)]
-    // Local path has a non-manifest extension; targetUrl carries .m3u8 -- second branch catches it.
     [InlineData("/play/a/manifest.bin", "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=abc", "application/octet-stream", true)]
-    // Bare "manifest" (no extension) is treated as a manifest -- some providers ship that.
     [InlineData("/play/a/manifest", "https://us1.vrcresolver.com/api/proxy/manifest", "application/vnd.apple.mpegurl", true)]
-    // /manifest.mp4 was the 2026-05-22 YouTube load_failure bug: the
-    // relay's own progressive-MP4 URL pattern was treated as an HLS
-    // manifest, run through the line-by-line text rewriter, and shipped
-    // as Transfer-Encoding: chunked with no Content-Length, so WMF/NSPlayer
-    // disconnected on the first byte.
     [InlineData("/play/a/manifest.mp4", "https://us1.vrcresolver.com/api/proxy/manifest.mp4?q=abc", "video/mp4", false)]
     [InlineData("/play/a/MANIFEST.MP4", "https://us1.vrcresolver.com/api/proxy/manifest.mp4?q=abc", "video/mp4", false)]
-    // Segment URLs never qualify as manifests, regardless of "manifest" appearing in path.
     [InlineData("/play/a/seg.ts", "https://us1.vrcresolver.com/api/proxy/seg.ts?url=abc", "video/mp2t", false)]
     [InlineData("/play/a/manifest_archive/seg.ts", "https://us1.vrcresolver.com/api/proxy/seg.ts", "video/mp2t", false)]
-    // Content-type fallback: a .ts URL that's actually an m3u8 (Tubi pattern) still classifies.
     [InlineData("/play/a/foo.ts", "https://example.test/playlist.ts", "application/vnd.apple.mpegurl", true)]
     public void ManifestLocalizer_DetectsOnlyManifestShapes(
         string localPath,

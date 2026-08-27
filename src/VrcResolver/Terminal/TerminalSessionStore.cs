@@ -134,7 +134,6 @@ internal sealed class TerminalSessionStore : IDisposable
         }
         catch
         {
-            // History is a convenience. Never let it affect watchdog behavior.
         }
     }
 
@@ -153,7 +152,6 @@ internal sealed class TerminalSessionStore : IDisposable
         }
         catch
         {
-            // Best-effort compaction only.
         }
     }
 
@@ -167,7 +165,6 @@ internal sealed class TerminalSessionStore : IDisposable
         }
         catch
         {
-            // Session persistence must never break the watchdog.
         }
     }
 

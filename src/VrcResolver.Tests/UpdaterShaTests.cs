@@ -1,15 +1,9 @@
 using System.Security.Cryptography;
 using Xunit;
-// Bare `Program` would resolve to VrcResolver.Program (the watchdog) because
-// our namespace is VrcResolver.Tests and C# searches parent namespaces first.
-// Alias disambiguates.
 using UpdaterProgram = VrcResolver.Updater.Program;
 
 namespace VrcResolver.Tests;
 
-// Updater checksum extraction + ComputeSha256 + tag-version parsing. These
-// are the gates between "tampered/corrupted zip" and "installed-on-user-
-// machine"; a regression here lets bad zips through.
 public class UpdaterShaTests
 {
     [Fact]
@@ -43,7 +37,7 @@ public class UpdaterShaTests
     public void Sha256Line_does_not_match_short_or_invalid_hex()
     {
         Assert.False(UpdaterProgram.Sha256Line.Match("SHA256: not-hex").Success);
-        Assert.False(UpdaterProgram.Sha256Line.Match("SHA256: a665a4592").Success);  // too short
+        Assert.False(UpdaterProgram.Sha256Line.Match("SHA256: a665a4592").Success);
         Assert.False(UpdaterProgram.Sha256Line.Match("MD5: a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3").Success);
     }
 
@@ -96,7 +90,6 @@ public class UpdaterShaTests
     [Fact]
     public void ComputeSha256_matches_known_vector()
     {
-        // SHA-256("hello\n") = 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
         string tempFile = Path.GetTempFileName();
         try
         {
@@ -114,8 +107,6 @@ public class UpdaterShaTests
     [Fact]
     public void ComputeSha256_round_trips_with_self()
     {
-        // Stronger guarantee: hash any zip's bytes, write to disk, hash
-        // again — same value. Pure self-consistency check.
         string tempFile = Path.GetTempFileName();
         try
         {
@@ -125,7 +116,6 @@ public class UpdaterShaTests
             string b = UpdaterProgram.ComputeSha256(tempFile);
             Assert.Equal(a, b);
 
-            // And it matches a fresh independent computation.
             using var sha = SHA256.Create();
             string expected = Convert.ToHexString(sha.ComputeHash(payload));
             Assert.Equal(expected, a);
@@ -139,9 +129,9 @@ public class UpdaterShaTests
     [Theory]
     [InlineData("v2026.5.4.0", 2026, 5, 4, 0)]
     [InlineData("2026.5.4.0", 2026, 5, 4, 0)]
-    [InlineData("v2026.5.4.0-1A2B", 2026, 5, 4, 0)]   // dev suffix stripped
-    [InlineData("v2026.5.4.7-DEAD", 2026, 5, 4, 7)]    // uppercase dev hex
-    [InlineData("v2026.5.4.7-1234", 2026, 5, 4, 7)]    // numeric dev
+    [InlineData("v2026.5.4.0-1A2B", 2026, 5, 4, 0)]
+    [InlineData("v2026.5.4.7-DEAD", 2026, 5, 4, 7)]
+    [InlineData("v2026.5.4.7-1234", 2026, 5, 4, 7)]
     public void ParseTagVersion_handles_release_and_dev_shapes(
         string tag, int major, int minor, int build, int rev)
     {

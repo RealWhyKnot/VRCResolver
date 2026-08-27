@@ -42,10 +42,7 @@ public sealed class ResolveRequestProfileTests
         Assert.Equal("best",
             ResolveRequestProfile.ExtractDashFValue(new[] { "--format", "best", "https://x" }));
         Assert.Null(ResolveRequestProfile.ExtractDashFValue(new[] { "https://x" }));
-        // Flag in last position has no value to take.
         Assert.Null(ResolveRequestProfile.ExtractDashFValue(new[] { "https://x", "-f" }));
-        // The `--format=<selector>` form is deliberately unhandled (VRChat
-        // uses the spaced form).
         Assert.Null(ResolveRequestProfile.ExtractDashFValue(new[] { "--format=best", "https://x" }));
     }
 }

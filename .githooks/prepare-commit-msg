@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Append the current build version to the commit subject.
 
 set -eu
 

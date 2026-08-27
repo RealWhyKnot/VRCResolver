@@ -15,9 +15,6 @@
   </compatibility>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
-      <!-- Force UTF-8 codepage so em-dashes and other non-ASCII characters
-           in Console.WriteLine messages render correctly on default conhost
-           instead of as '?'. Win10 1903+. -->
       <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
     </windowsSettings>
   </application>

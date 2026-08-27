@@ -6,12 +6,6 @@ using System.Threading;
 
 namespace VrcResolver.Shared;
 
-// Centralized formatting + colour for user-facing console lines.
-// All output routes through a single static lock so concurrent writers
-// (resolves, mesh reconnects, hosts ticks, etc.) cannot interleave their
-// colour-state changes mid-line. Falls back to plain text when stdout is
-// not a TTY (CI capture, Get-Content tail, etc.).
-
 public enum LogComponent
 {
     Mesh,
@@ -43,10 +37,6 @@ public static class ConsoleUx
     private static readonly object s_lock = new();
     private static IConsoleOverlay? s_overlay;
 
-    // Component palette. Most normal output stays grey/white so the
-    // watchdog reads like a calm terminal transcript. Colour is reserved
-    // for things the user should notice quickly: mesh/relay activity,
-    // warnings, errors, and resolve outcomes.
     private static ConsoleColor ColorFor(LogComponent c) => c switch
     {
         LogComponent.Mesh => ConsoleColor.DarkCyan,
@@ -118,9 +108,6 @@ public static class ConsoleUx
         WriteStamped(ConsoleColor.Yellow, $"{Bullet()} {Tag(c)}[warn] {body}");
     }
 
-    // Component-tagged error. Same shape as Warn but red. Use for paths that
-    // are "we cannot proceed but the process keeps running" (an [err] sub-tag
-    // in the existing convention). For terminal halts use Fatal instead.
     public static void Error(LogComponent c, string body)
     {
         WriteStamped(ConsoleColor.Red, $"{Bullet()} {Tag(c)}[err] {body}");
@@ -131,19 +118,6 @@ public static class ConsoleUx
         WriteStamped(ConsoleColor.Red, $"{Bullet()} [FATAL] {body}");
     }
 
-    // Per-resolve outcome line. Fixed-column layout so the operator can
-    // eyeball columns down a busy log without parsing. Status token at
-    // the front (OK/!!/XX/??) carries the colour; the same status word
-    // follows in plain text so an operator reading a scrub-stripped log
-    // file (no colour) still understands the outcome.
-    //
-    //   [HH:mm:ss] OK   resolved   youtube.com                  AVPro 1080p     2.5s
-    //   [HH:mm:ss] OK   cached     youtu.be                     AVPro 1080p     0.0s
-    //   [HH:mm:ss] !!   fallback   vimeo.com                    AVPro 720p      8.1s   anti_bot
-    //   [HH:mm:ss] XX   failed     wacom.b-cdn.net              AVPro 720p     12.3s   timeout
-    //
-    // The lh-yt routing marker, when present, replaces the leading two
-    // spaces after the host column so wider hosts still align downstream.
     private const int HostWidth = 28;
     private const int PlayerWidth = 14;
     private const int OutcomeWidth = 9;
@@ -198,9 +172,6 @@ public static class ConsoleUx
         WriteStamped(color, line);
     }
 
-    // Wrapper og-fallback notification line. Lives next to the resolve
-    // outcomes visually but is emitted by the wrapper out-of-band, not
-    // by the resolve dispatch.
     public static void WrapperFallback(string host, string reason, long elapsedMs)
     {
         string line = string.Format(
@@ -210,10 +181,6 @@ public static class ConsoleUx
         WriteStamped(ConsoleColor.Yellow, line);
     }
 
-    // Multi-line startup banner. Boxed for visual separation from the
-    // running log below; key-value paths in a two-column block under the
-    // box. Box uses ASCII '=' / '-' so it renders identically across
-    // every terminal, code page, and log-tail tool.
     public static void Banner(
         string version,
         string sha,
@@ -247,9 +214,6 @@ public static class ConsoleUx
         }
     }
 
-    // Visual phase divider for transitions inside a session (startup
-    // complete, mesh up, shutting down, etc.). Single horizontal rule
-    // with a short label inline.
     public static void PhaseDivider(string label)
     {
         const int width = 60;
@@ -266,9 +230,6 @@ public static class ConsoleUx
         if (s == null) s = "";
         if (s.Length > width)
         {
-            // Keep as much of the head as fits, two-char ellipsis so the
-            // operator sees the truncation. Width must be >= 4 for ".." to
-            // make sense; smaller widths just truncate.
             return width >= 4 ? s.Substring(0, width - 2) + ".." : s.Substring(0, width);
         }
         return s.PadRight(width);
@@ -303,12 +264,12 @@ public static class ConsoleUx
             try
             {
                 if (ShouldUseColor())
-                    try { Console.ForegroundColor = color; } catch { /* no-tty */ }
+                    try { Console.ForegroundColor = color; } catch { }
                 Console.WriteLine(text);
             }
             finally
             {
-                try { Console.ForegroundColor = prev; } catch { /* no-tty */ }
+                try { Console.ForegroundColor = prev; } catch { }
             }
             TryRenderOverlayLocked();
         }
@@ -326,7 +287,6 @@ public static class ConsoleUx
         catch { s_overlay = null; }
     }
 
-    // The one place NO_COLOR is read; TerminalCapabilities delegates here.
     public static bool UseColor()
     {
         if (Console.IsOutputRedirected) return false;
@@ -340,7 +300,6 @@ public static class ConsoleUx
         return ShouldUseUnicode() ? "•" : "*";
     }
 
-    // The one place ASCII_TERMINAL is read; TerminalCapabilities delegates here.
     public static bool UseUnicode()
     {
         if (Console.IsOutputRedirected) return false;

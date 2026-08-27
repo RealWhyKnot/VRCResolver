@@ -4,33 +4,12 @@ using VrcResolver.Shared;
 
 namespace VrcResolver.Uninstaller;
 
-// No flags. No prompt. Running this exe IS consent.
-//
-// 1. Close any running watchdog (only ones launched from THIS install
-//    dir — parallel installs in other dirs are left alone). Pre-rename
-//    process/exe names are matched too.
-// 2. Restore yt-dlp.exe from yt-dlp-og.exe in VRChat Tools (belt-and-
-//    suspenders: drop the bundled vanilla in if og went missing; warn if
-//    even the bundled fallback is absent so VRChat won't be left with our
-//    patched yt-dlp pointing at a soon-to-be-deleted install dir)
-// 3. Remove the hosts entry (UAC re-exec via vrcresolver.exe
-//    --remove-hosts-entry, but only if the entry is actually present —
-//    avoids a UAC prompt for users who never enabled public-instance mode)
-// 4. Remove the localhost.youtube.com HTTPS cert/bindings if present
-// 5. Wipe the state roots: the current LocalLow root, the pre-rename
-//    LocalLow root, the even-older %LOCALAPPDATA% tree, and both
-//    ProgramData dirs
-// 6. Schedule install-dir self-deletion via cmd.exe /c, capturing the
-//    rmdir output to %TEMP% so a stuck rmdir leaves a diagnostic trail
-//
-// Per-step start/ok/skipped breadcrumbs are emitted to the rolling log so
-// "uninstall left X behind" reports can be diagnosed without a repro.
 [SupportedOSPlatform("windows")]
 internal static class Program
 {
     private static int Main(string[] args)
     {
-        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { /* best-effort */ }
+        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
         AppPaths.MigrateFromLegacyProduct(Console.WriteLine);
         Logger.Install("uninstaller");
         CrashHandler.Install("uninstaller");
@@ -53,10 +32,6 @@ internal static class Program
         return errors == 0 ? 0 : 2;
     }
 
-    // Per-step wrapper: emits start/ok/error breadcrumbs to the log so the
-    // remote postmortem can see which step ran, in what order, and whether
-    // it skipped vs threw. Returns 1 on caught exception so the caller can
-    // accumulate an error count.
     private static int RunStep(string step, Action body)
     {
         Console.WriteLine("[uninstall] " + step + " start");
@@ -73,14 +48,6 @@ internal static class Program
         }
     }
 
-    // Only close watchdog processes that were launched from THIS install
-    // dir's watchdog exe (current or pre-rename name). A user with parallel
-    // installs (release + dev, or two VRChat profiles) would otherwise have
-    // the OTHER install's watchdog killed when uninstalling one — hard to
-    // diagnose, easy to avoid. MainModule.FileName lookup throws on
-    // processes the current user can't open (admin-elevated watchdog from a
-    // non-admin uninstall); we treat those as "not ours" rather than
-    // failing the step.
     private static void CloseRunningWatchdog(string installDir)
     {
         string[] ownExes =
@@ -97,7 +64,7 @@ internal static class Program
             {
                 string? procExe = null;
                 try { procExe = p.MainModule?.FileName; }
-                catch { /* probably elevated and we're not */ skipped++; continue; }
+                catch { skipped++; continue; }
                 if (procExe == null
                     || !ownExes.Any(own => string.Equals(Path.GetFullPath(procExe), own,
                         StringComparison.OrdinalIgnoreCase)))
@@ -111,7 +78,7 @@ internal static class Program
                     p.WaitForExit(5000);
                     closed++;
                 }
-                catch { /* best-effort */ }
+                catch { }
             }
         }
         Console.WriteLine("[uninstall] close-watchdog matched=" + closed + " skipped_other_installs=" + skipped);
@@ -127,9 +94,7 @@ internal static class Program
             return;
         }
 
-        // Sweep before AND after: clears any sidecars from prior unclean runs
-        // up front, and clears the .stale-<utc> we may produce ourselves below.
-        try { ToolsDirSweeper.Sweep(toolsDir); } catch { /* best-effort */ }
+        try { ToolsDirSweeper.Sweep(toolsDir); } catch { }
 
         string target = Path.Combine(toolsDir, "yt-dlp.exe");
         string backup = Path.Combine(toolsDir, "yt-dlp-og.exe");
@@ -138,10 +103,6 @@ internal static class Program
         {
             if (File.Exists(backup))
             {
-                // Atomic same-volume rename -- no window where yt-dlp.exe is
-                // missing while the move is in flight. Falls back to the
-                // move-aside-then-move pattern if the target is locked
-                // (VRChat / AV holding it).
                 try
                 {
                     File.Move(backup, target, overwrite: true);
@@ -149,7 +110,6 @@ internal static class Program
                 }
                 catch (IOException)
                 {
-                    /* target locked -- try move-aside path below */
                 }
 
                 try
@@ -168,11 +128,6 @@ internal static class Program
                 }
                 return;
             }
-            // Backup missing. If yt-dlp.exe exists in VRChat's Tools dir
-            // it's almost certainly OUR wrapper -- pointing at an install
-            // dir we're about to delete. Delete the wrapper so VRChat
-            // re-downloads its yt-dlp on next session; safer than leaving
-            // a broken wrapper that exec's into nothing.
             if (File.Exists(target))
             {
                 try
@@ -193,10 +148,7 @@ internal static class Program
         }
         finally
         {
-            // Final pass — picks up the .stale-<utc> from the locked-target
-            // branch (and any .new-<short> from a partial run), so Tools/
-            // is left containing only yt-dlp.exe.
-            try { ToolsDirSweeper.Sweep(toolsDir); } catch { /* best-effort */ }
+            try { ToolsDirSweeper.Sweep(toolsDir); } catch { }
         }
     }
 
@@ -207,10 +159,6 @@ internal static class Program
             Console.WriteLine("[uninstall] remove-hosts skipped: watchdog exe missing (can't re-exec elevated)");
             return;
         }
-        // Skip the UAC prompt entirely if no entry is present — users who
-        // never enabled public-instance mode shouldn't see a UAC dialog
-        // for a no-op write. The hosts file is world-readable so we can
-        // check from this unelevated process.
         if (!HostsFileContainsBypassEntry())
         {
             Console.WriteLine("[uninstall] remove-hosts skipped: entry already absent");
@@ -264,12 +212,6 @@ internal static class Program
         }
     }
 
-    // Local read-only check that mirrors HostsManager.IsBypassActive (we
-    // can't reference the watchdog assembly's internal class from here).
-    // Match: a non-comment line containing both "127.0.0.1" and the marker
-    // host. Best-effort — failures (file missing, locked) return false so
-    // the caller falls through to the UAC re-exec which has its own
-    // error handling.
     private const string BypassMarkerHost = "localhost.youtube.com";
     private static bool HostsFileContainsBypassEntry()
     {
@@ -289,21 +231,10 @@ internal static class Program
                 if (t.Contains("127.0.0.1") && t.Contains(BypassMarkerHost)) return true;
             }
         }
-        catch { /* best-effort */ }
+        catch { }
         return false;
     }
 
-    // Wipe every state root this product has ever used: the current
-    // LocalLow root, the pre-rename LocalLow root (left in place by the
-    // rename migration for the wrapper transition window), the even-older
-    // %LOCALAPPDATA% tree, and both ProgramData dirs (TLS ports file;
-    // best-effort — files written by the elevated bootstrap may need the
-    // elevated remove-relay-tls step, which already ran).
-    //
-    // Closes the open log writer first so the BaseStream's FileShare.Read
-    // handle doesn't block Directory.Delete on the logs subdir. After
-    // close, Tee() is a no-op — subsequent Console.WriteLine still reaches
-    // the underlying console writer for the user's "uninstalled" banner.
     private static void WipeState()
     {
         Logger.Close();
@@ -335,20 +266,9 @@ internal static class Program
 
     private static void ScheduleInstallDirDelete(string installDir)
     {
-        // Defensive: refuse to interpolate a path containing a `"` character.
-        // AppContext.BaseDirectory cannot reach this state on Windows (file
-        // APIs reject quotes in path segments), but bail loudly rather than
-        // emitting malformed cmd that could be mistakenly parsed.
         if (installDir.Contains('"'))
             throw new InvalidOperationException("install dir contains a quote character: " + installDir);
 
-        // Spawn detached cmd.exe that waits, then rmdir's the install dir.
-        // The uninstaller exits before the wait elapses so its own exe is
-        // no longer locked. 3-second wait is conservative — earlier 1s wait
-        // raced against AV scanners holding the exe handle on slow disks.
-        // Capture rmdir output to %TEMP% so a stuck rmdir leaves a
-        // diagnostic trail (otherwise the user sees "uninstalled" but the
-        // dir survives, with no clue why).
         string log = Path.Combine(Path.GetTempPath(),
             "vrcresolver-uninstall-rmdir-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss") + ".log");
         string cmd = $"/c (ping 127.0.0.1 -n 4 > nul) & (rmdir /s /q \"{installDir}\") > \"{log}\" 2>&1";

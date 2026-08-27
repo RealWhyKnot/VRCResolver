@@ -35,9 +35,6 @@ public sealed class HighQualityRequestTests
         Assert.True(ResolveRequestProfile.ApplyHighQuality(req, enabled: true));
 
         Assert.Equal(WireConstants.HighQualityMaxHeight, req.MaxHeight);
-        // The selector must go, not just the cap: the server prepends it ahead of its own
-        // chain, so a surviving height<=1080 clause would win and the raised cap would be
-        // silently inert.
         Assert.Null(req.VrchatFormatArg);
         Assert.True(req.PreferHighest);
     }

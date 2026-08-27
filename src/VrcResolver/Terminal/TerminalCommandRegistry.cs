@@ -2,7 +2,6 @@ namespace VrcResolver;
 
 internal sealed class TerminalCommandRegistry
 {
-    // A verb further than this from every known command is a typo worth no guess at all.
     private const int MaxSuggestionScore = 3;
 
     private readonly Dictionary<string, TerminalCommand> _commands = new(StringComparer.OrdinalIgnoreCase);
@@ -185,9 +184,6 @@ internal sealed class TerminalCommandRegistry
         return command.Completer?.Invoke(slash, tokens, endsWithSpace) ?? TerminalCompletion.Empty;
     }
 
-    // The dimmed remainder shown after the caret as the user types. Offered only when the
-    // completion is unambiguous: a ghost that picks between several commands reads as a
-    // decision the terminal has already made.
     public string Suggest(string input)
     {
         input ??= "";
@@ -204,9 +200,6 @@ internal sealed class TerminalCommandRegistry
             : "";
     }
 
-    // Ranked nearest matches for a verb that matched nothing. Prefix and subsequence hits
-    // rank above edit distance, so a truncation and a transposition both land on the
-    // command the user meant.
     public IReadOnlyList<TerminalCompletionItem> NearestCommands(string verb, int max = 3)
     {
         verb = TerminalCommandLine.NormalizeVerb(verb ?? "");
@@ -432,8 +425,6 @@ internal sealed class TerminalCommand
     public string Description { get; }
     public IReadOnlyList<string> Aliases { get; }
 
-    // Set once at registration. Null means the command takes no completable arguments, which
-    // is the honest answer for most of them.
     public TerminalArgumentCompleter? Completer { get; set; }
 
     public Task ExecuteAsync(TerminalCommandContext context, string arguments, CancellationToken ct)

@@ -45,8 +45,6 @@ public class ServerEndpointsTests
         Assert.Equal(
             "wss://us1.vrcresolver.com/mesh",
             ServerEndpoints.MeshWebSocketUrlForHost("us1.vrcresolver.com").ToString());
-        // Discovery may still hand back a node under the pre-rename server
-        // domain; the mesh URL builder is host-agnostic.
         Assert.Equal(
             "wss://node1.whyknot.dev/mesh",
             ServerEndpoints.MeshWebSocketUrlForHost("node1.whyknot.dev").ToString());

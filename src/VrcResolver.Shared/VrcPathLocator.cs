@@ -2,10 +2,6 @@ using System.Runtime.Versioning;
 
 namespace VrcResolver.Shared;
 
-// Locates VRChat's Tools directory (where its bundled yt-dlp.exe lives and where
-// PatchManager preserves the vanilla copy as yt-dlp-og.exe). Shared so both the
-// watchdog (which de-bundles + patches) and the yt-dlp wrapper (which falls back
-// to the vanilla binary when the mesh is unreachable) resolve the same path.
 [SupportedOSPlatform("windows")]
 public static class VrcPathLocator
 {

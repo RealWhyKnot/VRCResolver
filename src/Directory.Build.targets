@@ -6,20 +6,6 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <PublishReadyToRun>true</PublishReadyToRun>
 
-    <!-- Size knobs that are safe for every Exe in this solution
-         regardless of AOT/single-file/regular-publish profile.
-
-         UseSizeOptimizedLinq (.NET 10 new): drops throughput-optimized LINQ
-           paths in favour of smaller code. Default-on under PublishAot;
-           explicit setting also catches the watchdog's regular publish.
-         DebuggerSupport=false: drops runtime metadata used by the managed
-           debugger. Release builds shouldn't need an attached debugger;
-           crash logs still carry exception type + message via Logger /
-           CrashHandler. StackTraceSupport stays enabled so ex.StackTrace
-           still resolves on the watchdog/updater diagnostic paths.
-         DebugType=none: no .pdb for Release publishes (build.ps1 also
-           sweeps any leftover .pdb files post-publish, but cheaper to
-           never produce them). -->
     <UseSizeOptimizedLinq>true</UseSizeOptimizedLinq>
   </PropertyGroup>
 

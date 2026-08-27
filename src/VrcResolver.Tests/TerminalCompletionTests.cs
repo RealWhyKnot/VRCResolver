@@ -20,8 +20,6 @@ public sealed class TerminalCompletionTests
     [Fact]
     public void Suggest_IsEmptyWhenSeveralCommandsMatch()
     {
-        // "s" reaches both settings and status; guessing between them would read as a
-        // decision the terminal had already made.
         Assert.Equal("", Registry().Suggest("s"));
     }
 
@@ -88,8 +86,6 @@ public sealed class TerminalCompletionTests
     [Fact]
     public void CommandsWithoutACompleterOfferNothing()
     {
-        // clear takes no arguments; the hook exists so this is an honest empty rather than a
-        // hardcoded special case for settings.
         Assert.Empty(Registry().Complete("clear ").Suggestions);
         Assert.Equal("", Registry().Complete("clear ").Replacement);
     }

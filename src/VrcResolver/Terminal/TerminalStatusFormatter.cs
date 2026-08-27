@@ -109,9 +109,6 @@ internal static class TerminalStatusFormatter
         return narrow;
     }
 
-    // Where the hardware caret belongs on the rendered line. The overlay repaints the whole
-    // line every frame, so without this the caret always sits after the last character and
-    // mid-line editing would happen somewhere the user cannot see.
     private static int CaretColumn(int inputStartColumn, string input, int cursor)
     {
         if (cursor < 0) return -1;

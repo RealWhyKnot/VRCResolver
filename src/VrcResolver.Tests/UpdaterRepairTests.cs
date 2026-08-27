@@ -15,7 +15,7 @@ public class UpdaterRepairTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_root, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(_root, recursive: true); } catch { }
     }
 
     [Fact]
@@ -32,8 +32,6 @@ public class UpdaterRepairTests : IDisposable
         Assert.Empty(Directory.GetFiles(_root, "*.old-*"));
     }
 
-    // The pre-rename launcher is no longer shipped, so a stale one on disk is
-    // left alone rather than swapped over.
     [Fact]
     public void ApplyIfPresent_ignores_pre_rename_names()
     {

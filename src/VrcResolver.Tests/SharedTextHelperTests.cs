@@ -3,14 +3,12 @@ using Xunit;
 
 namespace VrcResolver.Tests;
 
-// LogUtil.BareHost and Base64UrlText replaced per-project private copies; these
-// pin the unified behavior (www-strip, padded-and-unpadded decode tolerance).
 public class SharedTextHelperTests
 {
     [Theory]
     [InlineData("https://www.youtube.com/watch?v=abc", "youtube.com")]
     [InlineData("https://youtube.com/watch?v=abc", "youtube.com")]
-    [InlineData("https://WWW.Example.COM/x", "example.com")]  // Uri.Host lowercases
+    [InlineData("https://WWW.Example.COM/x", "example.com")]
     [InlineData("https://wwwx.example.com/x", "wwwx.example.com")]
     [InlineData("not a url", "?")]
     [InlineData("", "?")]
@@ -35,7 +33,6 @@ public class SharedTextHelperTests
     [Fact]
     public void Base64UrlText_TryDecode_AcceptsPaddedInput()
     {
-        // Wire-adjacent tolerance the BCL Base64Url type does not promise.
         Assert.True(Base64UrlText.TryDecode("aGk=", out string decoded));
         Assert.Equal("hi", decoded);
     }

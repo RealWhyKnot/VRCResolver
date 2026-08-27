@@ -1,4 +1,3 @@
-# Core Ignored Folders
 .old/
 todo/
 dist/
@@ -10,30 +9,25 @@ node_modules/
 .docs/
 GEMINI.md
 
-# .NET
 [Bb]in/
 [Oo]bj/
 *.user
 *.userosscache
 *.sln.docstates
 
-# Visual Studio
 .vs/
 .vscode/
 .claude/
 
-# Web UI
 dist-ssr/
 wwwroot/
 *.local
 
-# Project Specific
 .local_build_state.json
 version.txt
 src/VrcResolver/Generated/
 *.log
 
-# Test / sample media — not for version control
 *.webm
 *.mp4
 *.mkv

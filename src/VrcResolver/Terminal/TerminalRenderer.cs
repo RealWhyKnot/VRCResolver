@@ -49,9 +49,6 @@ internal sealed class TerminalRenderer
     public void AttachOverlay()
     {
         _overlayRegistration ??= ConsoleUx.UseOverlay(_overlay);
-        // The caret is left visible on purpose. It used to be hidden because input was
-        // append-only and the caret never moved, but the prompt now supports mid-line editing,
-        // and an invisible caret in a line you can move around inside is worse than a flicker.
     }
 
     public void DetachOverlay()
@@ -123,7 +120,7 @@ internal sealed class TerminalRenderer
         {
             _overlay.ClearLocked();
             try { Console.Clear(); }
-            catch { /* non-clearable host */ }
+            catch { }
             _overlay.RenderLocked();
         });
     }
@@ -383,13 +380,13 @@ internal sealed class TerminalRenderer
         {
             foreach (TerminalTextRun run in runs)
             {
-                try { Console.ForegroundColor = run.Color; } catch { /* no-tty */ }
+                try { Console.ForegroundColor = run.Color; } catch { }
                 writer.Write(run.Text);
             }
         }
         finally
         {
-            try { Console.ForegroundColor = prev; } catch { /* no-tty */ }
+            try { Console.ForegroundColor = prev; } catch { }
         }
     }
 
@@ -429,8 +426,6 @@ internal sealed class TerminalRenderer
             ParkCaret(frame.CursorColumn);
         }
 
-        // The line never wraps (Fit clamps it to the window width), so the caret only ever
-        // moves along the row the overlay just painted.
         private static void ParkCaret(int column)
         {
             if (column < 0) return;
@@ -441,7 +436,6 @@ internal sealed class TerminalRenderer
             }
             catch
             {
-                /* redirected or non-positionable host */
             }
         }
     }

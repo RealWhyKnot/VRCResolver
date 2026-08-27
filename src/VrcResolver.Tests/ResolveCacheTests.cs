@@ -4,14 +4,6 @@ using Xunit;
 
 namespace VrcResolver.Tests;
 
-// Per-(url, player, format, node) resolve cache. The cache file is the
-// only state the v3.2 hot-path optimization holds across launches; a
-// corrupt or missing file MUST gracefully degrade to "treat as miss,
-// fall through to mesh" rather than throwing -- the resolve hot path
-// assumes the cache is optional. Lookups must respect the server-issued
-// expires_at + 30s safety margin, evictions must drop matching entries
-// across all (player, format) combinations, and the cap must trim the
-// oldest entries first when exceeded.
 public class ResolveCacheTests : IDisposable
 {
     private readonly string _tempDir;
@@ -26,7 +18,7 @@ public class ResolveCacheTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempDir, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(_tempDir, recursive: true); } catch { }
     }
 
     private static ResolveResponse MakeResolved(string url, string? expiresAt)
@@ -65,12 +57,10 @@ public class ResolveCacheTests : IDisposable
         Assert.NotNull(hit);
         Assert.Equal(WireConstants.ActionResolved, hit.Value.Action);
 
-        // Frame must contain the new request id, not the stored one.
         string json = System.Text.Encoding.UTF8.GetString(hit.Value.Frame);
         Assert.Contains("\"id\":\"req-2\"", json);
         Assert.DoesNotContain("ignored-on-store", json);
 
-        // And the original stream URL must round-trip intact.
         Assert.Contains(resp.Url!, json);
     }
 
@@ -122,10 +112,6 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Store_applies_fallback_default_TTL_when_server_omits_expires_at()
     {
-        // Server-side resolved responses don't always carry expires_at;
-        // we apply a 5-minute default so the cache still yields value.
-        // The 30s safety margin still applies on lookup, so a default-TTL
-        // entry stays serveable for ~4.5 minutes.
         var cache = new ResolveCache(_path);
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", expiresAt: null);
         string? effective = cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, resp);
@@ -133,7 +119,6 @@ public class ResolveCacheTests : IDisposable
         Assert.NotNull(effective);
         Assert.Equal(1, cache.Count);
 
-        // Cache hit confirms the entry is queryable.
         var hit = cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, "r");
         Assert.NotNull(hit);
     }
@@ -142,20 +127,13 @@ public class ResolveCacheTests : IDisposable
     public void Lookup_treats_expired_entry_as_miss_and_evicts_it()
     {
         var cache = new ResolveCache(_path);
-        // Already past server-issued expiry.
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddSeconds(-60).ToString("o"));
-        // Bypass Store's expiry check by writing the file directly with a stale entry.
-        // (Store would refuse a backwards-dated expires_at via the live check below.)
-        // Easier: store with a future expiry, then mutate the file to backdate.
-        // Even easier: rely on the 30s safety margin. Set expiry only 5s in the future.
         resp.ExpiresAt = DateTime.UtcNow.AddSeconds(5).ToString("o");
         cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, resp);
         Assert.Equal(1, cache.Count);
 
-        // 5s < 30s safety margin -> treated as expired by Lookup.
         Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, "r"));
 
-        // And evicted lazily on the same lookup pass.
         Assert.Equal(0, cache.Count);
     }
 
@@ -262,20 +240,14 @@ public class ResolveCacheTests : IDisposable
         var cache = new ResolveCache(_path);
         string future = DateTime.UtcNow.AddHours(1).ToString("o");
 
-        // Stuff 502 entries -- 2 over the 500 cap. Each Store advances the
-        // fetched_at by a microsecond (DateTime.UtcNow ticks).
         for (int i = 0; i < 502; i++)
         {
             string url = "https://example.com/v=" + i;
             cache.Store("us1.vrcresolver.com", url, "avpro", null, 1080, MakeResolved(url, future));
-            // The microsecond-resolution DateTime.UtcNow can collide on
-            // adjacent stores; bump explicitly so the eviction order is
-            // deterministic.
             System.Threading.Thread.Sleep(1);
         }
         Assert.Equal(500, cache.Count);
 
-        // Oldest two (i=0 and i=1) should be gone; newest (i=501) should be present.
         Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://example.com/v=0", "avpro", null, 1080, "r"));
         Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://example.com/v=1", "avpro", null, 1080, "r"));
         Assert.NotNull(cache.Lookup("us1.vrcresolver.com", "https://example.com/v=501", "avpro", null, 1080, "r"));
@@ -300,10 +272,8 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Load_drops_already_expired_entries_so_stale_urls_arent_resurrected()
     {
-        // Hand-craft a file with one fresh entry + one already-expired one.
-        // EnsureLoaded should prune the expired one on first access.
         string fresh = DateTime.UtcNow.AddHours(2).ToString("o");
-        string stale = DateTime.UtcNow.AddSeconds(5).ToString("o"); // < 30s margin
+        string stale = DateTime.UtcNow.AddSeconds(5).ToString("o");
         string handCrafted = "{\"version\":1,\"entries\":{" +
             "\"keep\":{\"key\":\"keep\",\"node\":\"n\",\"url\":\"u-keep\",\"player\":\"avpro\",\"format_arg\":\"f\",\"response\":{\"action\":\"resolved\",\"id\":\"i\",\"url\":\"https://x/\",\"expires_at\":\"" + fresh + "\"},\"fetched_at\":\"2026-01-01T00:00:00Z\",\"expires_at\":\"" + fresh + "\"}," +
             "\"drop\":{\"key\":\"drop\",\"node\":\"n\",\"url\":\"u-drop\",\"player\":\"avpro\",\"format_arg\":\"f\",\"response\":{\"action\":\"resolved\",\"id\":\"i\",\"url\":\"https://x/\",\"expires_at\":\"" + stale + "\"},\"fetched_at\":\"2026-01-01T00:00:00Z\",\"expires_at\":\"" + stale + "\"}" +
@@ -320,7 +290,6 @@ public class ResolveCacheTests : IDisposable
         File.WriteAllText(_path, "this is not json{[}");
         var cache = new ResolveCache(_path);
         Assert.Equal(0, cache.Count);
-        // And still functional after a corrupt load.
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddHours(1).ToString("o"));
         cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, resp);
         Assert.NotNull(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, "r"));
@@ -329,13 +298,11 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Oversized_file_renames_aside_and_treats_as_miss()
     {
-        // File larger than the 4 MiB cap -- renamed aside, treated as miss.
         File.WriteAllBytes(_path, new byte[ResolveCache.MaxCacheFileBytes + 1]);
 
         var cache = new ResolveCache(_path);
         Assert.Equal(0, cache.Count);
 
-        // Original path is gone (renamed aside); new launch is free to write.
         Assert.False(File.Exists(_path));
         var aside = Directory.GetFiles(_tempDir, "resolve_cache.json.oversized-*");
         Assert.Single(aside);
@@ -349,8 +316,6 @@ public class ResolveCacheTests : IDisposable
 
         cache.Store("us1.vrcresolver.com", url, "avpro", null, 1080, resp);
 
-        // Turning high quality on changes nothing else about a request whose caller sent no
-        // -f, so without height in the key the 1080 URL would be served back forever.
         Assert.Null(cache.Lookup("us1.vrcresolver.com", url, "avpro", null, 2160, "r"));
         Assert.NotNull(cache.Lookup("us1.vrcresolver.com", url, "avpro", null, 1080, "r"));
     }

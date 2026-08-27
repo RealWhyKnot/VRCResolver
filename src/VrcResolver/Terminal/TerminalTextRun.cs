@@ -38,8 +38,6 @@ internal sealed class TerminalFrame
     public string PlainText { get; }
     public IReadOnlyList<TerminalTextRun> Runs { get; }
 
-    // Column the caret should be left at after this frame is painted, or -1 to leave it
-    // wherever the write ended. Only the prompt frame sets it.
     public int CursorColumn { get; set; } = -1;
 
     public static TerminalFrame Empty { get; } =

@@ -1,33 +1,14 @@
 name: Changelog append
 
-# On every push to main, walk the commits in the push range and append bullets
-# under "## Unreleased" in CHANGELOG.md (root, embedded into the in-app viewer).
-# Then commit the updated file back to main via the GraphQL createCommitOnBranch mutation (so the
-# resulting commit is signed server-side with GitHub's bot key and clears the
-# "Commits must have verified signatures" protected-branch rule on main; a
-# plain `git push` of an unsigned commit gets GH006).
-#
-# A commit made by GITHUB_TOKEN (whether via push or via createCommitOnBranch)
-# does NOT trigger workflow runs, so the appender's own commit will not recurse.
-# Belt-and-braces: the commit message carries [skip changelog] and the job's
-# `if:` filter rejects messages with that marker, so even a manual re-trigger
-# or non-token actor cannot recurse.
-
 on:
   push:
     branches: [main]
-    # Skip pushes that only touch the changelog files themselves or pure-doc
-    # paths the user has already taken care of. Saves a workflow run on
-    # release.yml's promotion commit (it modifies CHANGELOG.md exclusively).
     paths-ignore:
       - 'CHANGELOG.md'
       - 'LICENSE'
       - '.gitignore'
       - '.gitattributes'
       - '.editorconfig'
-  # Manual trigger so a failed run (e.g. transient GraphQL error, or a push
-  # whose head_commit message accidentally tripped the recursion filter) can
-  # be re-driven without waiting for the next push.
   workflow_dispatch:
     inputs:
       range:
@@ -36,20 +17,14 @@ on:
         default: ''
 
 permissions:
-  contents: write   # push the appender's commit back to main
+  contents: write
 
 concurrency:
-  # Serialise: two concurrent appenders racing to push could lose entries.
   group: changelog-append
   cancel-in-progress: false
 
 jobs:
   append:
-    # Recursion guard for the push trigger: skip if the bot was the actor
-    # (the appender's own commit) or if the head commit carries the marker
-    # in its subject line (release.yml's promotion commit, manual back-fill
-    # on a docs-only push, etc.). workflow_dispatch always runs -- the
-    # operator picked it on purpose.
     if: ${{ github.event_name == 'workflow_dispatch' || (github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip changelog]')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -57,7 +32,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0   # full history so the before..after range resolves
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compute push range

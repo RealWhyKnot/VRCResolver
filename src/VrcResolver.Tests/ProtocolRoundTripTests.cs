@@ -5,10 +5,6 @@ using Xunit;
 
 namespace VrcResolver.Tests;
 
-// Verifies the wire-protocol DTOs deserialize and re-serialize without
-// losing v2 fields or unknown extension data. Regressions here would
-// silently break v3+ forward-compat — invisible until a server-side
-// field gets dropped on the floor.
 public class ProtocolRoundTripTests
 {
     [Fact]
@@ -63,7 +59,6 @@ public class ProtocolRoundTripTests
         Assert.True(req.Extra!.ContainsKey("future_v3_field"));
         Assert.True(req.Extra.ContainsKey("another_unknown"));
 
-        // Re-serialize and verify the unknowns survive the round trip.
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(req);
         using var doc = JsonDocument.Parse(bytes);
         Assert.True(doc.RootElement.TryGetProperty("future_v3_field", out var fv3));
@@ -136,11 +131,6 @@ public class ProtocolRoundTripTests
     [Fact]
     public void PlaybackFeedback_frame_matches_server_contract()
     {
-        // Server-side validator (the server's mesh dispatcher) expects exactly:
-        //   action="playback_feedback", url, kind, timestamp (ISO-8601 UTC),
-        //   ms_since_open. Optional: correlation_id, client_id. The earlier
-        //   R2 stash sent `timestamp_utc` which the server rejected with a
-        //   protocol_error (field=timestamp); this test pins the new shape.
         var ts = new DateTime(2026, 5, 4, 7, 22, 0, DateTimeKind.Utc);
         byte[] bytes = MeshClient.BuildPlaybackFeedbackPayload(
             url: "https://us1.vrcresolver.com/r/abc",
@@ -160,19 +150,12 @@ public class ProtocolRoundTripTests
         Assert.Equal("client-xyz", root.GetProperty("client_id").GetString());
         Assert.Equal("cid-42", root.GetProperty("correlation_id").GetString());
 
-        // Old field MUST NOT appear — server rejects with protocol_error.
         Assert.False(root.TryGetProperty("timestamp_utc", out _));
     }
 
     [Fact]
     public void PlaybackFeedback_frame_omits_correlation_id_when_unknown()
     {
-        // When VrcLogMonitor sees an Opening for a URL not in the recent-
-        // resolves cache (e.g. wrapper served via fallback_native, or pre-
-        // existing AVPro URL from before watchdog start), correlation_id is
-        // null. Frame must OMIT the field, not serialize "null", so the
-        // server's missing-field semantics apply (skip cache lookup, fall
-        // back to URL-host extraction).
         byte[] bytes = MeshClient.BuildPlaybackFeedbackPayload(
             url: "https://example.com/video.m3u8",
             kind: WireConstants.PlaybackFeedbackSilentStall,
@@ -273,9 +256,6 @@ public class ProtocolRoundTripTests
     [Fact]
     public void WireConstants_match_server_spec_strings()
     {
-        // These are the constants the server-side audit explicitly listed
-        // as needing to be byte-exact. A typo in either side breaks the
-        // wire silently — easy unit-test guard.
         Assert.Equal("welcome", WireConstants.ActionWelcome);
         Assert.Equal("protocol_version", WireConstants.FieldProtocolVersion);
         Assert.Equal("accept_protocols", WireConstants.FieldAcceptProtocols);
@@ -289,9 +269,6 @@ public class ProtocolRoundTripTests
         Assert.Equal("playing", WireConstants.PlaybackFeedbackPlaying);
         Assert.Equal("avpro", WireConstants.PlayerAvPro);
         Assert.Equal("unity", WireConstants.PlayerUnity);
-        // Bumped 2 → 3 alongside v3 wire-protocol shipping. v2 servers
-        // negotiate down via Math.Clamp(server, 1, client) on welcome
-        // receipt — backward compat preserved.
         Assert.Equal(3, WireConstants.ClientProtocolVersion);
     }
 

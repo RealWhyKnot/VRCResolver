@@ -7,19 +7,6 @@
     <Company>RealWhyKnot</Company>
     <Product>VRCResolver</Product>
     <AssemblyTitle>VRCResolver updater</AssemblyTitle>
-    <!-- AOT publish so the updater is ~10x smaller (was ~80 MB self-
-         contained single-file). Trimming in 'full' mode is safe here
-         because:
-           * JSON parsing uses JsonDocument.Parse + RootElement.GetProperty
-             — no reflection-bound serialization.
-           * No reflection over user types (no Activator.CreateInstance,
-             Type.GetType(string), MakeGenericType, etc.).
-           * Regex.Compiled converted to [GeneratedRegex] source-gen.
-         The watchdog stays JIT/R2R (separate audit pending — different
-         concerns: long-lived process, larger BCL surface).
-         InvariantGlobalization drops ICU (~1 MB) — the updater does no
-         culture-sensitive formatting beyond OrdinalIgnoreCase string
-         comparisons. -->
     <PublishAot>true</PublishAot>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>

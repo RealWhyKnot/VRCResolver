@@ -179,8 +179,6 @@ internal sealed class InteractiveTerminal : IDisposable
                 Redraw();
                 return;
             case ConsoleKey.RightArrow:
-                // At the end of the line with a ghost showing, right-arrow accepts it; that is
-                // the only thing right-arrow could mean there, and it saves reaching for tab.
                 if (_input.AtEnd && _ghost.Length > 0)
                     CompleteInput(showSuggestionsWhenAmbiguous: false);
                 else
@@ -221,8 +219,6 @@ internal sealed class InteractiveTerminal : IDisposable
         }
     }
 
-    // Ghost text is only meaningful at the end of the line -- mid-line it would render after
-    // text the user is still editing around and read as part of the input.
     private void RefreshSuggestion()
     {
         _lastSuggestionInput = "";
@@ -327,7 +323,7 @@ internal sealed class InteractiveTerminal : IDisposable
             Task timeout = Task.Delay(timeoutMs);
             await Task.WhenAny(task, timeout).ConfigureAwait(false);
         }
-        catch { /* best-effort */ }
+        catch { }
     }
 
     public void Dispose()

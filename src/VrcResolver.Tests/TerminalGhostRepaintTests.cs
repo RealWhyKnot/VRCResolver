@@ -4,9 +4,6 @@ using Xunit;
 
 namespace VrcResolver.Tests;
 
-// Regression cover for a prompt that appeared frozen while typing. Ghost text makes the rendered
-// string invariant as the user types into a suggestion, so a change detector that only compares
-// text suppresses every repaint and nothing the user types ever appears.
 public sealed class TerminalGhostRepaintTests
 {
     private static TerminalFrame PromptFrame(string input, string ghost)
@@ -31,7 +28,6 @@ public sealed class TerminalGhostRepaintTests
         var line = new TerminalOverlayLine();
         var writer = new StringWriter();
 
-        // Every one of these renders the identical string "vrcr> status ".
         Assert.True(line.RenderIfChanged(writer, PromptFrame("sta", "tus "), Write));
         Assert.True(line.RenderIfChanged(writer, PromptFrame("stat", "us "), Write));
         Assert.True(line.RenderIfChanged(writer, PromptFrame("statu", "s "), Write));
@@ -41,7 +37,6 @@ public sealed class TerminalGhostRepaintTests
     [Fact]
     public void TheRenderedTextReallyIsIdenticalAcrossThoseKeystrokes()
     {
-        // If this ever stops being true the test above stops covering the bug it was written for.
         Assert.Equal(PromptFrame("sta", "tus ").PlainText, PromptFrame("stat", "us ").PlainText);
     }
 

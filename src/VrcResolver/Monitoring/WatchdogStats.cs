@@ -2,16 +2,6 @@ using VrcResolver.Shared;
 
 namespace VrcResolver;
 
-// Process-wide counters surfaced by the periodic Heartbeat ticker. All
-// counters are interlocked-incremented so increments from the IPC accept
-// loop, the WS dispatch loop, and the run loop don't lose updates under
-// concurrent resolves. Bytes counter caps at long.MaxValue (~9.2 EB --
-// effectively unbounded for any conceivable session).
-//
-// Stats are session-scoped: reset to zero on each watchdog start. Not
-// persisted across launches. No platform-specific APIs -- kept platform-
-// agnostic so MeshClient (which isn't [SupportedOSPlatform("windows")])
-// can call it without CA1416.
 internal static class WatchdogStats
 {
     private const int BandwidthBucketCount = 32;

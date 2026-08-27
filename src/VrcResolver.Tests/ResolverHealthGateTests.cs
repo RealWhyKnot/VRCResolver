@@ -176,9 +176,6 @@ public sealed class ResolverHealthGateTests
         Assert.Equal(ResolverHealthGate.Transition.Opened, gate.RecordPlaybackFailure());
     }
 
-    // The immediate-og property: the gate's reason (and the emit guard's)
-    // must never be retried by the wrapper, or the pause would still cost
-    // the 750/2250 ms retry delays per video.
     [Theory]
     [InlineData(WireConstants.OgFallbackReasonResolverUnhealthy)]
     [InlineData(WireConstants.OgFallbackReasonResolvedUrlRejected)]

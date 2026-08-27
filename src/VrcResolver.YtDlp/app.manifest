@@ -15,9 +15,6 @@
   </compatibility>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
-      <!-- VRChat reads our stdout line-buffered; force UTF-8 so non-ASCII
-           characters in resolved URLs (rare but possible) don't get
-           mangled by the legacy console codepage. Win10 1903+. -->
       <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
     </windowsSettings>
   </application>

@@ -1,8 +1,5 @@
 name: Commit message check
 
-# Server-side enforcement of the same rule .githooks/commit-msg enforces
-# locally: a commit subject may contain at most one build-version stamp.
-
 on:
   push:
     branches: [main]

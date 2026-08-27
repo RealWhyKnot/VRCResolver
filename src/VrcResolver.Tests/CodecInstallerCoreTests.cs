@@ -8,10 +8,6 @@ using Xunit;
 
 namespace VrcResolver.Tests;
 
-// The installer's decision engine with every side effect injected. Pins the
-// state machine the live winget/AppX/MF wrappers feed: probe-first install
-// detection, verify-after-install, the ordered HEVC store-id list, and the
-// transient-vs-permanent backoff windows.
 [SupportedOSPlatform("windows")]
 public class CodecInstallerCoreTests
 {
@@ -73,7 +69,6 @@ public class CodecInstallerCoreTests
     [Fact]
     public async Task WingetSuccess_OnlyCountsWhenVerified()
     {
-        // winget exit 0 but neither probe confirms -> failed, transient class.
         var core = MakeCore(wingetInstall: _ => Task.FromResult(Ok()));
         var state = new CodecInstaller.CodecState();
 
@@ -105,8 +100,6 @@ public class CodecInstallerCoreTests
     [Fact]
     public async Task SecondStoreId_TriedOnlyAfterFirstFails()
     {
-        // The paid HEVC listing fails without entitlement; the free
-        // device-manufacturer listing is the fallback.
         var tried = new List<string>();
         bool installed = false;
         var core = MakeCore(
@@ -212,9 +205,6 @@ public class CodecInstallerCoreTests
     [Fact]
     public void LegacyStateFile_WithoutFailureClass_StillParses()
     {
-        // Pre-overhaul entries carry status/last_attempt_utc/package_family_name
-        // only. failure_class is additive; a missing value reads as null and
-        // the backoff treats it as unknown (transient).
         string path = Path.Combine(Path.GetTempPath(), "codec-state-" + Guid.NewGuid().ToString("N") + ".json");
         File.WriteAllText(path,
             "{\"codecs\":{\"9NMZLZ57R3T7\":{\"status\":\"failed\",\"last_attempt_utc\":\"2026-08-20T00:00:00Z\",\"package_family_name\":\"Microsoft.HEVCVideoExtension\"}}}");
@@ -235,8 +225,6 @@ public class CodecInstallerCoreTests
     [Fact]
     public void RequiredList_PinsTheHevcFallbackOrder()
     {
-        // 9NMZLZ57R3T7 is the paid listing (fails without entitlement);
-        // 9N4WGH0Z6VHQ is the free device-manufacturer listing. Order matters.
         var hevc = Array.Find(CodecInstaller.Required, c => c.ProbeCodec == "h265");
         Assert.NotNull(hevc);
         Assert.Equal(new[] { "9NMZLZ57R3T7", "9N4WGH0Z6VHQ" }, hevc!.StoreIds);

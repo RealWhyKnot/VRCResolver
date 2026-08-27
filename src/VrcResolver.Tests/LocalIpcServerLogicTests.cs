@@ -8,9 +8,6 @@ namespace VrcResolver.Tests;
 [SupportedOSPlatform("windows")]
 public class LocalIpcServerLogicTests
 {
-    // The health gate must open only for synthesized unreachable/internal
-    // outcomes. A server that ANSWERS -- with any verdict, including the
-    // new rate_limited/protocol_error control outcomes -- is alive.
     [Theory]
     [InlineData(null, "resolved", null, true)]
     [InlineData(null, "fallback_native", "all_configs_failed", true)]
@@ -24,8 +21,6 @@ public class LocalIpcServerLogicTests
         string? failReason, string outcome, string? serverReason, bool expected)
         => Assert.Equal(expected, LocalIpcServer.IsHealthyOutcome(failReason, outcome, serverReason));
 
-    // og_failed detail is a closed server-side set; the wrapper's classifier
-    // vocabulary maps onto it verbatim with everything else as "unknown".
     [Theory]
     [InlineData("cf_403", "cf_403")]
     [InlineData("rate_limited", "rate_limited")]

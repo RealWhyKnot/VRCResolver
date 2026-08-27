@@ -2,27 +2,14 @@ using System.Reflection;
 
 namespace VrcResolver.Shared;
 
-// Hooks AppDomain.UnhandledException and TaskScheduler.UnobservedTaskException
-// so unhandled-exception teardowns leave a postmortem on disk instead of just
-// scrolling off the console buffer. Crash logs land at
-//   %LOCALAPPDATA%Low\vrcresolver\crashes\crash-<component>-<utc>.log
-// and contain stack + process metadata. Each exe (watchdog, updater,
-// uninstaller) calls Install() at the very top of Main so handlers are live
-// before any other code runs.
 public static class CrashHandler
 {
     private static readonly object _writeLock = new();
     private static string? _logDir;
     private static string _component = "unknown";
-    private static int _installed; // Interlocked guard — Install is idempotent.
+    private static int _installed;
     private static Func<string>? _stateSnapshot;
 
-    // Optional state-snapshot delegate. Whatever the caller registers gets
-    // invoked at crash time and its output is written into the postmortem.
-    // The watchdog populates this with a one-paragraph status block (mesh
-    // state, patch state, pending request count) so a crash log carries
-    // enough context to diagnose without the live process. Best-effort:
-    // exceptions inside the snapshot are caught.
     public static void SetStateSnapshot(Func<string>? snapshot)
     {
         _stateSnapshot = snapshot;
@@ -40,9 +27,6 @@ public static class CrashHandler
         }
         catch
         {
-            // Can't create the dir (UAC / disk-full / weird profile). The
-            // handlers will silently no-op — at least we won't make things
-            // worse during teardown.
             _logDir = null;
         }
 
@@ -54,17 +38,10 @@ public static class CrashHandler
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
             WriteCrashLog("UnobservedTaskException", e.Exception, terminating: false);
-            // Mark observed so .NET's legacy fail-fast policy (if ever re-enabled)
-            // doesn't kill the process for a logged-and-handled background fault.
             e.SetObserved();
         };
     }
 
-    // Strip user-identifying tokens from text the user is likely to paste
-    // into a public bug report. Replaces the literal %USERPROFILE% value
-    // (typically C:\Users\<name>) and Environment.UserName with stable
-    // placeholders. The 3-char floor on UserName avoids replacing common
-    // 2-letter substrings.
     private static string Redact(string s)
     {
         if (string.IsNullOrEmpty(s)) return s;
@@ -74,14 +51,14 @@ public static class CrashHandler
             if (!string.IsNullOrEmpty(userProfile))
                 s = s.Replace(userProfile, "%USERPROFILE%", StringComparison.OrdinalIgnoreCase);
         }
-        catch { /* best-effort */ }
+        catch { }
         try
         {
             string userName = Environment.UserName;
             if (userName.Length >= 3)
                 s = s.Replace(userName, "<user>", StringComparison.OrdinalIgnoreCase);
         }
-        catch { /* best-effort */ }
+        catch { }
         return s;
     }
 
@@ -92,9 +69,6 @@ public static class CrashHandler
         {
             string ts = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff");
             string path = Path.Combine(_logDir, $"crash-{_component}-{ts}.log");
-            // TryEnter (not lock) so if another thread is wedged inside the
-            // crash handler we don't block process teardown waiting for it.
-            // 1s budget is plenty for a single small log write.
             if (!Monitor.TryEnter(_writeLock, TimeSpan.FromSeconds(1))) return;
             try
             {
@@ -109,9 +83,6 @@ public static class CrashHandler
                 w.WriteLine($"basedir:      {Redact(AppContext.BaseDirectory)}");
                 w.WriteLine($"os:           {Environment.OSVersion}");
 
-                // Caller-provided state snapshot, e.g. mesh/patch/pending-
-                // request status. Wrapped in try/catch so a buggy snapshot
-                // delegate can't prevent the exception from being recorded.
                 var snapshot = _stateSnapshot;
                 if (snapshot != null)
                 {
@@ -131,8 +102,6 @@ public static class CrashHandler
         }
         catch
         {
-            // Crash-log handler is the last line of defense; it must never
-            // throw further. Best-effort and move on.
         }
     }
 }

@@ -2,11 +2,6 @@ using System.Text;
 
 namespace VrcResolver.Shared;
 
-// The one base64url text codec (RFC 4648 alphabet, padding stripped) shared by
-// the trust-gateway URL builder and the relay target resolver. Verbatim
-// consolidation of the logic both carried -- TryDecode tolerates padded AND
-// unpadded input, which is wire-adjacent behavior the BCL Base64Url type does
-// not promise, so it stays hand-rolled.
 public static class Base64UrlText
 {
     public static string Encode(string value)

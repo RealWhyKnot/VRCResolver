@@ -6,47 +6,14 @@ namespace VrcResolver.Shared;
 
 public enum WrapperKind
 {
-    // The file is one of ours (current build, prior release, or dev build).
-    // Callers must NOT exec it on the fallback path (would recurse) and must
-    // NOT preserve it as the og backup.
     Ours,
-    // VRChat-bundled yt-dlp -- VRChat ships a modified yt-dlp, not vanilla
-    // upstream. Identified by elimination (large PyInstaller-style binary
-    // with none of our positive signals). Safe to preserve as yt-dlp-og.exe
-    // and to exec on the fallback path.
     VrcBundledYtDlp,
-    // Signals were inconclusive. Caller should leave the file alone.
     Unknown,
 }
 
-// Multi-signal "is this binary ours?" classifier. Used by PatchManager to
-// avoid swapping a dev build out from under itself, and by the wrapper's
-// fallback exec path to refuse a recursive exec into another copy of
-// ourselves.
-//
-// Four signals, short-circuited in order:
-//   1. Embedded UTF-8 marker baked into every build via the MarkerUtf8
-//      literal in this file (NativeAOT emits the bytes directly into
-//      rodata so a byte scan finds them). Pre-rename builds carry the
-//      legacy marker; both are accepted.
-//   2. PE FileVersionInfo (CompanyName + ProductName).
-//   3. SHA-256 against an optional known-release-hashes list shipped with
-//      the release artifact. Skipped when the file is missing (dev builds
-//      and source-only installs).
-//   4. Size band: our wrapper AOT-publishes to ~3-5 MB; the VRChat-bundled
-//      yt-dlp (a modified yt-dlp distribution, not vanilla upstream) is
-//      PyInstaller-packed at ~17-30 MB. Above the ceiling with all prior
-//      signals negative classifies VrcBundledYtDlp; below the ceiling
-//      stays Unknown.
 [SupportedOSPlatform("windows")]
 public static class WrapperIdentity
 {
-    // Length-mirrored UTF-8 literal and string literal. The UTF-8 form is
-    // what byte-scans look for; the string form is exposed for diagnostics
-    // and so callers can document the constant. Both must literally appear
-    // in the source so the AOT compiler emits them into the binary.
-    // Classification also accepts the pre-rename marker and product name
-    // (LegacyCompat) so wrappers installed by older builds stay recognized.
     private const string MarkerString =
         "VRCRESOLVER_WRAPPER_MARKER_v1:6f2a9c41-8d5e-4b7a-a3c9-1e8f7d2b4a60";
     private static ReadOnlySpan<byte> MarkerUtf8 =>
@@ -68,15 +35,8 @@ public static class WrapperIdentity
         try { size = new FileInfo(path).Length; }
         catch { return WrapperKind.Unknown; }
 
-        // Signal 1: embedded marker. Only scan up to MaxScanBytes; anything
-        // larger is automatically not-ours and would only waste IO. We bail
-        // early on size > MaxScanBytes since the marker can't be in there
-        // if we never wrote one.
         if (size <= MaxScanBytes && ContainsMarker(path)) return WrapperKind.Ours;
 
-        // Signal 2: PE FileVersionInfo. Cheap and definitive when populated.
-        // Accepts the pre-rename product name so binaries stamped by older
-        // releases still classify as ours.
         try
         {
             var fvi = FileVersionInfo.GetVersionInfo(path);
@@ -87,11 +47,8 @@ public static class WrapperIdentity
                 return WrapperKind.Ours;
             }
         }
-        catch { /* FileVersionInfo can fail on non-PE files; fall through */ }
+        catch { }
 
-        // Signal 3: SHA against shipped known-release-hashes list. Only fires
-        // when the artifact is present; dev workflow and source-only installs
-        // skip this silently.
         if (!string.IsNullOrEmpty(knownHashesPath) && File.Exists(knownHashesPath))
         {
             string? sha = ComputeSha256(path);
@@ -99,11 +56,6 @@ public static class WrapperIdentity
                 return WrapperKind.Ours;
         }
 
-        // Signal 4: size band. PyInstaller-packed yt-dlp (vanilla or
-        // VRChat-modified) is always well above 10 MiB; anything under
-        // that with no positive signal is Unknown rather than
-        // VrcBundledYtDlp -- we'd rather wait than risk exec'ing an
-        // arbitrary small binary the user dropped in Tools.
         return size > OursSizeCeiling ? WrapperKind.VrcBundledYtDlp : WrapperKind.Unknown;
     }
 
@@ -151,11 +103,6 @@ public static class WrapperIdentity
         }
     }
 
-    // Reads wrapper_hashes.txt looking for a leading 64-hex-char field
-    // matching the candidate. Format is `<sha256>  <version>  <iso-utc-date>`
-    // per release (two-space separator, mirrors sha256sum). Comments (#) and
-    // blank lines are ignored. The file is tiny; reading top-to-bottom on
-    // every call is fine.
     public static bool KnownHashListContains(string listPath, string sha256Hex)
     {
         try
@@ -170,7 +117,7 @@ public static class WrapperIdentity
                     return true;
             }
         }
-        catch { /* missing or unreadable list -> caller treats as "no match" */ }
+        catch { }
         return false;
     }
 }

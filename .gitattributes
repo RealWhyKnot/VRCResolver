@@ -1,7 +1,3 @@
-# Auto detect text files and perform LF normalization
 * text=auto
 
-# Git hooks are bash scripts. CRLF line endings break them on Linux/macOS
-# (`bash: \r: command not found`), so pin them to LF regardless of the
-# checkout-time autocrlf setting.
 .githooks/* text eol=lf

@@ -37,8 +37,6 @@ public class OgFallbackHintTests
         clock.Advance(TimeSpan.FromSeconds(61));
 
         Assert.False(hint.ShouldPreferOg("https://www.youtube.com/watch?v=abc"));
-        // Expired entry should be pruned on read so the map stays small
-        // without an external sweep.
         Assert.Equal(0, hint.LiveEntryCountForTests());
     }
 
@@ -50,10 +48,9 @@ public class OgFallbackHintTests
 
         hint.RecordLoadFailure("https://www.youtube.com/watch?v=abc");
         clock.Advance(TimeSpan.FromSeconds(45));
-        // Second failure within the window pushes TTL back out 60 s from now.
         hint.RecordLoadFailure("https://www.youtube.com/watch?v=abc");
 
-        clock.Advance(TimeSpan.FromSeconds(45)); // now 90 s after first failure
+        clock.Advance(TimeSpan.FromSeconds(45));
         Assert.True(hint.ShouldPreferOg("https://www.youtube.com/watch?v=abc"));
     }
 
@@ -65,9 +62,6 @@ public class OgFallbackHintTests
 
         hint.RecordLoadFailure("https://www.youtube.com/watch?v=abc");
 
-        // A different source URL does not get the og hint just because some
-        // other source recently failed -- avoids cross-contamination between
-        // unrelated playbacks.
         Assert.False(hint.ShouldPreferOg("https://www.youtube.com/watch?v=def"));
         Assert.True(hint.ShouldPreferOg("https://www.youtube.com/watch?v=abc"));
     }
@@ -100,8 +94,6 @@ public class OgFallbackHintTests
     [Fact]
     public void DefaultTtl_IsSixtySeconds()
     {
-        // Pinned: this is the user-visible recovery window between an
-        // observed AVPro failure and the og hint expiring.
         var hint = new OgFallbackHint();
         Assert.Equal(TimeSpan.FromSeconds(60), hint.Ttl);
     }

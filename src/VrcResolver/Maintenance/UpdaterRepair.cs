@@ -4,9 +4,6 @@ namespace VrcResolver;
 
 internal static class UpdaterRepair
 {
-    // Staged-updater pairs applied at watchdog startup: the running updater
-    // cannot overwrite itself, so the new one arrives under a .next name and
-    // is swapped in here on the following launch.
     private static readonly (string Staged, string Target)[] Pairs =
     {
         ("vrcresolver.Updater.next.exe", "vrcresolver.Updater.exe"),
@@ -38,7 +35,7 @@ internal static class UpdaterRepair
             }
 
             MoveWithRetry(staged, target, retries: 3);
-            try { if (File.Exists(backup)) File.Delete(backup); } catch { /* best-effort */ }
+            try { if (File.Exists(backup)) File.Delete(backup); } catch { }
             ConsoleUx.Success(LogComponent.Update, "updater refreshed for future updates.");
             return true;
         }
@@ -49,7 +46,7 @@ internal static class UpdaterRepair
                 if (!File.Exists(target) && File.Exists(backup))
                     File.Move(backup, target);
             }
-            catch { /* best-effort */ }
+            catch { }
 
             Logger.WriteFileOnly("[update] staged updater repair failed: " + ex.GetType().Name + ": " + ex.Message);
             ConsoleUx.Warn(LogComponent.Update, "could not refresh updater yet; it will retry on next launch.");

@@ -3,28 +3,12 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <RootNamespace>VrcResolver.YtDlp</RootNamespace>
-    <!-- AssemblyName must stay exactly "yt-dlp": VRChat invokes
-         Tools\yt-dlp.exe by that literal name. Never rename this output. -->
     <AssemblyName>yt-dlp</AssemblyName>
-    <!-- AOT publish so the wrapper VRChat invokes per video player is ~10x
-         smaller and starts without JIT. The watchdog stays on regular self-
-         contained .NET 10 (it's a one-shot launch, size doesn't matter, and
-         it has heavier dependencies that aren't worth porting). Trimming
-         in 'full' mode is safe here because every reachable JSON path is
-         source-gen'd via WrapperJsonContext and there is no runtime
-         reflection over user types in this project. InvariantGlobalization
-         drops ICU data (~1 MB); the wrapper does no culture-sensitive
-         formatting. -->
     <PublishAot>true</PublishAot>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>
     <InvariantGlobalization>true</InvariantGlobalization>
 
-    <!-- PE FileVersionInfo fields. WrapperIdentity.Classify reads
-         CompanyName + ProductName off the PE resource block as one of its
-         four "is this our binary?" signals; a vanilla yt-dlp PE has
-         OriginalFilename="yt-dlp" with no CompanyName, so the pair below
-         is distinct enough to short-circuit positively. -->
     <Company>RealWhyKnot</Company>
     <Product>VRCResolver</Product>
     <AssemblyTitle>VRCResolver yt-dlp wrapper</AssemblyTitle>

@@ -4,8 +4,6 @@ namespace VrcResolver;
 
 internal static class TerminalCapabilities
 {
-    // NO_COLOR and ASCII_TERMINAL are each read in exactly one place
-    // (ConsoleUx); this type just adds the terminal-specific animation gate.
     public static bool UseColor() => ConsoleUx.UseColor();
 
     public static bool UseAnimations()
@@ -44,6 +42,6 @@ internal static class TerminalCapabilities
             return;
 
         try { Console.CursorVisible = visible; }
-        catch { /* no cursor */ }
+        catch { }
     }
 }

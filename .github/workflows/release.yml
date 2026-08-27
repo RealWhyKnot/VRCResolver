@@ -1,20 +1,5 @@
 name: Release
 
-# Triggered by pushing a tag like v2026.4.27.0 (release; .N = release iteration for the day,
-# starting at 0). Dev-style tags like v2026.4.27.7-4974 are also accepted but should be rare on
-# the release stream — the -XXXX suffix is intended for local dev builds where many rebuilds at
-# the same daily counter need to be disambiguated. The tag (minus the leading "v") drives the
-# build's version: it's passed to build.ps1 -Version so the assembly version, version.txt, and the
-# zip filename all match the tag. build.ps1 validates the shape and fails fast on a malformed tag.
-# Builds the full distribution via build.ps1 on a Windows runner — required because the build
-# produces win-x64 exes and uses PowerShell-only cmdlets — then attaches the zip
-# from dist/ to a GitHub release with an integrity TSV so updater.exe can verify the download.
-#
-# Changelog promotion: before the build runs, .github/scripts/Update-Changelog.ps1 renames the
-# "## Unreleased" heading in CHANGELOG.md to "## [vTAG] - DATE", linking
-# to this release. After the GitHub release is created, the promoted file is
-# committed back to main through the verified createCommitOnBranch path so main
-# carries the same CHANGELOG.md that shipped in the release artifact.
 on:
   push:
     tags:
@@ -28,9 +13,6 @@ on:
 permissions:
   contents: write
 
-# Share a concurrency group with changelog-append so the appender can't run
-# during a release build and add entries to main's Unreleased that the release
-# itself doesn't contain. Only one of these two workflows runs at a time.
 concurrency:
   group: changelog-append
   cancel-in-progress: false
@@ -48,8 +30,6 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           ref: ${{ github.event.inputs.tag || github.ref }}
-          # GITHUB_TOKEN is enough for release publishing and the verified
-          # createCommitOnBranch mutations used after publish.
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Resolve release tag
@@ -173,9 +153,6 @@ jobs:
         env:
           TAG_NAME: ${{ steps.release_tag.outputs.tag }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          # gh release list is used by the prev-tag resolver's subject-match
-          # fallback. Without it the resolver may treat the tag as the first
-          # release and use the curated changelog section.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Composes the full release body: title + auto-changelog slice +
@@ -331,15 +308,6 @@ jobs:
           throw "Release body still differs after auto-correct + retries."
 
       - name: Append wrapper SHA to wrapper_hashes.txt
-        # Only fires for release tags (no -XXXX dev suffix). Dev builds keep
-        # their SHA out of the public hash list -- WrapperIdentity identifies
-        # them via the embedded marker and PE-metadata signals instead.
-        #
-        # Runs after the release is published so a build/release failure
-        # doesn't leave a phantom hash entry on main for a release that never
-        # shipped. Uses the same createCommitOnBranch mutation pattern as
-        # changelog-append.yml so the commit lands verified on main and
-        # clears the protected-branch signature rule.
         if: ${{ !contains(steps.release_tag.outputs.tag, '-') }}
         shell: bash
         env:
@@ -436,10 +404,6 @@ jobs:
 
       - name: Commit promoted CHANGELOG.md back to main (verified)
         if: ${{ !contains(steps.release_tag.outputs.tag, '-') }}
-        # Uses the same createCommitOnBranch pattern as changelog-append.yml
-        # and the wrapper-hash step so the commit lands verified on main.
-        # Done last so a build/release failure doesn't leave a phantom
-        # changelog promotion for a release that never shipped.
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

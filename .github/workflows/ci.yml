@@ -3,8 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    # Negations re-include CHANGELOG.md so changelog-only pulls and commits
-    # still exercise the required status check.
     paths-ignore:
       - '**.md'
       - '!CHANGELOG.md'

@@ -28,8 +28,6 @@ internal sealed class TerminalInputBuffer
         lock (_lock) return _buffer.ToString();
     }
 
-    // Caret offset in characters from the start of the line. The overlay redraws the whole
-    // line every frame, so this is what tells it where to leave the hardware cursor.
     public int Cursor
     {
         get { lock (_lock) return _cursor; }

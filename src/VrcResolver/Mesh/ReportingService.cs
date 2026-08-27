@@ -9,28 +9,6 @@ using VrcResolver.Shared;
 
 namespace VrcResolver;
 
-// Anonymous failure reporting to ServerEndpoints.ReportUrl. Restored from
-// the legacy ReportingService — opt-in via env var, privacy-scrubbed
-// before send, rate-limited.
-//
-// Privacy contract (mirrors what the server validates):
-//   - Full URL is NEVER transmitted. Only the bare domain (host minus
-//     "www." prefix). Paths and query strings are reduced to a 12-char
-//     hex hash of SHA-256.
-//   - For YouTube specifically, the video ID is also hashed.
-//   - Error strings (yt-dlp stderr, exception messages, mesh reason
-//     codes) are run through Sanitize() which strips:
-//       * %USERPROFILE% and the literal Environment.UserName
-//       * Windows-style C:\... paths and Unix-style /home/... paths
-//       * IPv4 literals
-//       * the original URL (so we don't accidentally re-leak it via the
-//         error text)
-//       * long token-shaped sequences (>=20 contiguous base64 chars)
-//   - Rate limit: at most 1 report per 30s, max 20 per process session.
-//     The server applies its own per-IP rate limit on top.
-//
-// Opt-in: set VRCRESOLVER_ANONYMOUS_REPORTING=1 at process launch (the
-// pre-rename env prefix keeps working via LegacyCompat). Default OFF.
 internal static partial class ReportingService
 {
     private static readonly TimeSpan MinInterval = TimeSpan.FromSeconds(30);
@@ -65,21 +43,16 @@ internal static partial class ReportingService
             ConsoleUx.Write(LogComponent.Report, "anonymous failure reporting ON (VRCRESOLVER_ANONYMOUS_REPORTING=1)");
     }
 
-    // Fire a report when the mesh returns fallback_native. Filters out
-    // transient reasons that aren't failure-of-strategy (server_unreachable,
-    // discovery_in_progress) — those would just spam the channel during
-    // a network outage.
     public static void ReportFallback(ResolveRequest req, string reason, string? errorSummary)
     {
         if (!_enabled || req == null || string.IsNullOrEmpty(req.Url)) return;
         string failureKind = MapReasonToFailureKind(reason);
-        if (string.IsNullOrEmpty(failureKind)) return; // skipped (transient)
+        if (string.IsNullOrEmpty(failureKind)) return;
         _ = Task.Run(() => SendAsync(req, failureKind, errorSummary));
     }
 
     private static async Task SendAsync(ResolveRequest req, string failureKind, string? errorSummary)
     {
-        // Rate-limit gate.
         lock (_gate)
         {
             if (_sentThisSession >= MaxPerSession) return;
@@ -101,7 +74,7 @@ internal static partial class ReportingService
             FailureKind = failureKind,
             UrlDomain = domain,
             Player = player,
-            StreamType = "vod", // we have no reliable signal client-side; server budgets are loose
+            StreamType = "vod",
             UrlPathHashShort = HashShort(ExtractPathAndQuery(req.Url)),
             VideoIdHashShort = HashShort(ExtractYouTubeVideoId(req.Url) ?? ""),
             ErrorSummary = TrimTo(Sanitize(errorSummary ?? "", req.Url), 500),
@@ -109,9 +82,6 @@ internal static partial class ReportingService
 
         try
         {
-            // AOT migration: typed PostAsJsonAsync overload routed through
-            // MeshJsonContext source-gen. Equivalent wire output to the
-            // pre-AOT reflection-based extension method; just AOT-clean.
             using var resp = await _http.PostAsJsonAsync(
                 ServerEndpoints.ReportUrl, payload, MeshJsonContext.Default.ReportPayload).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
@@ -125,9 +95,6 @@ internal static partial class ReportingService
 
     private static string MapReasonToFailureKind(string reason)
     {
-        // Mesh fallback reasons → server's AllowedFailureKinds set
-        // {Unknown, NetworkError, Timeout, Blocked403, NotFound404,
-        //  JsChallenge, LowQuality, PlaybackFailed, AllStrategiesFailed}.
         return reason switch
         {
             WireConstants.FallbackAllConfigsFailed => "AllStrategiesFailed",
@@ -135,7 +102,6 @@ internal static partial class ReportingService
             WireConstants.FallbackInternalError => "Unknown",
             WireConstants.ReasonUnityUnsupportedFormat => "Unknown",
             WireConstants.ReasonWarpDown => "NetworkError",
-            // Transient or server-refused — don't report:
             WireConstants.FallbackServerUnreachable => "",
             WireConstants.FallbackDiscoveryInProgress => "",
             WireConstants.FallbackRateLimited => "",
@@ -144,7 +110,6 @@ internal static partial class ReportingService
         };
     }
 
-    // Returns the bare host (no www., no port, lowercase).
     private static string? ExtractDomain(string url)
     {
         try
@@ -176,9 +141,6 @@ internal static partial class ReportingService
         return m.Success ? m.Groups[1].Value : null;
     }
 
-    // SHA-256 prefix — first 12 hex chars. Stable across reports for the
-    // same value so the server-side dashboard can correlate, but
-    // computationally one-way so the original input isn't recoverable.
     private static string HashShort(string s)
     {
         if (string.IsNullOrEmpty(s)) return "";
@@ -192,10 +154,6 @@ internal static partial class ReportingService
     private static string TrimTo(string s, int maxLen) =>
         s.Length <= maxLen ? s : s[..maxLen];
 
-    // Strip user-identifying tokens and the original URL from a free-form
-    // string before it's sent. The server rejects on a leak-pattern hit
-    // anyway; this is the client-side first pass so we don't waste
-    // round-trips on rejected payloads.
     [GeneratedRegex(@"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")]
     private static partial Regex Ipv4();
     [GeneratedRegex(@"[A-Za-z]:\\[^\s""]+")]
@@ -214,18 +172,18 @@ internal static partial class ReportingService
             if (!string.IsNullOrEmpty(un) && un.Length >= 3)
                 s = s.Replace(un, "<user>", StringComparison.OrdinalIgnoreCase);
         }
-        catch { /* best-effort */ }
+        catch { }
         try
         {
             string up = Environment.GetEnvironmentVariable("USERPROFILE") ?? "";
             if (!string.IsNullOrEmpty(up))
                 s = s.Replace(up, "%USERPROFILE%", StringComparison.OrdinalIgnoreCase);
         }
-        catch { /* best-effort */ }
+        catch { }
         if (!string.IsNullOrEmpty(originalUrl))
             s = s.Replace(originalUrl, "<url>", StringComparison.OrdinalIgnoreCase);
         try { s = Environment.MachineName is { Length: > 0 } mn ? s.Replace(mn, "<machine>", StringComparison.OrdinalIgnoreCase) : s; }
-        catch { /* best-effort */ }
+        catch { }
         s = WindowsPath().Replace(s, "<path>");
         s = UnixPath().Replace(s, "<path>");
         s = Ipv4().Replace(s, "<ip>");
@@ -233,9 +191,6 @@ internal static partial class ReportingService
         return s;
     }
 
-    // AOT migration: promoted private -> internal so MeshJsonContext can
-    // [JsonSerializable(typeof(ReportingService.ReportPayload))] and emit
-    // a source-gen formatter the typed PostAsJsonAsync overload uses.
     internal sealed class ReportPayload
     {
         [JsonPropertyName("appVersion")] public string AppVersion { get; set; } = "";

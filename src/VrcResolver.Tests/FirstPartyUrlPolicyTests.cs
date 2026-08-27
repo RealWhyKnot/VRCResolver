@@ -5,9 +5,6 @@ namespace VrcResolver.Tests;
 
 public class FirstPartyUrlPolicyTests
 {
-    // Both host families are first-party: the server intentionally keeps
-    // returning whyknot-family playback URLs for wire compatibility with
-    // pre-rename clients.
     [Theory]
     [InlineData("https://vrcresolver.com/api/proxy/manifest.m3u8?q=abc", true)]
     [InlineData("https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=abc", true)]
@@ -151,8 +148,6 @@ public class FirstPartyUrlPolicyTests
             out _));
     }
 
-    // Server-provided welcome_hosts augmentation: strict union. The hardcoded
-    // families always answer; a server list can only ADD validated entries.
     [Fact]
     public void ServerProvidedHosts_UnionWithHardcoded_NeverReplace()
     {

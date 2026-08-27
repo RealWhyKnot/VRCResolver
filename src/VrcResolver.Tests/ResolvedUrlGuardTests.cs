@@ -85,9 +85,6 @@ public class ResolvedUrlGuardTests
         Assert.False(RelayLiveness.IsListening(port));
     }
 
-    // The wrapper's AVPro backstop, now in Shared where tests reach it.
-    // Blacklist semantics: trust by default, reject only the shapes AVPro
-    // demonstrably cannot decode.
     [Theory]
     [InlineData("rtmp://live.example.com/stream", false)]
     [InlineData("rtmps://live.example.com/stream", false)]

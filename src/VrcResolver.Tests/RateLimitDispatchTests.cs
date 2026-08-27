@@ -11,11 +11,6 @@ using Xunit;
 
 namespace VrcResolver.Tests;
 
-// Server control-frame handling. Before these handlers existed, a rate_limited
-// or protocol_error frame was default-discarded, the pending resolve timed out
-// into server_unreachable (retryable AND health-gate-unhealthy), and the retry
-// loop added load to a server that had just refused us. Reflection reaches the
-// private dispatch + fields, same pattern as V31BinaryControlFrameTests.
 public class RateLimitDispatchTests
 {
     private static async Task DispatchJsonAsync(MeshClient client, string json)
@@ -143,9 +138,6 @@ public class RateLimitDispatchTests
     [Fact]
     public async Task ProtocolError_without_id_never_touches_pending()
     {
-        // An id-less protocol_error may concern a fire-and-forget frame
-        // (playback_feedback validation); nuking pending resolves for it
-        // would fail an unrelated video.
         var client = new MeshClient();
         var pending = Pending(client);
         var tcs = new TaskCompletionSource<MeshResolveResult>();

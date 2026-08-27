@@ -82,12 +82,8 @@ internal sealed partial class MeshClient
             finally
             {
                 _welcomeTcs?.TrySetResult(null);
-                // Clean close (server sent a Close frame) exits PumpAsync
-                // without throwing, so the catch above never runs -- without
-                // this, in-flight resolves sat parked until the IPC budget
-                // fired. Idempotent with the catch path's call.
                 FailAllPending(WireConstants.FallbackServerUnreachable);
-                try { _ws?.Dispose(); } catch { /* ignore */ }
+                try { _ws?.Dispose(); } catch { }
                 _ws = null;
             }
 
@@ -199,7 +195,7 @@ internal sealed partial class MeshClient
                         else
                         {
                             ConsoleUx.Warn(LogComponent.Mesh, "unexpected Binary frame on json-negotiated connection -- aborting + reconnecting");
-                            try { _ws?.Abort(); } catch { /* ignore */ }
+                            try { _ws?.Abort(); } catch { }
                             return;
                         }
                         break;
@@ -209,7 +205,7 @@ internal sealed partial class MeshClient
         finally
         {
             pumpCts.Cancel();
-            try { await hbTask.ConfigureAwait(false); } catch { /* ignore */ }
+            try { await hbTask.ConfigureAwait(false); } catch { }
         }
     }
 
@@ -230,7 +226,7 @@ internal sealed partial class MeshClient
 
             if (_lastPongUtc < sentAt)
             {
-                try { ws.Abort(); } catch { /* ignore */ }
+                try { ws.Abort(); } catch { }
                 return;
             }
         }

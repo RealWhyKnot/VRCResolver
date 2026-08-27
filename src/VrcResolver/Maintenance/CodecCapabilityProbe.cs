@@ -4,15 +4,6 @@ using VrcResolver.Shared;
 
 namespace VrcResolver;
 
-// Verifies which extension-backed video codecs this machine can actually decode,
-// by asking Media Foundation for a registered decoder (MFTEnumEx). That is the
-// truth regardless of how the decoder arrived — store package, device-manufacturer
-// variant, or a hardware MFT — where an AppX name check only sees store installs.
-//
-// The watchdog probes once at startup and again after a confirmed codec install;
-// LocalIpcServer reads the snapshot to prune the wrapper's static accept_codecs
-// claim down to verified reality before it goes to the server. A failed probe
-// yields null and the claim conservatively drops every extension-backed codec.
 [SupportedOSPlatform("windows")]
 internal static class CodecCapabilityProbe
 {
@@ -29,8 +20,6 @@ internal static class CodecCapabilityProbe
         HashSet<string>? result = null;
         try
         {
-            // MFSTARTUP_LITE; ref-counted and never shut down — the watchdog is
-            // long-lived and process exit reclaims it.
             if (MFStartup(MfVersion, MfStartupLite) >= 0)
             {
                 var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -50,7 +39,6 @@ internal static class CodecCapabilityProbe
             + (result == null ? "unavailable" : result.Count == 0 ? "none" : string.Join(",", result)));
     }
 
-    // Fresh MFTEnumEx for one codec token; null = probe machinery unavailable.
     internal static bool? ProbeDecoder(string codec)
     {
         Guid subtype;
@@ -95,7 +83,6 @@ internal static class CodecCapabilityProbe
 
     private static readonly Guid MftCategoryVideoDecoder = new("d6c02d4b-6833-45b4-971a-05a4b04bab91");
     private static readonly Guid MfMediaTypeVideo = new("73646976-0000-0010-8000-00aa00389b71");
-    // FourCC subtypes: first GUID field is the little-endian FourCC.
     private static readonly Guid MfVideoFormatHevc = new("43564548-0000-0010-8000-00aa00389b71");
     private static readonly Guid MfVideoFormatVp90 = new("30395056-0000-0010-8000-00aa00389b71");
     private static readonly Guid MfVideoFormatAv01 = new("31305641-0000-0010-8000-00aa00389b71");

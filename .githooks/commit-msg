@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Reject commit subjects that contain more than one build-version stamp.
 
 set -euo pipefail
 

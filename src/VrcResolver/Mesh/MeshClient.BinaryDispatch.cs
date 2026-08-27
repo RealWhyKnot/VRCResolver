@@ -9,13 +9,10 @@ internal sealed partial class MeshClient
 {
     private async Task DispatchBinaryFrameAsync(byte[] payload, CancellationToken ct)
     {
-        // Peek action without consuming the array — MessagePackReader
-        // is a ref-struct over a ReadOnlySequence<byte> view.
         string action;
         try
         {
             var reader = new MessagePack.MessagePackReader(payload);
-            // Frame is a fixed-length array; first element is action string.
             int count = reader.ReadArrayHeader();
             if (count < 1)
             {
@@ -43,10 +40,6 @@ internal sealed partial class MeshClient
                     }
                     if (mp == null || string.IsNullOrEmpty(mp.Id)) return;
 
-                    // Transcode to the JSON ResolveResponse shape the
-                    // wrapper expects. Field-by-field copy — server's
-                    // msgpack tag list omits Reason/Message on resolved
-                    // frames so we just don't populate them.
                     var resp = new ResolveResponse
                     {
                         Action = WireConstants.ActionResolved,
@@ -65,10 +58,6 @@ internal sealed partial class MeshClient
                     };
                     byte[] jsonFrame = JsonSerializer.SerializeToUtf8Bytes(resp, MeshJsonContext.Default.ResolveResponse);
 
-                    // Same downstream routing as the text-path: stats
-                    // recording (bytes_estimate accumulator), recent-cid
-                    // map (resolved URL → cid for VrcLogMonitor), pending
-                    // TCS resolve.
                     if (mp.BytesEstimate.HasValue)
                         WatchdogStats.RecordBytesEstimate(mp.BytesEstimate.Value);
 
@@ -127,20 +116,6 @@ internal sealed partial class MeshClient
                         " " + LogUtil.SanitizeForConsole(mp.Message ?? "", 240));
                     return;
                 }
-            // Defense-in-depth (2026-05-05 incident): per the v3.1 spec, control
-            // frames (pong / protocol_error / rate_limited) ALWAYS go as JSON-Text,
-            // but a server-side regression at commit 2c4b432 (since fixed) routed
-            // pong through SendTo<T>, sending it as msgpack-Binary on negotiated
-            // connections. The client's binary dispatch had only the three
-            // hot-path actions and default-discarded pong -- _lastPongUtc never
-            // advanced, heartbeat watchdog aborted the WS at every PongDeadline,
-            // and the user got a ~55 s reconnect storm for hours.
-            //
-            // Now we tolerate control actions on either path so a future server
-            // regression can't reproduce the storm. We don't bother decoding the
-            // body (pong has no payload; protocol_error/rate_limited have fields
-            // but no DTOs over here for the binary shape -- their content stays
-            // file-only diagnostic).
             case WireConstants.ActionPong:
                 _lastPongUtc = DateTime.UtcNow;
                 Logger.WriteFileOnly("[mesh] pong received via binary path (server should send as Text per v3.1 spec)");
@@ -156,7 +131,7 @@ internal sealed partial class MeshClient
                             await SendTextFrameAsync(PongFrame, ct).ConfigureAwait(false);
                         }
                     }
-                    catch { /* heartbeat will catch dead socket */ }
+                    catch { }
                     return;
                 }
             case "protocol_error":

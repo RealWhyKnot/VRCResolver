@@ -12,10 +12,6 @@ internal sealed partial class MeshClient
         try { doc = JsonDocument.Parse(payload); }
         catch (Exception ex)
         {
-            // Server protocol regression / framing bug. Without this log a
-            // malformed frame would drop pending TCS to time out 10s later as
-            // server_unreachable with no breadcrumb. Dedupe by exception type
-            // so a flapping server can't fill the scrollback.
             LogParseFailure(ex, payload);
             return;
         }
@@ -29,11 +25,6 @@ internal sealed partial class MeshClient
             case WireConstants.ActionResolved:
             case WireConstants.ActionFallbackNative:
                 {
-                    // Extract id, reason, and (on `resolved`) the resolved URL
-                    // from the parsed doc; then dispose the doc and hand the
-                    // verified raw frame bytes to the pending TCS. Caller writes
-                    // bytes through to the pipe — no JsonDocument re-encode on
-                    // the hot path.
                     string id = "";
                     if (doc.RootElement.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String)
                         id = idEl.GetString() ?? "";
@@ -50,11 +41,6 @@ internal sealed partial class MeshClient
                         resolvedUrl = urlEl.GetString();
                     }
 
-                    // bytes_estimate is a v2 response field (server's stream-size
-                    // estimate). Sum across resolves for the heartbeat line so
-                    // the operator can see aggregate "stream-bytes" served. Only
-                    // counted on `resolved` (fallback_native means og takes over
-                    // and the bytes don't go through us).
                     if (action == WireConstants.ActionResolved
                         && doc.RootElement.TryGetProperty("bytes_estimate", out var beEl)
                         && beEl.ValueKind == JsonValueKind.Number
@@ -66,16 +52,10 @@ internal sealed partial class MeshClient
                     if (action == WireConstants.ActionFallbackNative)
                         LogFallbackNative(id, reason);
 
-                    // doc no longer needed past this point — payload bytes carry
-                    // everything LocalIpcServer needs to forward to the wrapper.
                     doc.Dispose();
 
                     if (string.IsNullOrEmpty(id)) return;
 
-                    // Pop the inflight cid so VrcLogMonitor can later look it up by
-                    // the resolved URL. Only on `resolved` — fallback_native means
-                    // the patched yt-dlp re-runs vanilla, so the URL AVPro
-                    // ultimately opens isn't ours to attribute.
                     _inflightCids.TryRemove(id, out var cid);
                     if (action == WireConstants.ActionResolved
                         && !string.IsNullOrEmpty(cid)
@@ -99,20 +79,11 @@ internal sealed partial class MeshClient
                     {
                         ConsoleUx.Warn(LogComponent.Mesh, "welcome parse failed -- assuming v1 server: "
                             + ex.GetType().Name + ": " + LogUtil.SanitizeForConsole(ex.Message, 160));
-                        // Pin protocol version to v1 so subsequent ResolveAsync calls
-                        // don't get stuck waiting for a welcome that never arrives in
-                        // a parseable form.
                         Interlocked.CompareExchange(ref _serverProtocolVersion, 1, 0);
                     }
 
                     if (welcome != null)
                     {
-                        // Clamp to [1, ClientProtocolVersion]:
-                        //   - 0 / missing field demoting us back to "pre-welcome"
-                        //     would re-arm the 1s-timer's CompareExchange branch
-                        //     and confuse routing decisions. Force at least 1.
-                        //   - We can't speak anything newer than ClientProtocolVersion;
-                        //     advertising support for v999 would be a lie.
                         int negotiated = Math.Clamp(
                             welcome.ProtocolVersion,
                             1,
@@ -124,10 +95,6 @@ internal sealed partial class MeshClient
                         _serverVersion = welcome.ServerVersion;
                         _ytDlpVersion = welcome.YtDlpVersion;
 
-                        // v3.1: capture the post-welcome wire format the
-                        // server picked from our accept_formats list. Null
-                        // / missing field = "json" (v3.0 server, or v3.1
-                        // server we sent json-only opt-out to).
                         _negotiatedFormat = welcome.NegotiatedFormat ?? WireConstants.FormatJson;
                         _isMsgpackFormat = string.Equals(_negotiatedFormat, WireConstants.FormatMsgpack, StringComparison.Ordinal);
                         Logger.WriteFileOnly("[mesh][v3.1] negotiated_format=" + _negotiatedFormat
@@ -136,10 +103,6 @@ internal sealed partial class MeshClient
                         if (welcome.Features == null)
                             ConsoleUx.Warn(LogComponent.Mesh, "welcome missing required field: features");
 
-                        // Feature welcome_hosts: adopt the server's host/path lists so the
-                        // relay policy stops depending on this build's hardcoded set. The
-                        // policy validates and UNIONS -- a hostile or broken list can only
-                        // add candidate hosts that still have to pass every other guard.
                         if (HasFeature(welcome.Features, WireConstants.FeatureWelcomeHosts))
                             FirstPartyUrlPolicy.SetServerProvided(welcome.FirstPartyHosts, welcome.PlaybackProxyPaths);
 
@@ -155,12 +118,6 @@ internal sealed partial class MeshClient
                             " warp_active=" + (welcome.WarpActive?.ToString() ?? "?") +
                             " features=" + LogUtil.SanitizeForConsole(features, 240));
 
-                        // v3: persist the welcome contents keyed by hash so
-                        // the next reconnect can offer it back in client_hello
-                        // and let the server reply with the smaller
-                        // welcome_cached frame. Only on v3 connections AND
-                        // when the server actually sent a hash — v2 servers
-                        // don't and shouldn't cache.
                         if (_isV3Connection && !string.IsNullOrEmpty(welcome.WelcomeHash)
                             && !string.IsNullOrEmpty(_currentNodeHost))
                         {
@@ -179,15 +136,10 @@ internal sealed partial class MeshClient
                 }
             case WireConstants.ActionWelcomeCached:
                 {
-                    // v3: server confirmed our cached welcome_hash matched.
-                    // Hydrate per-connection state from the local cache;
-                    // server only sent the dynamic fields (warp_active +
-                    // node label) in this small frame. Engines / features /
-                    // version strings come from the cache entry.
                     if (!_isV3Connection)
                     {
                         ConsoleUx.Warn(LogComponent.Mesh, "welcome_cached received on non-v3 connection -- protocol error, reconnecting");
-                        try { _ws?.Abort(); } catch { /* ignore */ }
+                        try { _ws?.Abort(); } catch { }
                         doc.Dispose();
                         return;
                     }
@@ -208,16 +160,10 @@ internal sealed partial class MeshClient
                         : null;
                     if (entry == null)
                     {
-                        // Server claimed cache hit but we have nothing to
-                        // hydrate from — sync drift (file deleted between
-                        // client_hello send and this dispatch, or another
-                        // process clobbered the cache). Drop any stale
-                        // slot and force a clean reconnect with null hash;
-                        // the server will resend the full welcome.
                         if (!string.IsNullOrEmpty(_currentNodeHost))
                             _welcomeCache.Invalidate(_currentNodeHost);
                         ConsoleUx.Warn(LogComponent.Mesh, "welcome_cached but local entry missing -- invalidating + reconnecting");
-                        try { _ws?.Abort(); } catch { /* ignore */ }
+                        try { _ws?.Abort(); } catch { }
                         doc.Dispose();
                         return;
                     }
@@ -235,11 +181,6 @@ internal sealed partial class MeshClient
                     if (HasFeature(entry.Features, WireConstants.FeatureWelcomeHosts))
                         FirstPartyUrlPolicy.SetServerProvided(entry.FirstPartyHosts, entry.PlaybackProxyPaths);
 
-                    // v3.1: server's negotiated format is per-connection,
-                    // never cached — read from the dynamic fields the
-                    // welcome_cached frame carries. Null / missing field
-                    // means json (v3.0 server, or v3.1 server we sent
-                    // json-only opt-out to).
                     _negotiatedFormat = cached?.NegotiatedFormat ?? WireConstants.FormatJson;
                     _isMsgpackFormat = string.Equals(_negotiatedFormat, WireConstants.FormatMsgpack, StringComparison.Ordinal);
 
@@ -248,14 +189,7 @@ internal sealed partial class MeshClient
                         + " negotiated_format=" + _negotiatedFormat
                         + " features=" + (entry.Features != null
                             ? string.Join(",", entry.Features) : "<none>"));
-                    // No INFO console line — equivalent state was already
-                    // cached; the user doesn't need a "still v3, still
-                    // connected" reminder. The connect+welcome banner
-                    // already fired the first time.
 
-                    // _welcomeTcs awaits a WelcomeFrame? — null is fine
-                    // here. ResolveAsync waiters key off _serverProtocolVersion
-                    // and _serverFeatures, both of which are now set.
                     _welcomeTcs?.TrySetResult(null);
                     doc.Dispose();
                     return;
@@ -266,11 +200,6 @@ internal sealed partial class MeshClient
                 return;
             case WireConstants.ActionRateLimited:
                 {
-                    // Server refused an action over budget. Before this handler the
-                    // frame was default-discarded, the pending TCS timed out into
-                    // server_unreachable (retryable AND health-gate-unhealthy) and
-                    // the retry loop added MORE load. rate_limited is non-retryable
-                    // and healthy by construction: the server answered.
                     string meshAction = "";
                     if (doc.RootElement.TryGetProperty(WireConstants.FieldMeshAction, out var maEl)
                         && maEl.ValueKind == JsonValueKind.String)
@@ -301,8 +230,6 @@ internal sealed partial class MeshClient
                         }
                         else
                         {
-                            // Old servers omit the id; everything pending is a resolve
-                            // and every one of them was just refused.
                             FailAllPending(WireConstants.FallbackRateLimited);
                         }
                     }
@@ -310,10 +237,6 @@ internal sealed partial class MeshClient
                 }
             case WireConstants.ActionProtocolError:
                 {
-                    // Server rejected a frame shape. Fail the named request fast
-                    // (non-retryable, health-gate-neutral); without an id this may
-                    // concern a fire-and-forget frame (playback_feedback), so only
-                    // log -- never nuke unrelated pending resolves.
                     string peReason = "";
                     if (doc.RootElement.TryGetProperty("reason", out var peReasonEl)
                         && peReasonEl.ValueKind == JsonValueKind.String)
@@ -348,20 +271,15 @@ internal sealed partial class MeshClient
                 doc.Dispose();
                 try
                 {
-                    // Snapshot _ws before send — same TOCTOU concern as the
-                    // heartbeat loop's snapshot.
                     var pongWs = _ws;
                     if (pongWs is { State: WebSocketState.Open })
                     {
                         await SendTextFrameAsync(PongFrame, ct).ConfigureAwait(false);
                     }
                 }
-                catch { /* heartbeat will catch dead socket */ }
+                catch { }
                 return;
             default:
-                // Server-supplied string — strip control chars + truncate so a
-                // hostile or buggy server can't inject ANSI escapes into the
-                // user's console window.
                 ConsoleUx.Warn(LogComponent.Mesh, "unknown action -- discarding: "
                     + LogUtil.SanitizeForConsole(action, 64));
                 doc.Dispose();
@@ -392,8 +310,6 @@ internal sealed partial class MeshClient
 
 
 
-    // Dedupe parse-failure logs by exception type so a flapping server can't
-    // fill scrollback. One log per (type) per minute, plus a counter.
     private readonly Dictionary<string, (DateTime LastEmit, int Count)> _parseFailDedupe = new();
     private void LogParseFailure(Exception ex, byte[] payload)
     {

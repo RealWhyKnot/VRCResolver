@@ -42,7 +42,6 @@ public sealed class FallbackBinaryTests
     [Fact]
     public void Select_SkipsCandidatesThatAreOurWrapper()
     {
-        // Local og exists but IS our wrapper -> skip; VRChat's yt-dlp is vanilla -> use it.
         var picked = FallbackBinary.Select(Exe, Vrc,
             exists: p => p == Og(Exe) || p == YtDlp(Vrc),
             isOurWrapper: p => p == Og(Exe));
@@ -56,7 +55,6 @@ public sealed class FallbackBinaryTests
     [Fact]
     public void Select_ReturnsNull_WhenOnlyCandidateIsOurWrapper()
     {
-        // Swapped state, no backup: VRChat's own yt-dlp is our wrapper -> nothing usable.
         Assert.Null(FallbackBinary.Select(Exe, Vrc,
             exists: p => p == YtDlp(Vrc),
             isOurWrapper: _ => true));

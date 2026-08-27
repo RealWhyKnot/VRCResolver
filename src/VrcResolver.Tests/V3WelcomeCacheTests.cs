@@ -3,11 +3,6 @@ using Xunit;
 
 namespace VrcResolver.Tests;
 
-// Per-node welcome-cache persistence. The cache file is the only state
-// the v3 handshake holds across launches; a corrupt or missing file
-// MUST gracefully degrade to "send null hash, take the full welcome on
-// the wire" rather than throwing — the v3 wire path assumes cache is
-// optional.
 public class V3WelcomeCacheTests : IDisposable
 {
     private readonly string _tempDir;
@@ -22,7 +17,7 @@ public class V3WelcomeCacheTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempDir, recursive: true); } catch { /* best-effort */ }
+        try { Directory.Delete(_tempDir, recursive: true); } catch { }
     }
 
     [Fact]
@@ -59,8 +54,6 @@ public class V3WelcomeCacheTests : IDisposable
         cache.Store("us1.vrcresolver.com", welcome1, "hash1");
         cache.Store("eu1.vrcresolver.com", welcome2, "hash2");
 
-        // Re-open the cache from disk to confirm the persistence layer
-        // (not just an in-memory dict).
         var reopened = new WelcomeCache(_path);
         var got1 = reopened.Get("us1.vrcresolver.com");
         var got2 = reopened.Get("eu1.vrcresolver.com");
@@ -77,8 +70,6 @@ public class V3WelcomeCacheTests : IDisposable
     [Fact]
     public void Store_for_one_node_does_not_evict_another()
     {
-        // Per-node keying: writing node2's welcome must not blow away
-        // node1's. Single-slot bug regression test.
         var cache = new WelcomeCache(_path);
         cache.Store("us1.vrcresolver.com", new WelcomeFrame { ProtocolVersion = 3, Node = "node1" }, "h1");
         cache.Store("eu1.vrcresolver.com", new WelcomeFrame { ProtocolVersion = 3, Node = "node2" }, "h2");
@@ -100,8 +91,6 @@ public class V3WelcomeCacheTests : IDisposable
     [Fact]
     public void Get_on_corrupt_file_returns_null()
     {
-        // Corrupt JSON should NOT throw — the v3 handshake treats it as
-        // cache miss and continues.
         File.WriteAllText(_path, "{ this is not valid json");
         var cache = new WelcomeCache(_path);
         Assert.Null(cache.Get("us1.vrcresolver.com"));
@@ -110,10 +99,6 @@ public class V3WelcomeCacheTests : IDisposable
     [Fact]
     public void Store_writes_atomically_via_tmp_then_rename()
     {
-        // After Store, no .new sidecar should remain. Earlier non-atomic
-        // implementations could leave the .new file alongside on a crash;
-        // confirm File.Move(overwrite:true) replaces the destination
-        // cleanly.
         var cache = new WelcomeCache(_path);
         cache.Store("node1", new WelcomeFrame { ProtocolVersion = 3 }, "h");
         Assert.True(File.Exists(_path));
@@ -131,8 +116,6 @@ public class V3WelcomeCacheTests : IDisposable
     [Fact]
     public void Store_on_empty_hash_is_noop()
     {
-        // Defensive: never persist an entry without a hash — a hashless
-        // entry can't satisfy the next handshake's lookup anyway.
         var cache = new WelcomeCache(_path);
         cache.Store("node1", new WelcomeFrame { ProtocolVersion = 3 }, "");
         Assert.Null(cache.Get("node1"));
@@ -142,16 +125,8 @@ public class V3WelcomeCacheTests : IDisposable
     [Fact]
     public void Oversize_file_returns_null_without_deserialize()
     {
-        // Hardening: a corrupt/hostile multi-MB cache file must not
-        // pump JsonSerializer.Deserialize against the whole stream
-        // before catch fires. Cap is a FileInfo.Length pre-check.
-        // Plant a file at MaxCacheFileBytes + 1 byte; cache must read
-        // null and not throw.
         long cap = WelcomeCache.MaxCacheFileBytes;
         var bytes = new byte[cap + 1];
-        // Fill with a `{` followed by zeros — would parse as the start
-        // of valid JSON if we did try to deserialize. We assert the
-        // cap fires BEFORE parsing.
         bytes[0] = (byte)'{';
         File.WriteAllBytes(_path, bytes);
 
@@ -162,45 +137,30 @@ public class V3WelcomeCacheTests : IDisposable
     [Fact]
     public void Oversize_file_renamed_to_oversized_marker()
     {
-        // After the oversize check, the file gets renamed aside with a
-        // .oversized-<utc> suffix so the next launch doesn't re-trip on
-        // the same bytes. Server's next welcome rebuilds a clean cache.
         long cap = WelcomeCache.MaxCacheFileBytes;
         File.WriteAllBytes(_path, new byte[cap + 1]);
 
         var cache = new WelcomeCache(_path);
         cache.Get("us1.vrcresolver.com");
 
-        // Original path should no longer exist (renamed aside).
         Assert.False(File.Exists(_path));
-        // An .oversized-<utc> sibling should exist.
         var aside = Directory.GetFiles(_tempDir, "v3_welcome_cache.json.oversized-*");
         Assert.Single(aside);
-        // And its content is the oversized bytes (preserved for forensics).
         Assert.Equal(cap + 1, new FileInfo(aside[0]).Length);
     }
 
     [Fact]
     public void Save_failure_cleans_tmp_residue()
     {
-        // Simulate a save failure by holding the destination path open
-        // with FileShare.None so File.Move can't overwrite it. SaveFile
-        // catches, but its outer catch must clean up the .new tmp.
         var cache = new WelcomeCache(_path);
-        // Seed a real cache file first so File.Move's destination exists.
         cache.Store("us1.vrcresolver.com", new WelcomeFrame { ProtocolVersion = 3 }, "h0");
         Assert.True(File.Exists(_path));
 
-        // Hold the cache file exclusively.
         using (var lockFs = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.None))
         {
-            // Now try to Store again — File.Move should fail because the
-            // destination is locked. Outer catch should delete the .new
-            // tmp.
             cache.Store("us1.vrcresolver.com", new WelcomeFrame { ProtocolVersion = 3 }, "h1");
         }
 
-        // The .new tmp should have been cleaned up.
         Assert.False(File.Exists(_path + ".new"),
             "SaveFile catch should have deleted the .new tmp residue");
     }
@@ -208,9 +168,6 @@ public class V3WelcomeCacheTests : IDisposable
     [Fact]
     public void Store_persists_welcome_hosts_fields_for_cached_hydration()
     {
-        // welcome_cached hydration reads these from the entry; the server's
-        // hash covers them, so a change forces a full welcome and this cache
-        // can never serve stale lists.
         var cache = new WelcomeCache(_path);
         cache.Store("us1.vrcresolver.com", new WelcomeFrame
         {

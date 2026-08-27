@@ -10,10 +10,6 @@ public static class FirstPartyUrlPolicy
         "vtt", "srt",
     };
 
-    // Server-provided augmentation (welcome feature "welcome_hosts"). Union-only
-    // and validated: the hardcoded families/paths below always answer, and a
-    // server list can only ADD candidates -- which still pass every other relay
-    // guard. Whole-array swaps so concurrent readers see a consistent snapshot.
     private static string[] s_serverHostFamilies = Array.Empty<string>();
     private static string[] s_serverProxyPaths = Array.Empty<string>();
 
@@ -27,9 +23,6 @@ public static class FirstPartyUrlPolicy
 
     internal static void ResetServerProvidedForTests() => SetServerProvided(null, null);
 
-    // DNS-shaped apex families only: >=2 labels of [a-z0-9-], no IP literals,
-    // no scheme/path/port debris. Anything else is dropped, not rejected as a
-    // whole -- a partially-bad list still contributes its good entries.
     private static string[] SanitizeHostFamilies(string[]? entries)
     {
         if (entries == null || entries.Length == 0) return Array.Empty<string>();
@@ -58,8 +51,6 @@ public static class FirstPartyUrlPolicy
         return result.ToArray();
     }
 
-    // Proxy-path prefixes must stay under /api/ -- the relay only ever talks to
-    // the server's api surface, and a server bug must not widen that to "/".
     private static string[] SanitizeProxyPaths(string[]? entries)
     {
         if (entries == null || entries.Length == 0) return Array.Empty<string>();
@@ -83,9 +74,6 @@ public static class FirstPartyUrlPolicy
         return result.ToArray();
     }
 
-    // Both hardcoded host families are first-party: the server intentionally
-    // returns whyknot-family playback URLs for wire compatibility with
-    // pre-rename clients, so this client must recognize both as its own.
     public static bool IsFirstPartyHost(string host)
     {
         if (host.Equals("vrcresolver.com", StringComparison.OrdinalIgnoreCase)

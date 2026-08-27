@@ -1,53 +1,3 @@
-<#
-.SYNOPSIS
-  Maintains CHANGELOG.md so the changelog stays current without manual editing
-  on every release.
-
-.DESCRIPTION
-  Three modes:
-
-    Append   Parses commit subjects in -Range, buckets them by conventional-
-             commit type, and inserts bullets under the "## Unreleased" heading
-             at the top of the file. Skips merge commits, bot commits, and
-             commits explicitly tagged "[skip changelog]" in the subject. Skips
-             types that aren't user-visible (docs/build/ci/chore/test) so the
-             changelog stays focused on behavior changes.
-
-    Promote  Renames the "## Unreleased" heading to "## [vTAG](...) -- DATE",
-             links to the GitHub release page, and inserts a fresh empty
-             "## Unreleased" section above. Used by release.yml on tag push so
-             the embedded CHANGELOG.md inside the shipped exe carries the
-             versioned notes for that release.
-
-    Notes    Reads the current "## Unreleased" section content (or, with
-             -ForVersion, reads the section for that version) and writes it to
-             stdout. Used to inject the section into the GitHub release body.
-
-  The script is invoked from .github/workflows/changelog-append.yml and
-  .github/workflows/release.yml. PowerShell Core (pwsh) is used because both
-  Windows and Ubuntu runners ship it, and the existing build tooling is
-  PowerShell-native.
-
-.PARAMETER Mode
-  Append | Promote | Notes
-
-.PARAMETER Range
-  git-log range, e.g. "abc123..def456". Required for Append.
-
-.PARAMETER Version
-  Tag, e.g. "v2026.4.27.3". Required for Promote and Notes (with -ForVersion).
-
-.PARAMETER ForVersion
-  When set on Notes mode, returns the section for that already-promoted
-  version instead of the live "## Unreleased" section.
-
-.PARAMETER Repo
-  owner/repo for release-link generation, defaults to $env:GITHUB_REPOSITORY.
-
-.PARAMETER RepoRoot
-  Repo root, defaults to the script's parent's parent's parent (.github/scripts/.. -> .github/.. -> repo root).
-#>
-
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
@@ -73,11 +23,6 @@ $RootChangelog = Join-Path $RepoRoot 'CHANGELOG.md'
 
 if (-not (Test-Path $RootChangelog)) { throw "CHANGELOG.md not found at $RootChangelog" }
 
-# --- Helpers ---------------------------------------------------------------
-
-# Read a file as UTF-8 text. We deliberately avoid BOM round-trips: the prepare-
-# commit-msg hook already had to defend against PowerShell-written BOMs in
-# version.txt; let's not seed any new ones in changelog files.
 function Read-TextUtf8 {
     param([string]$Path)
     return [System.IO.File]::ReadAllText($Path, [System.Text.UTF8Encoding]::new($false))
@@ -107,37 +52,24 @@ function Get-ReleaseDateStamp {
     return $central.ToString($Format, [System.Globalization.CultureInfo]::InvariantCulture)
 }
 
-# Strip the (YYYY.M.D.N-XXXX) or (YYYY.M.D.N) build stamp the prepare-commit-msg
-# hook appends to every subject in this repo. Without this every changelog bullet
-# would carry a noisy "(2026.4.27.14-A130)" tail.
 function Strip-BuildStamp {
     param([string]$Subject)
     return ($Subject -replace ' \(\d{4}\.\d+\.\d+\.\d+(-([A-Fa-f0-9]{4,8}|beta))?\)$', '').Trim()
 }
 
-# Conventional-commit bucketing. Returns $null for types we deliberately skip
-# (docs/build/ci/test/non-deps chore) -- those are real work but not user-visible
-# release notes. Returns @{Bucket=...; Bullet=...} otherwise.
 function Parse-CommitSubject {
     param([string]$Sha, [string]$Subject)
 
     $stripped = Strip-BuildStamp -Subject $Subject
     if ([string]::IsNullOrWhiteSpace($stripped)) { return $null }
 
-    # Skip explicit opt-out token. Lets a user push a no-op-from-changelog-
-    # perspective commit (typo fix, doc reword) without it showing up.
     if ($stripped -match '\[skip changelog\]') { return $null }
 
-    # Skip merge subjects. `git log --no-merges` already excludes them in
-    # Append mode, but be defensive.
     if ($stripped -match '^Merge ') { return $null }
 
     $pattern = '^(?<type>feat|fix|perf|refactor|docs|build|ci|chore|test|revert)(?:\((?<scope>[^)]+)\))?(?<bang>!)?:\s+(?<desc>.+)$'
     $m = [regex]::Match($stripped, $pattern)
     if (-not $m.Success) {
-        # Non-conventional commit -- surface it under "Changed" rather than
-        # silently dropping. Engineering-Standards mandates the format, but
-        # one slipped through is better in the changelog than missing.
         return @{
             Bucket = 'Changed'
             Bullet = "- $stripped (" + $Sha.Substring(0, 7) + ')'
@@ -149,8 +81,6 @@ function Parse-CommitSubject {
     $isBreaking = $m.Groups['bang'].Success
     $desc = $m.Groups['desc'].Value
 
-    # Capitalise the description to match the existing changelog's "Added"
-    # / "Fixed" prose style.
     if ($desc.Length -gt 0) {
         $desc = $desc.Substring(0, 1).ToUpper() + $desc.Substring(1)
     }
@@ -162,12 +92,9 @@ function Parse-CommitSubject {
         'refactor' { 'Changed' }
         'revert' { 'Changed' }
         'chore' {
-            # Surface dependency bumps (Dependabot et al.) -- those are user-
-            # facing in the security/footprint sense -- but skip everything
-            # else. `chore(deps)` and `chore(deps-dev)` both qualify.
             if ($scope -and $scope -match '^deps') { 'Changed' } else { $null }
         }
-        default { $null }  # docs / build / ci / test
+        default { $null }
     }
 
     if (-not $bucket) { return $null }
@@ -180,12 +107,8 @@ function Parse-CommitSubject {
     return @{ Bucket = $bucket; Bullet = $bullet }
 }
 
-# Order matters for rendering -- Breaking comes first, then Added, Changed, Fixed.
 $BucketOrder = @('Breaking', 'Added', 'Changed', 'Fixed')
 
-# Find the "## Unreleased" section in $content. Returns @{Start=int; End=int;
-# Body=string} where Body is everything between the heading and the next "---"
-# separator (exclusive). Returns $null if the section isn't present.
 function Find-UnreleasedSection {
     param([string]$Content)
 
@@ -199,15 +122,12 @@ function Find-UnreleasedSection {
     }
     if ($startIdx -lt 0) { return $null }
 
-    # Section body runs from startIdx+1 up to (but not including) the next
-    # "---" separator. The convention in CHANGELOG.md is "---" between sections.
     $endIdx = $lines.Length
     for ($j = $startIdx + 1; $j -lt $lines.Length; $j++) {
         if ($lines[$j] -match '^---\s*$') {
             $endIdx = $j
             break
         }
-        # Defensive: another ## heading without a separator means we ran past.
         if ($lines[$j] -match '^##\s+') {
             $endIdx = $j
             break
@@ -221,14 +141,6 @@ function Find-UnreleasedSection {
     }
 }
 
-# Parse an existing Unreleased body into bucket -> bullets[] map.
-# Body lines look like:
-#   ### Added
-#   - foo (abc1234)
-#   - bar (def5678)
-#
-#   ### Fixed
-#   - baz (...)
 function Parse-UnreleasedBody {
     param([string[]]$BodyLines)
 
@@ -247,13 +159,10 @@ function Parse-UnreleasedBody {
     return $buckets
 }
 
-# Render bucket map to body lines.
 function Render-UnreleasedBody {
     param([hashtable]$Buckets)
 
     if ($Buckets.Count -eq 0) {
-        # Empty body -- match the seed placeholder so the file stays consistent
-        # and the seed comment in the file makes sense.
         return @('', '_No notable changes since the last release._', '')
     }
 
@@ -267,8 +176,6 @@ function Render-UnreleasedBody {
             $emitted[$name] = $true
         }
     }
-    # Anything not in the canonical order (custom bucket someone hand-added)
-    # -- preserve it after the canonical ones.
     foreach ($name in $Buckets.Keys) {
         if (-not $emitted.ContainsKey($name) -and $Buckets[$name].Count -gt 0) {
             $out += "### $name"
@@ -282,7 +189,7 @@ function Render-UnreleasedBody {
 function Update-OneFile {
     param(
         [string]$Path,
-        [hashtable]$NewBullets   # bucket -> string[] of bullets
+        [hashtable]$NewBullets
     )
 
     $content = Read-TextUtf8 -Path $Path
@@ -300,8 +207,6 @@ function Update-OneFile {
     foreach ($bucket in $NewBullets.Keys) {
         if (-not $existing.Contains($bucket)) { $existing[$bucket] = @() }
         foreach ($bullet in $NewBullets[$bucket]) {
-            # De-dupe: skip if the same short-sha is already present (rerun-
-            # safety for cases where the workflow re-fires for some reason).
             $sha = if ($bullet -match '\(([a-f0-9]{7})\)\s*$') { $matches[1] } else { $null }
             if ($sha) {
                 $alreadyHas = $false
@@ -327,15 +232,11 @@ function Update-OneFile {
     Write-TextUtf8 -Path $Path -Content $newContent
 }
 
-# --- Mode: Append ----------------------------------------------------------
-
 if ($Mode -eq 'Append') {
     if (-not $Range) { throw "Append mode requires -Range (e.g. abc..def)." }
 
     Push-Location $RepoRoot
     try {
-        # %H = full sha, %s = subject, %ae = author email, %P = parents (for
-        # merge filtering -- we also pass --no-merges as a belt-and-braces).
         $log = & git log --no-merges --format='%H%x09%s%x09%ae' $Range 2>$null
         if ($LASTEXITCODE -ne 0) {
             Write-Host "git log returned non-zero for range '$Range' -- treating as no commits."
@@ -361,9 +262,6 @@ if ($Mode -eq 'Append') {
         $sha = $parts[0]; $subject = $parts[1]; $email = $parts[2]
         $considered++
 
-        # Skip bot commits. The appender itself pushes as github-actions[bot]
-        # via GITHUB_TOKEN, so any future re-runs across that boundary
-        # would otherwise self-cite.
         if ($email -match 'github-actions\[bot\]' -or $email -match 'noreply@github.com') { continue }
 
         $parsed = Parse-CommitSubject -Sha $sha -Subject $subject
@@ -388,8 +286,6 @@ if ($Mode -eq 'Append') {
     return
 }
 
-# --- Mode: Promote ---------------------------------------------------------
-
 if ($Mode -eq 'Promote') {
     if (-not $Version) { throw "Promote mode requires -Version (e.g. v2026.4.27.3)." }
     if (-not $Repo) { throw "Promote mode requires -Repo or `$env:GITHUB_REPOSITORY (e.g. owner/repo)." }
@@ -408,29 +304,14 @@ if ($Mode -eq 'Promote') {
     $bodyEnd = $section.EndIdx - 1
     $bodyLines = if ($bodyEnd -ge $bodyStart) { $lines[$bodyStart..$bodyEnd] } else { @() }
 
-    # Drop the placeholder if it's the only thing in the body.
     $hasReal = $false
     foreach ($l in $bodyLines) {
         if ($l -match '^\s*- ' -or $l -match '^###\s+') { $hasReal = $true; break }
     }
     if (-not $hasReal) {
-        # Empty section: the released version still gets an entry, but avoid
-        # describing the release type when there were no changelog bullets.
         $bodyLines = @('', '_No user-visible changes in this release._', '')
     }
 
-    # Build the new file:
-    #   <preamble through line StartIdx-1>
-    #   ## Unreleased
-    #
-    #   _No notable changes since the last release._
-    #
-    #   ---
-    #
-    #   ## [vX] - DATE
-    #   <bodyLines>
-    #   ---
-    #   <rest>
     $before = if ($section.StartIdx -gt 0) { $lines[0..($section.StartIdx - 1)] } else { @() }
     $after = if ($section.EndIdx -lt $lines.Length) { $lines[$section.EndIdx..($lines.Length - 1)] } else { @() }
 
@@ -444,7 +325,6 @@ if ($Mode -eq 'Promote') {
     $newLines += ''
     $newLines += $heading
     $newLines += $bodyLines
-    # $after starts with the existing "---" separator (or next ## heading).
     $newLines += $after
 
     Write-TextUtf8 -Path $RootChangelog -Content (($newLines -join "`n"))
@@ -453,14 +333,11 @@ if ($Mode -eq 'Promote') {
     return
 }
 
-# --- Mode: Notes -----------------------------------------------------------
-
 if ($Mode -eq 'Notes') {
     $content = Read-TextUtf8 -Path $RootChangelog
 
     if ($ForVersion) {
         if (-not $Version) { throw "Notes -ForVersion requires -Version." }
-        # Find "## [vTag](...) -- DATE" -- the heading pattern Promote writes.
         $escaped = [regex]::Escape($Version)
         $pattern = "(?ms)^##\s+\[" + $escaped + "\][^\n]*\n(.*?)(?=^---\s*$|^##\s+|\z)"
         $m = [regex]::Match($content, $pattern)

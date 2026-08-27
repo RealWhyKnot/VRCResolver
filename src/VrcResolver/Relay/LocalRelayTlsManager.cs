@@ -15,9 +15,6 @@ internal static class LocalRelayTlsManager
     public const string RemoveArg = "--local-relay-tls-remove";
 
     private const string PortsFileName = "localhost-youtube-relay-ports.txt";
-    // Cosmetic store label on newly created certs. Reuse/removal matching
-    // is by CN + self-signed check (IsOurCertificate), so certs created
-    // under the previous label keep working and get cleaned up the same.
     private const string FriendlyName = "VRCResolver localhost.youtube.com relay";
     private const string HostName = HostsManager.MarkerHost;
     private const string LoopbackIp = "127.0.0.1";
@@ -109,10 +106,7 @@ internal static class LocalRelayTlsManager
             if (Directory.Exists(root) && !Directory.EnumerateFileSystemEntries(root).Any())
                 Directory.Delete(root);
         }
-        catch { /* best-effort */ }
-        // This child runs elevated, so it's the right place to clear the
-        // pre-rename ProgramData dir (its files were written elevated and
-        // may not be deletable from the unelevated uninstaller).
+        catch { }
         try
         {
             string legacyRoot = Path.Combine(
@@ -121,7 +115,7 @@ internal static class LocalRelayTlsManager
             if (Directory.Exists(legacyRoot))
                 Directory.Delete(legacyRoot, recursive: true);
         }
-        catch { /* best-effort */ }
+        catch { }
 
         return errors == 0 ? 0 : 1;
     }
@@ -263,7 +257,7 @@ internal static class LocalRelayTlsManager
     private static void TrySetFriendlyName(X509Certificate2 cert)
     {
         try { cert.FriendlyName = FriendlyName; }
-        catch { /* best-effort */ }
+        catch { }
     }
 
     private static void EnsurePortBinding(int port, string thumbprint)
@@ -309,7 +303,7 @@ internal static class LocalRelayTlsManager
         proc.WaitForExit(15000);
         if (!proc.HasExited)
         {
-            try { proc.Kill(); } catch { /* best-effort */ }
+            try { proc.Kill(); } catch { }
             return (1, stdout, stderr + " netsh timed out");
         }
         return (proc.ExitCode, stdout, stderr);
@@ -384,7 +378,7 @@ internal static class LocalRelayTlsManager
             if (int.TryParse(File.ReadAllText(path).Trim(), out int port) && IsValidPort(port))
                 ports.Add(port);
         }
-        catch { /* best-effort */ }
+        catch { }
     }
 
     private static bool IsValidPort(int port) => port > 1024 && port < 65536;

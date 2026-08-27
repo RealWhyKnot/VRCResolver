@@ -111,11 +111,6 @@ internal sealed class MaintenanceAppSettings
     [JsonPropertyName("codec_auto_install")]
     public bool CodecAutoInstall { get; set; } = true;
 
-    // Opt-in to picking up GitHub prereleases on both the startup
-    // "version X is available" nudge AND the vrcresolver.Updater
-    // exchange. Default false so the stable channel keeps its
-    // hands-off behaviour; flipping on widens the scope of
-    // "newer release" to anything tagged prerelease.
     [JsonPropertyName("include_prereleases")]
     public bool IncludePrereleases { get; set; }
 
@@ -133,10 +128,6 @@ internal sealed class MaintenanceAppSettings
 
 internal sealed class PlaybackAppSettings
 {
-    // Take the best rung the source offers instead of the cap VRChat asked for. Off by
-    // default: it costs bandwidth, and above 1080 most ladders are VP9/AV01, which only
-    // plays if this machine has a decoder for them. There is no way to pick a quality from
-    // inside VRChat, so this is the one place the choice can be made.
     [JsonPropertyName("high_quality")]
     public bool HighQuality { get; set; }
 
@@ -246,7 +237,6 @@ internal sealed class AppSettingsStore
         }
         catch
         {
-            // If quarantine fails, defaults are still safer than trusting bad JSON.
         }
     }
 }

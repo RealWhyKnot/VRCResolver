@@ -6,18 +6,6 @@ using VrcResolver.Shared;
 
 namespace VrcResolver;
 
-// Picks an ephemeral high port on 127.0.0.1 for the local-relay HTTP
-// listener and writes it to %LOCALAPPDATA%Low\vrcresolver\relay_port.txt
-// plus relay_scheme.txt so the patched yt-dlp wrapper can read it and emit
-// the trust-gateway URL (`{scheme}://localhost.youtube.com:{port}/play/<session>/manifest.<ext>?target=<base64>`) to
-// VRChat instead of raw first-party playback proxy URLs that AVPro's allowlist rejects.
-//
-// Port-persistence behavior across watchdog restarts: read the previous
-// port from disk, try to claim it; on success, reuse so any AVPro request
-// in flight against the previous port survives the restart. On failure
-// (port now busy, e.g. another process took it), pick a fresh ephemeral.
-//
-// AOT-clean: only TcpListener + File I/O. No reflection.
 [SupportedOSPlatform("windows")]
 internal sealed class RelayPortManager
 {
@@ -102,9 +90,9 @@ internal sealed class RelayPortManager
     public void DeletePortFile()
     {
         try { if (File.Exists(_portFile)) File.Delete(_portFile); }
-        catch { /* best-effort cleanup */ }
+        catch { }
         try { if (File.Exists(_schemeFile)) File.Delete(_schemeFile); }
-        catch { /* best-effort cleanup */ }
+        catch { }
     }
 
     private int? TryReadPreviousPort()
@@ -116,7 +104,7 @@ internal sealed class RelayPortManager
             if (int.TryParse(text, out int p) && p > 1024 && p < 65536)
                 return p;
         }
-        catch { /* best-effort */ }
+        catch { }
         return null;
     }
 

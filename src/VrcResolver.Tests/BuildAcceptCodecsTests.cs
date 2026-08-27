@@ -4,9 +4,6 @@ using Xunit;
 
 namespace VrcResolver.Tests;
 
-// The accept_codecs claim must stay a multi-entry set and stay TRUE: the
-// baseline (h264/aac) and audio codecs always survive, and extension-backed
-// video codecs appear only when the capability probe verified a decoder.
 public class BuildAcceptCodecsTests
 {
     private static HashSet<string> Set(params string[] items) => new(items);

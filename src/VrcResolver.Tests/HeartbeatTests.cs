@@ -8,7 +8,7 @@ public class HeartbeatTests
 {
     [Theory]
     [InlineData(0, "0m")]
-    [InlineData(45, "0m")]   // sub-minute → 0m
+    [InlineData(45, "0m")]
     [InlineData(60, "1m")]
     [InlineData(59 * 60, "59m")]
     [InlineData(60 * 60, "1h0m")]
@@ -35,7 +35,6 @@ public class HeartbeatTests
     [Fact]
     public void FormatBytes_LargeRoundsToTwoDecimals()
     {
-        // 1.2 GB
         long bytes = (long)(1.2 * 1024 * 1024 * 1024);
         Assert.Equal("1.20 GB", Heartbeat.FormatBytes(bytes));
     }

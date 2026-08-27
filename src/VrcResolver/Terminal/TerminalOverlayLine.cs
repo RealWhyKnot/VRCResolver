@@ -92,10 +92,6 @@ internal sealed class TerminalOverlayLine
         if (frame == null) throw new ArgumentNullException(nameof(frame));
         if (writeFrame == null) throw new ArgumentNullException(nameof(writeFrame));
 
-        // The caret column has to be part of the comparison, not just the text. Typing into a
-        // ghost suggestion keeps the rendered text identical -- "sta" + "tus " and "stat" + "us "
-        // are the same string -- so comparing text alone suppresses every repaint and the line
-        // appears frozen while the user types.
         if (_visible
             && string.Equals(_lastRendered, frame.PlainText, StringComparison.Ordinal)
             && _lastCursorColumn == frame.CursorColumn)

@@ -80,6 +80,6 @@ public class RelayPortManagerTests
     private static void DeleteTempStateRoot(string path)
     {
         try { Directory.Delete(path, recursive: true); }
-        catch { /* best-effort cleanup */ }
+        catch { }
     }
 }

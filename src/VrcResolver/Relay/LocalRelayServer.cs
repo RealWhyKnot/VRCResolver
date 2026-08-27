@@ -6,31 +6,6 @@ using VrcResolver.Shared;
 
 namespace VrcResolver;
 
-// Local-relay listener at http(s)://127.0.0.1:{port}/. Trust gateway
-// for AVPro: VRChat's AVPro player ships a built-in trusted-host
-// allowlist that includes `*.youtube.com`. The hosts file maps
-// `localhost.youtube.com -> 127.0.0.1`, so AVPro fetches
-//   http(s)://localhost.youtube.com:{port}/play/<session>/manifest.<ext>?target=<base64>
-// AVPro's trust check passes on the localhost.youtube.com host; the listener
-// decodes target=, forwards to the real upstream (typically
-// `https://vrcresolver.com/api/proxy?...`), and streams bytes back.
-//
-// If the server-side playlist uses relative subresource URLs, AVPro resolves
-// them under /play/<session>/ and the listener forwards them relative to the
-// original target URL's directory. When the server emits absolute first-party
-// playback proxy URLs, the relay localizes only those URLs back under the
-// same localhost namespace. The server still owns manifest compatibility,
-// tier routing, and transcoding.
-//
-// The relay never rewrites arbitrary upstream URLs. Only first-party
-// proxy URLs are accepted or localized, so localhost cannot become a general
-// open proxy for local processes.
-//
-// HTTPS is preferred when the per-machine certificate + Windows HTTP.sys
-// binding are available. HTTP remains a fallback so declining UAC does not
-// break playback on worlds that still allow plain local loopback URLs.
-//
-// AOT-clean: HttpListener + HttpClient + System.IO. No reflection, no dynamic codegen.
 [SupportedOSPlatform("windows")]
 internal sealed partial class LocalRelayServer : IDisposable
 {
@@ -46,16 +21,8 @@ internal sealed partial class LocalRelayServer : IDisposable
     private readonly LocalRelayTargetResolver _targets = new();
     private Task? _acceptLoop;
 
-    // Verbose request/response trace gated on BuildInfo.IsDevBuild. Dev builds
-    // (auto-version OR dirty source) emit per-request logs the user can paste
-    // back when reporting an issue; release builds (clean -Version + clean
-    // tree, what CI ships) stay quiet so the watchdog log isn't flooded
-    // during normal use.
     private static readonly bool s_verbose = BuildInfo.IsDevBuild;
     private static long s_reqCounter;
-    // Bounds the fire-and-forget handler tasks (and their upstream
-    // connections). Real HLS fan-out is a handful of segment requests;
-    // triple digits means something local is hammering the listener.
     private const int MaxInFlight = 128;
     private int _inFlight;
 
@@ -73,8 +40,6 @@ internal sealed partial class LocalRelayServer : IDisposable
             MaxAutomaticRedirections = 5,
             PooledConnectionIdleTimeout = TimeSpan.FromSeconds(60),
             ConnectTimeout = TimeSpan.FromSeconds(15),
-            // Address guard at connect time -- covers every redirect hop,
-            // which the pre-flight target allowlist cannot.
             ConnectCallback = GuardedRelayConnect.Callback,
         };
         _http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
@@ -98,10 +63,10 @@ internal sealed partial class LocalRelayServer : IDisposable
     public async Task StopAsync()
     {
         _cts.Cancel();
-        try { _listener.Stop(); } catch { /* best-effort */ }
+        try { _listener.Stop(); } catch { }
         if (_acceptLoop != null)
         {
-            try { await _acceptLoop.ConfigureAwait(false); } catch { /* ignore */ }
+            try { await _acceptLoop.ConfigureAwait(false); } catch { }
         }
     }
 
@@ -119,12 +84,10 @@ internal sealed partial class LocalRelayServer : IDisposable
                 ConsoleUx.Warn(LogComponent.Relay, "accept failed: " + ex.Message);
                 continue;
             }
-            // Fire-and-forget per-request handler. HttpListener serialises
-            // accept; the dispatched task does the actual work in parallel.
             if (Interlocked.Increment(ref _inFlight) > MaxInFlight)
             {
                 Interlocked.Decrement(ref _inFlight);
-                try { ctx.Response.StatusCode = 503; ctx.Response.Close(); } catch { /* best-effort */ }
+                try { ctx.Response.StatusCode = 503; ctx.Response.Close(); } catch { }
                 continue;
             }
             _ = Task.Run(async () =>
@@ -177,10 +140,6 @@ internal sealed partial class LocalRelayServer : IDisposable
                 return;
             }
 
-            // Media players never send Origin; a browser on this machine
-            // does. The hosts-file pin makes localhost.youtube.com reachable
-            // from any local page, so drive-by fetch attempts are rejected
-            // outright rather than relayed.
             if (ctx.Request.Headers["Origin"] != null)
             {
                 if (s_verbose) Verbose("req=" + reqId + " -> 403 (origin header)");
@@ -335,9 +294,6 @@ internal sealed partial class LocalRelayServer : IDisposable
                 return;
             }
 
-            // Binary stream copy with per-read idle CTS so a long video
-            // (HLS segment, mp4 progressive) doesn't get killed by a
-            // single deadline timer; idle = 30s without a byte = abort.
             using var upstream = await resp.Content.ReadAsStreamAsync(_cts.Token).ConfigureAwait(false);
             byte[] buf = new byte[CopyBufferSize];
             while (!_cts.IsCancellationRequested)
@@ -370,7 +326,7 @@ internal sealed partial class LocalRelayServer : IDisposable
             failure = "client_disconnect";
             if (s_verbose) Verbose("req=" + reqId + " client-disconnect (IOException: " + ioe.Message + ") bytes-out=" + bytesOut);
         }
-        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { /* shutdown */ }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
         catch (Exception ex)
         {
             failure = ex.GetType().Name;
@@ -396,7 +352,7 @@ internal sealed partial class LocalRelayServer : IDisposable
                     failure));
             }
 
-            try { ctx.Response.Close(); } catch { /* best-effort */ }
+            try { ctx.Response.Close(); } catch { }
         }
     }
 
@@ -423,7 +379,7 @@ internal sealed partial class LocalRelayServer : IDisposable
             }
 
             try { downstream.Headers.Add(h.Key, string.Join(", ", h.Value)); passedHeaders++; }
-            catch { /* HttpListener rejects some restricted headers; skip */ }
+            catch { }
         }
 
         if (!string.IsNullOrWhiteSpace(contentTypeOverride))
@@ -492,7 +448,7 @@ internal sealed partial class LocalRelayServer : IDisposable
     public void Dispose()
     {
         _cts.Cancel();
-        try { _listener.Close(); } catch { /* best-effort */ }
+        try { _listener.Close(); } catch { }
         _http.Dispose();
         _cts.Dispose();
     }

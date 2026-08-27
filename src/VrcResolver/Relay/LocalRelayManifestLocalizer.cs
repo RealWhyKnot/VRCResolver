@@ -11,13 +11,6 @@ namespace VrcResolver;
 [SupportedOSPlatform("windows")]
 internal static partial class LocalRelayManifestLocalizer
 {
-    // Soft sanity cap. The relay used to buffer the entire manifest into
-    // memory and 502 anything over 4 MiB. Once the server started appending
-    // an HMAC playback_id token to every segment URL (co-watcher gating),
-    // long VOD playlists routinely crossed 4 MiB. The current path is a
-    // line-by-line streaming rewrite that never holds the full body, so the
-    // cap is now just a defense-in-depth bound against a pathological
-    // upstream.
     public const int MaxManifestBytes = 64 * 1024 * 1024;
 
     private static readonly HashSet<string> s_manifestExts = new(StringComparer.OrdinalIgnoreCase)
@@ -203,13 +196,6 @@ internal static partial class LocalRelayManifestLocalizer
         string fileName = Path.GetFileName(path);
         if (fileName.Equals("manifest", StringComparison.OrdinalIgnoreCase))
             return true;
-        // A "manifest.<ext>" filename is only a manifest when <ext> is one of
-        // the known manifest extensions. The relay also constructs
-        // /play/<id>/manifest.mp4 for progressive MP4 responses, and the
-        // previous unconditional StartsWith branch swept those into the
-        // streaming text rewriter -- the response then went out as
-        // Transfer-Encoding: chunked with no Content-Length and AVPro/WMF
-        // disconnected on the first byte without playing anything.
         if (fileName.StartsWith("manifest.", StringComparison.OrdinalIgnoreCase))
             return HasManifestExtension(fileName);
         return false;

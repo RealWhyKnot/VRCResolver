@@ -7,12 +7,6 @@
     <Company>RealWhyKnot</Company>
     <Product>VRCResolver</Product>
     <AssemblyTitle>VRCResolver uninstaller</AssemblyTitle>
-    <!-- AOT publish so the uninstaller is ~10x smaller. Trim-safe:
-         pure file/process operations + Logger/CrashHandler/WkvrcPaths/
-         ToolsDirSweeper from Shared. No JSON serialization. No reflection
-         over user types. No JIT-compiled regex (ToolsDirSweeper converted
-         to [GeneratedRegex]).
-         InvariantGlobalization drops ICU (~1 MB). -->
     <PublishAot>true</PublishAot>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>

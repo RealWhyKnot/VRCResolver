@@ -7,69 +7,16 @@ using VrcResolver.Shared;
 
 namespace VrcResolver.YtDlp;
 
-// VRChat invokes its `Tools\yt-dlp.exe` for every video. PatchManager swaps
-// VRChat's bundled vanilla yt-dlp for THIS binary at watchdog startup; the
-// vanilla copy is preserved as `Tools\yt-dlp-og.exe` so we have an
-// unconditional fallback target.
-//
-// Behaviour per invocation:
-//   1. Extract the URL (first http(s) arg) and the `-f <selector>` value
-//      from VRChat's argv. Infer player from `-f` (Unity caps height<=720;
-//      anything else defaults to AVPro).
-//   2. Connect to `\\.\pipe\vrcresolver.resolve` with a 1 s connect budget.
-//   3. Send a v2 ResolveRequest as a single NDJSON line, including
-//      vrchat_format_arg (raw -f value), accept_protocols / accept_codecs
-//      defaults per the inferred player, and protocol_version=2.
-//   4. Read one response line (28 s ceiling — must outlast the watchdog's
-//      LocalIpcServer per-request timeout so the synthesized fallback
-//      response reliably wins the race).
-//      - action=resolved + url present  → write URL to stdout, exit 0.
-//      - action=fallback_native (any reason) → exec sibling yt-dlp-og.exe
-//        with the original argv, pass through stdout/stderr/exit-code.
-//      - any failure (no pipe, parse error, IO error, timeout, no URL field)
-//        → same exec.
-//
-// Graceful-degradation contract: when the watchdog isn't running, when the
-// server returns fallback_native, and when yt-dlp-og.exe is unavailable or
-// crashes — VRChat must see the SAME behaviour it would see if vrcresolver
-// weren't installed at all. yt-dlp-og.exe is the preserved vanilla copy;
-// its stdout/stderr/exit-code is passed through unmodified. When even
-// yt-dlp-og.exe is missing, we emit empty stdout + exit 0 so VRChat's
-// resolver sees "no URL found" and falls into its own error path — never
-// the original URL re-emitted as if we'd resolved to it.
-//
-// Stdout contract: VRChat's bundled yt-dlp writes the resolved URL on a
-// single line terminated by exactly one '\n' — no CRLF, no BOM. We match
-// that via raw Console.OpenStandardOutput().
-//
-// Logging: every invocation appends a start banner, a step-by-step trace,
-// a fallback-stdout/stderr preview, and an END summary line to
-// %LOCALAPPDATA%Low\vrcresolver\logs\yt-dlp-wrapper.log. Each line is prefixed
-// with [<utc>] [<rid>] for grep correlation. URLs in argv are sanitized to
-// host-only when logged (no path/query — they may carry tokens).
 [SupportedOSPlatform("windows")]
 internal static partial class Program
 {
     private static readonly TimeSpan PipeConnectTimeout = TimeSpan.FromSeconds(1);
-    // Overall budget for a complete response. The watchdog now sizes its own
-    // per-request timeout off wrapper_deadline_ms (LocalIpcServer.cs), so this
-    // single value drives the end-to-end budget. Cold extractors on slow sites
-    // (Tubi has been observed at ~20-25 s) need the full window; setting this
-    // shorter than the cold-discovery worst case is what forced the historical
-    // "paste the URL twice" behaviour.
     private static readonly TimeSpan ResolveDeadline = TimeSpan.FromSeconds(28);
 
-    // Per-invocation correlation id. 8 hex chars — enough to tell two
-    // overlapping invocations apart when VRChat fires retries quickly.
     private static string s_rid = "????????";
 
     private static async Task<int> Main(string[] args)
     {
-        // No Console.OutputEncoding setup here — the wrapper writes its
-        // resolved URL via raw Console.OpenStandardOutput().Write(bytes)
-        // and og fallback via the same raw write. Console.WriteLine is
-        // never called. Setting OutputEncoding triggers SetConsoleOutputCP
-        // syscalls + buffer flushing that just waste 1-3 ms per invocation.
         s_rid = Guid.NewGuid().ToString("N")[..8];
         var swTotal = Stopwatch.StartNew();
 
@@ -86,9 +33,6 @@ internal static partial class Program
 
             if (string.IsNullOrEmpty(url))
             {
-                // No URL in argv -- not a resolve invocation (e.g.,
-                // `yt-dlp --version`, `--help`, or a probe). Forward
-                // straight to vanilla so diagnostic invocations work.
                 Log("no URL in argv -- exec og fallback (diagnostic invocation)");
                 await TrySendOgFallbackNotifyAsync(null, WireConstants.OgFallbackReasonNoUrlDiagnostic, swTotal.ElapsedMilliseconds).ConfigureAwait(false);
                 exitCode = await ExecFallbackAsync(args, null).ConfigureAwait(false);
@@ -98,10 +42,6 @@ internal static partial class Program
             {
                 if (FirstPartyUrlPolicy.IsFirstPartyPlaybackProxyUrl(url))
                 {
-                    // Users can paste a first-party playback URL directly into
-                    // a VRChat player. Do not send that back through the mesh
-                    // resolver: it is already a server-minted playback URL,
-                    // and resolving it again can recurse through /api/proxy.
                     string toEmit = TryWrapForTrustGateway(url, probeRelay: true);
                     TryWriteUrlToStdout(toEmit);
                     bool wrapped = !string.Equals(toEmit, url, StringComparison.Ordinal);
@@ -125,10 +65,6 @@ internal static partial class Program
                         result = (null, WireConstants.OgFallbackReasonPipeResolveFailed, null);
                     }
 
-                    // Emit-shape guard: the resolved URL crossed a pipe and,
-                    // before that, a WebSocket and possibly a disk cache --
-                    // none of which prove it is something VRChat should fetch.
-                    // Loopback / private-range / non-http shapes go to og.
                     if (!string.IsNullOrEmpty(result.resolved)
                         && !ResolvedUrlGuard.IsSafeToEmit(result.resolved))
                     {
@@ -138,13 +74,6 @@ internal static partial class Program
 
                     if (!string.IsNullOrEmpty(result.resolved))
                     {
-                        // Trust-gateway wrap (Phase 1, HTTP-only). If the
-                        // watchdog is running and bound the local listener
-                        // it leaves a port file on disk; first-party playback proxy
-                        // URLs are wrapped through localhost.youtube.com:<port>/play
-                        // so AVPro's allowlist accepts them in default-public
-                        // worlds. Missing port file, non-first-party responses, or
-                        // malformed URLs fall through to emitting the raw URL.
                         string toEmit = TryWrapForTrustGateway(result.resolved!);
                         TryWriteUrlToStdout(toEmit);
                         bool wrapped = !ReferenceEquals(toEmit, result.resolved);
@@ -156,11 +85,6 @@ internal static partial class Program
                     }
                     else
                     {
-                        // Notify the watchdog about the og fallback before
-                        // invoking og so the watchdog console surfaces the
-                        // fallback fact in real time. Fire-and-forget; the
-                        // notify uses a fresh pipe connection that closes
-                        // immediately, then we exec og normally.
                         string reason = result.fallbackReason ?? WireConstants.OgFallbackReasonPipeResolveFailed;
                         await TrySendOgFallbackNotifyAsync(url, reason, swTotal.ElapsedMilliseconds, result.publicMessage).ConfigureAwait(false);
 
@@ -180,9 +104,6 @@ internal static partial class Program
         }
     }
 
-    // Returns (resolvedUrl, null) on success, (null, reason) on any
-    // failure (caller falls back to yt-dlp-og.exe and uses `reason` to
-    // notify the watchdog). Every exit branch logs.
     private static async Task<(string? Url, string? FallbackReason, string? PublicMessage)> ResolveOverPipeAsync(string url, string player, string? formatArg)
     {
         var swPipe = Stopwatch.StartNew();
@@ -209,12 +130,6 @@ internal static partial class Program
                 : WireConstants.AvProMaxAudioChannels,
         };
 
-        // The watchdog owns resolve retries now (it sees mesh state, the
-        // rate-limit cooldown, and the health gate; the server's contract
-        // wants fresh per-attempt ids, which only the watchdog stamps). The
-        // wrapper keeps exactly one retry: a failed pipe CONNECT, so a
-        // watchdog mid-restart (updater swap, crash recovery) doesn't turn
-        // every resolve in that window into a straight og punt.
         var swRequest = Stopwatch.StartNew();
         int connectRetriesSent = 0;
         while (true)
@@ -268,16 +183,7 @@ internal static partial class Program
             var swSend = Stopwatch.StartNew();
             try
             {
-                // Single WriteAsync containing payload + '\n'. Earlier impl
-                // split this across two WriteAsync calls + an explicit
-                // FlushAsync -- three kernel transitions per pipe send. Named
-                // pipes don't buffer like FileStream so the explicit Flush
-                // was already redundant; the byte-mode pipe with PIPE_WAIT
-                // dispatches the write atomically.
                 await pipe.WriteAsync(payload, ctsResolve.Token).ConfigureAwait(false);
-                // Subtract 1 from the logged byte count so the existing log
-                // ("request sent ... bytes=...") keeps reporting the JSON
-                // payload length and stays comparable across the change.
                 Log("request sent id=" + req.Id[..8] + " bytes=" + (payload.Length - 1) + " player=" + player
                     + " wrapper_deadline_ms=" + req.WrapperDeadlineMs
                     + " elapsed_ms=" + swSend.ElapsedMilliseconds);
@@ -300,12 +206,6 @@ internal static partial class Program
 
             if (resp.Action == WireConstants.ActionResolved && !string.IsNullOrEmpty(resp.Url))
             {
-                // AVPro sanity check (defense-in-depth). The server's
-                // FormatSelectorBuilder filters codecs upstream; if a domain
-                // config regression slips through and hands us an .flv / rtmp /
-                // .f4v URL while the player is AVPro, AVPro will silently fail
-                // playback. Exec og instead -- yt-dlp can often pick a working
-                // format itself when the server's strategy was wrong.
                 if (player == WireConstants.PlayerAvPro && !ResolvedUrlGuard.IsAvProCompatibleUrl(resp.Url))
                 {
                     Log("response action=resolved id=" + (resp.Id ?? "?")[..Math.Min(8, (resp.Id ?? "?").Length)] +
@@ -323,11 +223,6 @@ internal static partial class Program
                     + " elapsed_ms_since_request_sent=" + swRequest.ElapsedMilliseconds
                     + " remaining_budget_ms=" + (totalDeadlineMs - swPipe.ElapsedMilliseconds));
 
-                // Terminal: the watchdog already retried transient reasons on
-                // the shared policy before answering. Capture the server's
-                // public_message (when present) so the watchdog can surface a
-                // yellow line explaining why we punted -- DRM-detected,
-                // sign-in required, etc.
                 return (null, WireConstants.OgFallbackReasonServerFallbackNative, resp.PublicMessage);
             }
 
@@ -336,10 +231,6 @@ internal static partial class Program
         }
     }
 
-    // Serialize the request DTO with a trailing '\n' framing byte appended
-    // in-place. Source-gen path (WrapperJsonContext) writes through a
-    // PooledByteBufferWriter under the hood; we copy out and append the
-    // newline so the wire send is one WriteAsync instead of two.
     private static byte[] SerializeWithTrailingNewline(ResolveRequest req)
     {
         byte[] body = JsonSerializer.SerializeToUtf8Bytes(req, WrapperJsonContext.Default.ResolveRequest);
@@ -349,12 +240,6 @@ internal static partial class Program
         return framed;
     }
 
-    // v3.2: notify the watchdog that we're falling back to og.exe so it
-    // can surface a single console line in real time. Fire-and-forget --
-    // open a fresh pipe, write one JSON-NDJSON line, close. Any failure
-    // (watchdog not running, pipe busy, etc.) is silently swallowed: og
-    // fallback must never fail because diagnostic IPC failed. Tight
-    // timeout (1.5 s) so a hung watchdog can't delay the og exec.
     private static async Task TrySendOgFallbackNotifyAsync(string? url, string reason, long elapsedMs, string? publicMessage = null)
     {
         try
@@ -366,7 +251,7 @@ internal static partial class Program
                 PipeDirection.InOut,
                 PipeOptions.Asynchronous);
             try { await pipe.ConnectAsync(cts.Token).ConfigureAwait(false); }
-            catch { return; /* watchdog not running -- og still runs, no diagnostic line */ }
+            catch { return; }
 
             var notify = new WrapperEventNotify
             {
@@ -382,15 +267,11 @@ internal static partial class Program
             Buffer.BlockCopy(body, 0, framed, 0, body.Length);
             framed[body.Length] = (byte)'\n';
             try { await pipe.WriteAsync(framed, cts.Token).ConfigureAwait(false); }
-            catch { /* fire-and-forget */ }
+            catch { }
         }
-        catch { /* fire-and-forget */ }
+        catch { }
     }
 
-    // Mirror of TrySendOgFallbackNotifyAsync for the og-failed signal.
-    // Carries exit code + stderr preview so the watchdog can decide
-    // whether to evict the cache entry and surface a console line.
-    // Fire-and-forget; bounded 1.5s budget.
     private static async Task TrySendOgFailedNotifyAsync(string? url, string reason, int exitCode, string errorPreview, long elapsedMs)
     {
         try
@@ -419,22 +300,11 @@ internal static partial class Program
             Buffer.BlockCopy(body, 0, framed, 0, body.Length);
             framed[body.Length] = (byte)'\n';
             try { await pipe.WriteAsync(framed, cts.Token).ConfigureAwait(false); }
-            catch { /* fire-and-forget */ }
+            catch { }
         }
-        catch { /* fire-and-forget */ }
+        catch { }
     }
 
-    // Map og's stderr to a coarse failure-reason tag. The patterns cover
-    // the common upstream blockers we've seen in the field: Cloudflare
-    // anti-bot (403), rate limits (429), YouTube/auth-gated sign-in prompts,
-    // and "this content does not exist" terminal errors (deleted videos,
-    // closed channels, private videos, 404/410). Anything else is "unknown"
-    // -- still worth a notify so the user sees something failed.
-    //
-    // content_not_found matches the server-side reason emitted by
-    // DomainDispatcher.IsContentNotFoundFailure; aligning the two lets a
-    // watchdog skip a redundant og spawn when the server already classified
-    // the URL as terminally absent.
     private static string ClassifyOgFailure(string stderr)
     {
         if (string.IsNullOrEmpty(stderr)) return "unknown";
@@ -454,8 +324,6 @@ internal static partial class Program
         return "unknown";
     }
 
-    // Buffered NDJSON read. Mirrors LocalIpcServer's read loop so a single
-    // response line is consumed up to the first '\n'.
     private static async Task<string?> ReadLineAsync(Stream s, CancellationToken ct)
     {
         using var ms = new MemoryStream();
@@ -481,40 +349,12 @@ internal static partial class Program
         return Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
     }
 
-    // Exec sibling yt-dlp-og.exe with the same argv. yt-dlp-og.exe lives
-    // next to us — VRChat's Tools dir is our cwd when invoked, and
-    // PatchManager preserves vanilla yt-dlp there as yt-dlp-og.exe before
-    // installing this wrapper. We capture og's stdout + stderr (so the log
-    // sees what it actually emitted), then forward both to OUR own
-    // stdout/stderr unmodified before exiting with og's exit code. VRChat's
-    // pipe sees identical bytes to what it would see if vanilla yt-dlp had
-    // been invoked directly — that's the graceful-degradation contract.
-    //
-    // When yt-dlp-og.exe is missing entirely, we emit EMPTY stdout + exit 0.
-    // VRChat's resolver sees "no URL" and falls into its own error path,
-    // matching what would happen if Tools dir were broken / vrcresolver
-    // uninstalled mid-runtime. NEVER emit the input URL as if we'd resolved
-    // it — that confuses VRChat into "resolved to same URL" and the player
-    // tries to open a watch-page URL it can't decode.
     private static async Task<int> ExecFallbackAsync(string[] args, string? url)
     {
         string exeDir = AppContext.BaseDirectory;
 
-        // Recursive-exec guard. Any candidate that classifies as one of our own
-        // wrappers (current build, a prior release in the hash list, or a dev
-        // build with the embedded marker) would loop back into this same code
-        // path, so it is skipped. Hash list lives in LocalLow (the watchdog
-        // stages it on startup); marker + PE-info signals cover dev builds even
-        // when the list is missing.
         string knownHashesPath = Path.Combine(AppPaths.StateRoot(), "wrapper_hashes.txt");
 
-        // Pick a native yt-dlp to hand off to. FallbackBinary.Select walks, in order,
-        // yt-dlp-og.exe next to us, yt-dlp-og.exe in VRChat's Tools dir, then VRChat's
-        // own yt-dlp.exe there -- each gated so we never recurse into one of our own
-        // wrappers. Hash list lives in LocalLow (the watchdog stages it on startup);
-        // marker + PE-info signals cover dev builds even when the list is missing.
-        // Without this, a missing og made the wrapper emit empty stdout, which the user
-        // sees as a blank video for the whole resolve budget on any mesh outage.
         string? vrcTools = VrcPathLocator.Find();
         string? ogPath = FallbackBinary.Select(
             exeDir,
@@ -547,14 +387,8 @@ internal static partial class Program
             using var proc = Process.Start(psi);
             if (proc == null) { Log("FALLBACK og: Process.Start returned null"); return 0; }
 
-            // Read both streams concurrently to avoid pipe-buffer deadlock
-            // on yt-dlp invocations that emit non-trivial stderr (warnings,
-            // bot-detect notices) while stdout is still streaming.
             var stdoutTask = proc.StandardOutput.ReadToEndAsync();
             var stderrTask = proc.StandardError.ReadToEndAsync();
-            // Bounded wait. og is VRChat's own yt-dlp and normally exits in
-            // seconds; a wedged og would otherwise pin this wrapper (and
-            // VRChat's resolve) forever, one zombie pair per video.
             using var ctsOg = new CancellationTokenSource(TimeSpan.FromMinutes(5));
             try
             {
@@ -563,8 +397,8 @@ internal static partial class Program
             catch (OperationCanceledException)
             {
                 Log("FALLBACK og: no exit after 5 min -- killing process tree, emitting empty stdout");
-                try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
-                try { await proc.WaitForExitAsync().ConfigureAwait(false); } catch { /* reaped */ }
+                try { proc.Kill(entireProcessTree: true); } catch { }
+                try { await proc.WaitForExitAsync().ConfigureAwait(false); } catch { }
                 return 0;
             }
             string ogStdout = await stdoutTask.ConfigureAwait(false);
@@ -577,9 +411,6 @@ internal static partial class Program
             if (ogStderr.Length > 0)
                 Log("FALLBACK og stderr-preview: " + Preview(ogStderr, 240));
 
-            // og itself failed. Notify the watchdog so it can evict any
-            // stale cache entry for this URL and surface "og also failed"
-            // on the console. Fire-and-forget; pure diagnostic channel.
             if (proc.ExitCode != 0 && !string.IsNullOrEmpty(url))
             {
                 string failureReason = ClassifyOgFailure(ogStderr);
@@ -587,9 +418,6 @@ internal static partial class Program
                 await TrySendOgFailedNotifyAsync(url, failureReason, proc.ExitCode, preview, sw.ElapsedMilliseconds).ConfigureAwait(false);
             }
 
-            // Pass through to our stdout/stderr so VRChat sees exactly what
-            // vanilla yt-dlp would emit. Bytes copied verbatim — no encoding
-            // mangling, no trailing-newline normalization, no BOM.
             if (ogStdout.Length > 0)
             {
                 using var ourStdout = Console.OpenStandardOutput();
@@ -611,17 +439,10 @@ internal static partial class Program
         {
             sw.Stop();
             Log("FALLBACK og: exec failed: " + ex.GetType().Name + ": " + ex.Message + " elapsed_ms=" + sw.ElapsedMilliseconds);
-            // Graceful degradation — if og itself can't be spawned, give
-            // VRChat empty stdout + exit 0 instead of bubbling the exception.
             return 0;
         }
     }
 
-    // VRChat's stdout reader is line-buffered + picky: exactly one '\n'
-    // terminator, no CRLF, no BOM. Don't use Console.WriteLine.
-    // Swallows write failures (VRChat closed its end of the pipe) -- there is
-    // nobody left to read the URL and an unhandled IOException here used to
-    // crash the wrapper with a stack trace on stderr.
     private static void TryWriteUrlToStdout(string url)
     {
         try
@@ -638,9 +459,6 @@ internal static partial class Program
         }
     }
 
-    // First arg starting with http:// or https:// is the URL to resolve.
-    // Quoted matches are stripped of surrounding quotes by the OS argv
-    // parse before we see them.
     private static string ExtractUrl(string[] args)
     {
         foreach (var a in args)

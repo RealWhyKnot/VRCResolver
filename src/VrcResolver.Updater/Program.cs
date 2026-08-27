@@ -10,35 +10,12 @@ using VrcResolver.Shared;
 
 namespace VrcResolver.Updater;
 
-// No flags. Running this exe IS the request to check-and-maybe-update.
-//   1. Read current version from the vrcresolver.exe sitting next to us.
-//   2. Hit GitHub's releases-latest API for RealWhyKnot/VRCResolver.
-//   3. If newer, prompt with a 15s timeout (default No on timeout).
-//   4. On Yes: download zip, verify SHA256 from release body, extract,
-//      stop the running watchdog, swap files atomically, relaunch, exit.
-//
-// Failure-mode invariant: the watchdog is only stopped once the new
-// payload has been downloaded AND SHA-verified AND extracted. Any
-// failure before that step leaves the running watchdog untouched.
-//
-// Transition compat: installs updated across the product rename may still
-// have old-named processes, mutexes, and temp artifacts around. Payload
-// detection, watchdog stop/wait, and the temp sweep all accept BOTH the
-// current and the pre-rename names.
 internal static partial class Program
 {
     private const string Repo = "RealWhyKnot/VRCResolver";
-    // /releases/latest skips prereleases by GitHub convention. The list
-    // endpoint includes them; we filter ourselves when the user has not
-    // opted in via Maintenance.IncludePrereleases. The opt-in is read
-    // directly from settings.json on disk (the Updater is a separate
-    // process and can't share AppSettingsStore with the watchdog).
     private const string StableLatestUrl = "https://api.github.com/repos/" + Repo + "/releases/latest";
     private const string AnyReleasesUrl = "https://api.github.com/repos/" + Repo + "/releases?per_page=10";
     private const string WatchdogExeName = "vrcresolver.exe";
-    // Pre-rename watchdog exe name. A release zip may carry a launcher
-    // under this name during the transition window, and a pre-rename
-    // install being updated still has a process/exe by this name.
     private const string LegacyWatchdogExeName = "WKVRCProxy.exe";
     private const string WatchdogProcessName = "vrcresolver";
     private const string LegacyWatchdogProcessName = "WKVRCProxy";
@@ -51,10 +28,6 @@ internal static partial class Program
     private static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DownloadHardCap = TimeSpan.FromMinutes(10);
 
-    // Anchored to start-of-line (multiline) so a release body containing
-    // sample/quoted text like `` `SHA256: <fill in>` `` doesn't accidentally
-    // match a placeholder before the real line. release.yml emits exactly
-    // one bare-line `SHA256: <hex>`; tighten to that.
     [GeneratedRegex(@"^SHA256:\s*([0-9A-Fa-f]{64})\s*$",
         RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex Sha256LineRegex();
@@ -62,9 +35,7 @@ internal static partial class Program
 
     private static async Task<int> Main(string[] args)
     {
-        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { /* best-effort */ }
-        // Migration first so the logger opens files in the current state
-        // root rather than a pre-rename one.
+        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
         AppPaths.MigrateFromLegacyProduct(Console.WriteLine);
         Logger.Install("updater");
         CrashHandler.Install("updater");
@@ -96,10 +67,6 @@ internal static partial class Program
                 return 0;
             }
 
-            // Download → SHA verify → extract → kill-watchdog → atomic swap → relaunch.
-            // The watchdog is only stopped AFTER the new payload is verified and
-            // staged in temp, so a failed download leaves the user's running
-            // watchdog untouched.
             string tempZip = Path.Combine(Path.GetTempPath(), $"vrcresolver-{tagName}.zip");
             await DownloadAsync(zipUrl, tempZip);
 
@@ -111,7 +78,7 @@ internal static partial class Program
                     $"  url={zipUrl}\n" +
                     $"  expected={expectedSha256}\n" +
                     $"  actual={actualSha}");
-                try { File.Delete(tempZip); } catch { /* best-effort */ }
+                try { File.Delete(tempZip); } catch { }
                 return 13;
             }
 
@@ -120,8 +87,6 @@ internal static partial class Program
             string payloadRoot = ResolvePayloadRoot(tempExtract);
             EnsureStagedUpdaterCopy(payloadRoot);
 
-            // From here on we WILL stop the watchdog; pre-stop failures above
-            // returned without touching the running install.
             StopRunningWatchdog();
 
             try
@@ -130,14 +95,11 @@ internal static partial class Program
             }
             catch
             {
-                // CopyOver rolls back on rename failure; rethrow so the user
-                // sees the error and can re-run the updater. The old install
-                // is intact (atomic step never made it past the rename pass).
                 throw;
             }
 
-            try { File.Delete(tempZip); } catch { /* best-effort */ }
-            try { Directory.Delete(tempExtract, true); } catch { /* best-effort */ }
+            try { File.Delete(tempZip); } catch { }
+            try { Directory.Delete(tempExtract, true); } catch { }
 
             Console.WriteLine("Update installed. Relaunching watchdog…");
             Process.Start(new ProcessStartInfo
@@ -150,9 +112,6 @@ internal static partial class Program
         }
         catch (Exception ex)
         {
-            // Preserve exception type + (truncated) stack trace alongside the
-            // message so a user pasting the failure into a bug report has
-            // enough context for diagnosis.
             Console.Error.WriteLine("Updater failed: " + ex.GetType().FullName + ": " + ex.Message);
             if (ex.StackTrace != null)
                 Console.Error.WriteLine(ex.StackTrace);
@@ -160,10 +119,6 @@ internal static partial class Program
         }
     }
 
-    // H19: explicit error if the watchdog exe isn't sitting next to us.
-    // Pre-fix the code silently fell through to the Updater's own version,
-    // reporting an incorrect "current version" (the Updater's, not the
-    // watchdog's) and offering spurious updates.
     private static Version ReadCurrentVersion(string watchdogPath)
     {
         if (!File.Exists(watchdogPath))
@@ -179,11 +134,6 @@ internal static partial class Program
         return new Version(0, 0, 0, 0);
     }
 
-    // H18: tags can carry a trailing -XXXX dev-build suffix (4 hex chars per
-    // build.ps1's regex). System.Version.TryParse rejects those outright.
-    // Strip the suffix before parsing — the numeric part is what we compare
-    // against ReadCurrentVersion's FileVersion (which never carries the
-    // suffix because AssemblyVersion is pure numeric).
     [GeneratedRegex(@"-[A-Fa-f0-9]{4}$")]
     private static partial Regex DevSuffixRegex();
     internal static Version ParseTagVersion(string tag)
@@ -199,10 +149,6 @@ internal static partial class Program
     {
         bool includePrereleases = ReadIncludePrereleasesFromSettings();
 
-        // Explicit handler so corp-proxy / NTLM environments inherit Windows
-        // credentials (default HttpClient leaves UseDefaultCredentials=false
-        // and gets 407 Proxy Auth Required). Auto-redirect capped at 5 to
-        // catch redirect loops if GitHub ever serves a misconfigured 30x.
         using var handler = new HttpClientHandler
         {
             UseDefaultCredentials = true,
@@ -219,9 +165,6 @@ internal static partial class Program
             + (resp.Content.Headers.ContentType?.ToString() ?? "<none>"));
         resp.EnsureSuccessStatusCode();
 
-        // Cloudflare's "Always Online" / GitHub's maintenance pages return
-        // 200 OK with an HTML body. JsonDocument.Parse on HTML throws a
-        // confusing JsonException — surface a clearer error instead.
         var ct = resp.Content.Headers.ContentType?.MediaType ?? "";
         if (!ct.Contains("json", StringComparison.OrdinalIgnoreCase))
         {
@@ -264,8 +207,6 @@ internal static partial class Program
         if (string.IsNullOrEmpty(zipUrl))
             throw new InvalidOperationException("No .zip asset on latest release.");
 
-        // Prefer the integrity TSV asset, then GitHub's asset digest. Keep
-        // the body parser as a compatibility fallback for older releases.
         string body = releaseElement.TryGetProperty("body", out var b) ? (b.GetString() ?? "") : "";
         string? sha = await ResolveExpectedZipShaAsync(http, zipName, zipDigest, integrityUrl, body)
             .ConfigureAwait(false);
@@ -350,11 +291,6 @@ internal static partial class Program
         return true;
     }
 
-    // Read just the maintenance.include_prereleases flag straight from
-    // settings.json on disk. The Updater is a standalone process so it
-    // can't share AppSettingsStore with the watchdog; a one-shot
-    // JsonDocument lookup keeps the AOT build clean (no source-gen
-    // needed for one bool). Defaults to false on any read/parse error.
     private static bool ReadIncludePrereleasesFromSettings()
     {
         try
@@ -373,13 +309,6 @@ internal static partial class Program
         }
     }
 
-    // List endpoint returns releases newest-published first, which isn't
-    // necessarily highest-version. Pick the entry with the largest
-    // parseable version so a late stable patch on an old major still
-    // wins over a more-recently-published prerelease of the new major.
-    // Ties (same numeric version with different prerelease flag) resolve
-    // to the stable entry -- matches UpdateCheck.PickHighestFromList in
-    // the watchdog so both surfaces agree on which release to install.
     internal static JsonElement? PickHighestRelease(JsonElement list)
     {
         if (list.ValueKind != JsonValueKind.Array) return null;
@@ -421,12 +350,6 @@ internal static partial class Program
             return true;
         }
 
-        // KeyAvailable throws InvalidOperationException when stdin is redirected
-        // (updater piped from another tool, run from Task Scheduler, etc.).
-        // In that case we treat it as headless and default to N rather than
-        // crashing. A future opt-in could read a single line from stdin
-        // instead, but for now silent-default-N matches the documented
-        // 15s-timeout behaviour.
         if (Console.IsInputRedirected)
         {
             Console.WriteLine("Update available — stdin is redirected, declining update silently.");
@@ -456,11 +379,6 @@ internal static partial class Program
         return false;
     }
 
-    // Console-control P/Invoke surface for graceful watchdog shutdown.
-    // Without this, Process.CloseMainWindow returns false on a console
-    // app (no MainWindow) and we go straight to Kill, bypassing the
-    // watchdog's Ctrl+C handler — which is what writes clean_exit.flag
-    // and runs the atomic restore.
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AttachConsole(uint dwProcessId);
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -472,19 +390,6 @@ internal static partial class Program
     private const uint CTRL_C_EVENT = 0;
     private const uint ATTACH_PARENT_PROCESS = 0xFFFFFFFF;
 
-    // H17: prefer a graceful Ctrl+C event so the watchdog runs its real
-    // shutdown (atomic restore + clean_exit.flag). Fall back to Kill only
-    // if the process is still alive after the grace window.
-    //
-    // After the kill, poll for "no watchdog process exists AND the
-    // watchdog mutexes are acquirable" with a 5s budget, rather than a
-    // blind Sleep(500). Earlier impl raced against the kernel's
-    // mutex-handle release on slower machines: the new watchdog process
-    // launched at the end of Main() could hit AbandonedMutexException or
-    // fail to acquire the named pipe instance limit, then exit silently.
-    //
-    // Both process names are stopped: a pre-rename watchdog may be the one
-    // running when this updater installs the renamed build.
     private static void StopRunningWatchdog()
     {
         int killedCount = 0;
@@ -506,7 +411,7 @@ internal static partial class Program
                         SetConsoleCtrlHandler(IntPtr.Zero, false);
                     }
                 }
-                catch { /* fall back to Kill below */ }
+                catch { }
 
                 try
                 {
@@ -525,19 +430,13 @@ internal static partial class Program
                     }
                     killedCount++;
                 }
-                catch { /* best-effort */ }
+                catch { }
             }
         }
         if (killedCount == 0) return;
         WaitForWatchdogReleaseAsync().GetAwaiter().GetResult();
     }
 
-    // Poll for "no watchdog process exists AND mutexes acquirable" with a
-    // 5s budget. Returns silently when both conditions hold; logs a
-    // breadcrumb if the budget expires (caller proceeds anyway — the new
-    // watchdog will surface the problem at acquisition time). Checks BOTH
-    // mutex names: the renamed watchdog holds both, and a pre-rename
-    // watchdog holds the legacy one.
     private static async Task WaitForWatchdogReleaseAsync()
     {
         const int BudgetMs = 5000;
@@ -568,17 +467,12 @@ internal static partial class Program
             if (free) m.ReleaseMutex();
             return free;
         }
-        catch { /* mutex creation failed (privilege?) — treat as ready */ return true; }
+        catch { return true; }
     }
 
     private static async Task DownloadAsync(string url, string dest)
     {
         Console.WriteLine("Downloading…");
-        // Hard cap on the whole download so a half-open TCP from a corp
-        // proxy doesn't wedge the updater forever after the watchdog has
-        // already been killed. HttpClient's default Timeout doesn't apply
-        // to the body stream once headers have arrived; an explicit
-        // CancellationToken on CopyToAsync is the only reliable cap.
         using var cts = new CancellationTokenSource(DownloadHardCap);
         using var handler = new HttpClientHandler
         {
@@ -596,11 +490,6 @@ internal static partial class Program
         long? total = resp.Content.Headers.ContentLength;
         if (total.HasValue)
         {
-            // Refuse to start the download if temp drive doesn't have ~1.5×
-            // the asset size free. yt-dlp + bundled artifacts mean releases
-            // are routinely 250+ MB; a constrained Windows install dir can
-            // run out of disk mid-write and leave the user with a stuck
-            // half-zip + no clear error.
             try
             {
                 var tempDrive = new DriveInfo(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\");
@@ -613,7 +502,7 @@ internal static partial class Program
                         + (tempDrive.AvailableFreeSpace / (1024 * 1024)) + " MiB).");
                 }
             }
-            catch (ArgumentException) { /* path-root parse failed; skip the check */ }
+            catch (ArgumentException) { }
             Logger.WriteFileOnly("[updater] download size=" + (total.Value / 1024) + " KiB");
         }
 
@@ -623,11 +512,6 @@ internal static partial class Program
         Logger.WriteFileOnly("[updater] download complete bytes=" + dst.Length);
     }
 
-    // Sweep stale temp artifacts from prior failed runs so they don't pile
-    // up. Extract dirs and downloaded zips older than 1 day get cleaned,
-    // under both the current and the pre-rename naming patterns (leftovers
-    // from pre-rename updater runs). Best-effort — failures are logged but
-    // not fatal.
     private static readonly string[] TempExtractGlobs = { "vrcresolver-extract-*", "WKVRCProxy-extract-*" };
     private static readonly string[] TempZipGlobs = { "vrcresolver-*.zip", "WKVRCProxy-*.zip" };
 
@@ -650,7 +534,7 @@ internal static partial class Program
                             swept++;
                         }
                     }
-                    catch { /* skip */ }
+                    catch { }
                 }
             }
             foreach (string glob in TempZipGlobs)
@@ -665,11 +549,11 @@ internal static partial class Program
                             swept++;
                         }
                     }
-                    catch { /* skip */ }
+                    catch { }
                 }
             }
         }
-        catch { /* skip */ }
+        catch { }
         if (swept > 0) Logger.WriteFileOnly("[updater] swept " + swept + " stale temp artifacts");
     }
 
@@ -680,10 +564,6 @@ internal static partial class Program
         return Convert.ToHexString(sha.ComputeHash(s));
     }
 
-    // Accepts a payload keyed by EITHER watchdog exe name: current releases
-    // ship vrcresolver.exe, while the transition-window release also ships
-    // an old-named launcher, and a downgrade/re-run against an old zip
-    // still resolves.
     internal static string ResolvePayloadRoot(string extractRoot)
     {
         if (ContainsWatchdogExe(extractRoot))
@@ -716,17 +596,6 @@ internal static partial class Program
         }
     }
 
-    // Atomic two-pass copy: stage every file from the new payload as
-    // "<dst>.new-<short>", then rename pass replaces originals via
-    // File.Move(overwrite:true). On rename failure, all already-renamed
-    // files are restored from the .old-<short> sidecar so a failed update
-    // doesn't leave a half-old / half-new install.
-    //
-    // Each rename is retried up to 3 times with 200ms backoff to absorb
-    // brief AV-scanner holds on the new file. If the rollback ITSELF fails
-    // for some files, those failures are collected and surfaced in the
-    // rethrown exception so the user sees a manual-recovery hint instead
-    // of a silent inconsistent install.
     internal static void AtomicCopyOver(string from, string to)
     {
         var stagedFiles = new List<(string TempNew, string FinalDst)>();
@@ -744,7 +613,7 @@ internal static partial class Program
                 string target = SafeInstallPath(to, rel);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 if (Path.GetFileName(target).Equals(UpdaterExeName, StringComparison.OrdinalIgnoreCase))
-                    continue; // can't overwrite our own running exe
+                    continue;
                 string tempNew = target + ".new-" + Guid.NewGuid().ToString("N").Substring(0, 8);
                 File.Copy(file, tempNew, overwrite: true);
                 stagedFiles.Add((tempNew, target));
@@ -754,7 +623,7 @@ internal static partial class Program
         {
             foreach (var (tmp, _) in stagedFiles)
             {
-                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* best-effort */ }
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
             }
             throw;
         }
@@ -777,11 +646,6 @@ internal static partial class Program
                 }
                 catch (Exception innerEx)
                 {
-                    // Decorate the lock case for known critical files so the
-                    // user sees an actionable hint rather than a generic
-                    // IOException. Tools/yt-dlp.exe is the file most likely
-                    // to be locked (VRChat or the running watchdog's probe
-                    // handle).
                     string fname = Path.GetFileName(dst);
                     if (innerEx is IOException
                         && fname.Equals("yt-dlp.exe", StringComparison.OrdinalIgnoreCase))
@@ -814,10 +678,6 @@ internal static partial class Program
         }
         catch (Exception primaryEx)
         {
-            // Rename pass failed midway. Restore previously-renamed files
-            // from their .old- sidecars; collect any rollback-step failures
-            // and decorate the rethrown exception with a manual-recovery
-            // hint listing the files left in an unknown state.
             var rollbackFailures = new List<string>();
             foreach (var (backup, dst) in renamed)
             {
@@ -833,7 +693,7 @@ internal static partial class Program
             }
             foreach (var (tmp, _) in stagedFiles)
             {
-                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* best-effort */ }
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
             }
             if (rollbackFailures.Count > 0)
             {
@@ -850,7 +710,7 @@ internal static partial class Program
 
         foreach (var (backup, _) in renamed)
         {
-            try { File.Delete(backup); } catch { /* best-effort */ }
+            try { File.Delete(backup); } catch { }
         }
     }
 
@@ -898,10 +758,6 @@ internal static partial class Program
         return full;
     }
 
-    // Retry a File.Move up to `retries` times with 200ms backoff between
-    // attempts. Absorbs AV-scanner brief holds on the source file (Defender
-    // can hold a freshly-copied .new-<short> open for a tick before
-    // releasing). The last attempt's exception escapes if all retries fail.
     private static void MoveWithRetry(string src, string dst, int retries)
     {
         for (int attempt = 1; attempt <= retries; attempt++)
