@@ -17,6 +17,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ### Fixed
 - **terminal:** Repaint the prompt while typing into a suggestion (fc13a5f)
+- **resolve:** Return to the server after a failed native fallback (7ce6095)
 
 ---
 
