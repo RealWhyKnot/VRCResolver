@@ -58,10 +58,12 @@ internal sealed partial class LocalIpcServer : IDisposable
         string preview = LogUtil.SanitizeForConsole(notify.ErrorPreview ?? "", 80);
 
         int evicted = 0;
+        bool hintCleared = false;
         if (!string.IsNullOrEmpty(notify.Url))
         {
             try { evicted = _cache?.EvictByUrl(notify.Url) ?? 0; }
             catch { }
+            hintCleared = _ogFallbackHint?.TryClear(notify.Url) ?? false;
         }
 
         string hint = reason switch
@@ -82,6 +84,7 @@ internal sealed partial class LocalIpcServer : IDisposable
             " exit=" + notify.ExitCode +
             " elapsed_ms=" + notify.ElapsedMs +
             " evicted=" + evicted +
+            " hint_cleared=" + hintCleared +
             " preview=" + preview);
 
         if (!string.IsNullOrEmpty(notify.Url))

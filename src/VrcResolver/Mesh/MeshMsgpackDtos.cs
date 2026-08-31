@@ -27,6 +27,7 @@ internal sealed partial class MsgpackFallbackNativeFrame
     [Key(1)] public string? Id { get; set; }
     [Key(2)] public string? Reason { get; set; }
     [Key(3)] public string? PublicMessage { get; set; }
+    [Key(4)] public int? RetryAfterMs { get; set; }
 }
 
 [MessagePackObject(AllowPrivate = true)]

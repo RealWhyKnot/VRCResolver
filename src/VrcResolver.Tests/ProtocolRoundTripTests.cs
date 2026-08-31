@@ -254,6 +254,36 @@ public class ProtocolRoundTripTests
     }
 
     [Fact]
+    public void ResolveResponse_parses_retry_after_ms()
+    {
+        const string json = """
+        {"action":"fallback_native","id":"abc","reason":"discovery_in_progress","retry_after_ms":8500}
+        """;
+        var resp = JsonSerializer.Deserialize<ResolveResponse>(json);
+        Assert.Equal(8500, resp!.RetryAfterMs);
+
+        const string without = """
+        {"action":"fallback_native","id":"abc","reason":"resolve_cost_exceeds_deadline"}
+        """;
+        Assert.Null(JsonSerializer.Deserialize<ResolveResponse>(without)!.RetryAfterMs);
+    }
+
+    [Fact]
+    public void ResolveRequest_skip_native_hint_serialized_only_when_set()
+    {
+        var req = new ResolveRequest { Action = "resolve", Id = "x", Url = "https://x", Player = "avpro" };
+        using (var doc = JsonDocument.Parse(JsonSerializer.SerializeToUtf8Bytes(req)))
+            Assert.False(doc.RootElement.TryGetProperty("skip_native_hint", out _));
+
+        req.SkipNativeHint = true;
+        using (var doc = JsonDocument.Parse(JsonSerializer.SerializeToUtf8Bytes(req)))
+        {
+            Assert.True(doc.RootElement.TryGetProperty("skip_native_hint", out var prop));
+            Assert.True(prop.GetBoolean());
+        }
+    }
+
+    [Fact]
     public void WireConstants_match_server_spec_strings()
     {
         Assert.Equal("welcome", WireConstants.ActionWelcome);

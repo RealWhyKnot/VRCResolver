@@ -127,12 +127,13 @@ public class V31MsgpackTests
         };
         byte[] mp = MessagePackSerializer.Serialize(src);
 
-        Assert.Equal(0x94, mp[0]);
+        Assert.Equal(0x95, mp[0]);
         Assert.Equal(0xA1, mp[1]); Assert.Equal((byte)'F', mp[2]);
         Assert.Equal(0xA1, mp[3]); Assert.Equal((byte)'I', mp[4]);
         Assert.Equal(0xA1, mp[5]); Assert.Equal((byte)'R', mp[6]);
         Assert.Equal(0xC0, mp[7]);
-        Assert.Equal(8, mp.Length);
+        Assert.Equal(0xC0, mp[8]);
+        Assert.Equal(9, mp.Length);
     }
 
     [Fact]
@@ -188,13 +189,46 @@ public class V31MsgpackTests
             Reason = "warp_down",
         };
         byte[] bytes = MessagePackSerializer.Serialize(full);
-        var shortBytes = bytes.AsSpan(0, bytes.Length - 1).ToArray();
+        var shortBytes = bytes.AsSpan(0, bytes.Length - 2).ToArray();
         shortBytes[0] = 0x93;
 
         var round = MessagePackSerializer.Deserialize<MsgpackFallbackNativeFrame>(shortBytes);
         Assert.NotNull(round);
         Assert.Equal("warp_down", round!.Reason);
         Assert.Null(round.PublicMessage);
+        Assert.Null(round.RetryAfterMs);
+    }
+
+    [Fact]
+    public void MsgpackFallbackNativeFrame_tolerates_four_element_frame_without_retry_after()
+    {
+        byte[] mp =
+        {
+            0x94,
+            0xA1, (byte)'F',
+            0xA1, (byte)'I',
+            0xA1, (byte)'R',
+            0xC0,
+        };
+        var round = MessagePackSerializer.Deserialize<MsgpackFallbackNativeFrame>(mp);
+        Assert.NotNull(round);
+        Assert.Equal("I", round!.Id);
+        Assert.Null(round.RetryAfterMs);
+    }
+
+    [Fact]
+    public void MsgpackFallbackNativeFrame_carries_retry_after()
+    {
+        var src = new MsgpackFallbackNativeFrame
+        {
+            Action = "fallback_native",
+            Id = "id1",
+            Reason = "discovery_in_progress",
+            RetryAfterMs = 8500,
+        };
+        byte[] bytes = MessagePackSerializer.Serialize(src);
+        var round = MessagePackSerializer.Deserialize<MsgpackFallbackNativeFrame>(bytes);
+        Assert.Equal(8500, round!.RetryAfterMs);
     }
 
     [Fact]

@@ -91,6 +91,7 @@ internal sealed partial class MeshClient
                         Id = mp.Id ?? "",
                         Reason = mp.Reason,
                         PublicMessage = mp.PublicMessage,
+                        RetryAfterMs = mp.RetryAfterMs,
                     };
                     byte[] jsonFrame = JsonSerializer.SerializeToUtf8Bytes(resp, MeshJsonContext.Default.ResolveResponse);
 

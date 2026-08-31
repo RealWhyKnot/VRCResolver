@@ -129,6 +129,9 @@ public sealed class ResolveRequest
     [JsonPropertyName("prefer_highest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? PreferHighest { get; set; }
 
+    [JsonPropertyName("skip_native_hint"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? SkipNativeHint { get; set; }
+
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
@@ -152,6 +155,8 @@ public sealed class ResolveResponse
     [JsonPropertyName("resolved_height")] public int? ResolvedHeight { get; set; }
 
     [JsonPropertyName("public_message")] public string? PublicMessage { get; set; }
+
+    [JsonPropertyName("retry_after_ms")] public int? RetryAfterMs { get; set; }
 
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

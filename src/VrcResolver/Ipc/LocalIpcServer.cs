@@ -208,7 +208,11 @@ internal sealed partial class LocalIpcServer : IDisposable
             bool viaCache = false;
             string nodeHost = _mesh.CurrentNodeHost;
 
-            if (_ogFallbackHint != null && _ogFallbackHint.ShouldPreferOg(req.Url))
+            if (req.SkipNativeHint == true)
+            {
+                _ogFallbackHint?.TryClear(req.Url);
+            }
+            else if (_ogFallbackHint != null && _ogFallbackHint.ShouldPreferOg(req.Url))
             {
                 await WriteFallbackAsync(pipe, id,
                     WireConstants.OgFallbackReasonPriorLoadFailure,

@@ -14,6 +14,7 @@ internal static partial class Program
     private static readonly TimeSpan ResolveDeadline = TimeSpan.FromSeconds(28);
 
     private static string s_rid = "????????";
+    private static int? s_serverRetryAfterMs;
 
     private static async Task<int> Main(string[] args)
     {
@@ -88,7 +89,8 @@ internal static partial class Program
                         string reason = result.fallbackReason ?? WireConstants.OgFallbackReasonPipeResolveFailed;
                         await TrySendOgFallbackNotifyAsync(url, reason, swTotal.ElapsedMilliseconds, result.publicMessage).ConfigureAwait(false);
 
-                        exitCode = await ExecFallbackAsync(args, url).ConfigureAwait(false);
+                        exitCode = await ExecFallbackAsync(args, url,
+                            ogFailureReason => ReAskServerAsync(url, player, formatArg, swTotal, ogFailureReason)).ConfigureAwait(false);
                         outcome = "pipe-failed-og-fallback";
                     }
                 }
@@ -104,10 +106,10 @@ internal static partial class Program
         }
     }
 
-    private static async Task<(string? Url, string? FallbackReason, string? PublicMessage)> ResolveOverPipeAsync(string url, string player, string? formatArg)
+    private static async Task<(string? Url, string? FallbackReason, string? PublicMessage)> ResolveOverPipeAsync(string url, string player, string? formatArg, TimeSpan? deadlineOverride = null, bool skipNativeHint = false)
     {
         var swPipe = Stopwatch.StartNew();
-        long totalDeadlineMs = (long)ResolveDeadline.TotalMilliseconds;
+        long totalDeadlineMs = (long)(deadlineOverride ?? ResolveDeadline).TotalMilliseconds;
         int? maxHeight = ResolveRequestProfile.TryGetHeightCap(formatArg);
 
         var req = new ResolveRequest
@@ -128,6 +130,7 @@ internal static partial class Program
             MaxAudioChannels = player == WireConstants.PlayerUnity
                 ? WireConstants.UnityMaxAudioChannels
                 : WireConstants.AvProMaxAudioChannels,
+            SkipNativeHint = skipNativeHint ? true : null,
         };
 
         var swRequest = Stopwatch.StartNew();
@@ -218,8 +221,10 @@ internal static partial class Program
 
             if (resp.Action == WireConstants.ActionFallbackNative)
             {
+                s_serverRetryAfterMs = resp.RetryAfterMs;
                 Log("response action=fallback_native id=" + (resp.Id ?? "?")[..Math.Min(8, (resp.Id ?? "?").Length)]
                     + " reason=" + (resp.Reason ?? "?")
+                    + " retry_after_ms=" + (resp.RetryAfterMs?.ToString() ?? "-")
                     + " elapsed_ms_since_request_sent=" + swRequest.ElapsedMilliseconds
                     + " remaining_budget_ms=" + (totalDeadlineMs - swPipe.ElapsedMilliseconds));
 
@@ -349,7 +354,52 @@ internal static partial class Program
         return Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
     }
 
-    private static async Task<int> ExecFallbackAsync(string[] args, string? url)
+    private static async Task<string?> ReAskServerAsync(
+        string url, string player, string? formatArg, Stopwatch swTotal, string ogFailureReason)
+    {
+        if (ogFailureReason == "content_not_found")
+        {
+            Log("re-ask skipped: content gone upstream");
+            return null;
+        }
+        long remainingMs = (long)ResolveDeadline.TotalMilliseconds - swTotal.ElapsedMilliseconds;
+        if (remainingMs < 3000)
+        {
+            Log("re-ask skipped: remaining_budget_ms=" + remainingMs);
+            return null;
+        }
+        if (s_serverRetryAfterMs is int hint)
+        {
+            if (hint > remainingMs - 2000)
+            {
+                Log("re-ask skipped: server retry_after_ms=" + hint + " remaining_budget_ms=" + remainingMs);
+                return null;
+            }
+            if (hint > 0)
+            {
+                Log("re-ask waiting delay_ms=" + hint + " per server hint");
+                await Task.Delay(hint).ConfigureAwait(false);
+                remainingMs = (long)ResolveDeadline.TotalMilliseconds - swTotal.ElapsedMilliseconds;
+            }
+        }
+        Log("re-ask start remaining_budget_ms=" + remainingMs);
+        var retry = await ResolveOverPipeAsync(url, player, formatArg,
+            TimeSpan.FromMilliseconds(Math.Max(2000, remainingMs - 250)),
+            skipNativeHint: true).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(retry.Url))
+        {
+            Log("re-ask did not resolve reason=" + (retry.FallbackReason ?? "?"));
+            return null;
+        }
+        if (!ResolvedUrlGuard.IsSafeToEmit(retry.Url))
+        {
+            Log("re-ask resolved URL fails emit guard host=" + LogUtil.BareHost(retry.Url!));
+            return null;
+        }
+        return TryWrapForTrustGateway(retry.Url!);
+    }
+
+    private static async Task<int> ExecFallbackAsync(string[] args, string? url, Func<string, Task<string?>>? reAskAsync = null)
     {
         string exeDir = AppContext.BaseDirectory;
 
@@ -416,6 +466,20 @@ internal static partial class Program
                 string failureReason = ClassifyOgFailure(ogStderr);
                 string preview = ogStderr.Length > 0 ? Preview(ogStderr.Trim(), 200) : "";
                 await TrySendOgFailedNotifyAsync(url, failureReason, proc.ExitCode, preview, sw.ElapsedMilliseconds).ConfigureAwait(false);
+
+                if (reAskAsync != null)
+                {
+                    string? retryUrl = null;
+                    try { retryUrl = await reAskAsync(failureReason).ConfigureAwait(false); }
+                    catch (Exception rex) { Log("re-ask threw: " + rex.GetType().Name + ": " + rex.Message); }
+                    if (!string.IsNullOrEmpty(retryUrl))
+                    {
+                        Log("re-ask resolved after og failure host=" + LogUtil.BareHost(retryUrl!)
+                            + " suppressed_og_stderr_bytes=" + ogStderr.Length);
+                        TryWriteUrlToStdout(retryUrl!);
+                        return 0;
+                    }
+                }
             }
 
             if (ogStdout.Length > 0)
