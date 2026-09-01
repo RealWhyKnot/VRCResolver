@@ -17,7 +17,9 @@ public class LocalIpcServerLogicTests
     [InlineData(null, "fallback_native", "server_unreachable", false)]
     [InlineData(null, "fallback_native", "internal_error", false)]
     [InlineData("server_unreachable", "fallback_native/server_unreachable", null, false)]
-    public void IsHealthyOutcome_CountsOnlySynthesizedFailuresAsUnhealthy(
+    [InlineData(null, "fallback_native", "client_deadline_exceeded", true)]
+    [InlineData("client_deadline_exceeded", "fallback_native/client_deadline_exceeded", null, true)]
+    public void IsHealthyOutcome_CountsServerAndInternalFailuresAsUnhealthy(
         string? failReason, string outcome, string? serverReason, bool expected)
         => Assert.Equal(expected, LocalIpcServer.IsHealthyOutcome(failReason, outcome, serverReason));
 

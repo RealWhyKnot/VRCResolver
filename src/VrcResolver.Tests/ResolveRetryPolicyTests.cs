@@ -41,6 +41,13 @@ public class ResolveRetryPolicyTests
     }
 
     [Fact]
+    public void ShouldRetry_client_deadline_exceeded_returns_false()
+    {
+        Assert.False(ResolveRetryPolicy.ShouldRetry(
+            WireConstants.FallbackClientDeadlineExceeded, attemptsSoFar: 0, remainingBudgetMs: 15000));
+    }
+
+    [Fact]
     public void ShouldRetry_null_reason_returns_false()
     {
         Assert.False(ResolveRetryPolicy.ShouldRetry(null, attemptsSoFar: 0, remainingBudgetMs: 15000));

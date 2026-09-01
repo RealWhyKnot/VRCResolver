@@ -196,6 +196,9 @@ internal sealed partial class LocalIpcServer : IDisposable
             if (ResolveRequestProfile.ApplyHighQuality(req, AppSettingsStore.Shared.Snapshot().Playback.HighQuality))
                 Logger.WriteFileOnly("[ipc] high quality on; requesting up to "
                     + WireConstants.HighQualityMaxHeight + "p id=" + id);
+            else if (ResolveRequestProfile.ApplyDefaultQualityCap(req))
+                Logger.WriteFileOnly("[ipc] capped VRChat's height request to "
+                    + WireConstants.DefaultMaxHeight + "p id=" + id);
 
             string host = LogUtil.BareHost(req.Url);
             bool viaLhYt = IsLocalhostYoutubeUrl(req.Url);
@@ -320,7 +323,7 @@ internal sealed partial class LocalIpcServer : IDisposable
             }
             catch (OperationCanceledException)
             {
-                failReason = WireConstants.FallbackServerUnreachable;
+                failReason = WireConstants.FallbackClientDeadlineExceeded;
             }
             catch (Exception ex)
             {
@@ -415,7 +418,7 @@ internal sealed partial class LocalIpcServer : IDisposable
     }
 
     internal static bool IsHealthyOutcome(string? failReason, string outcome, string? serverReason)
-        => failReason == null
+        => (failReason == null || failReason == WireConstants.FallbackClientDeadlineExceeded)
            && !(outcome == WireConstants.ActionFallbackNative
                && (serverReason == WireConstants.FallbackServerUnreachable
                    || serverReason == WireConstants.FallbackInternalError));

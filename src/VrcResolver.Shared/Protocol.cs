@@ -75,6 +75,7 @@ public static class WireConstants
     public const string FallbackInternalError = "internal_error";
     public const string FallbackDiscoveryInProgress = "discovery_in_progress";
     public const string FallbackServerUnreachable = "server_unreachable";
+    public const string FallbackClientDeadlineExceeded = "client_deadline_exceeded";
 
     public const string FallbackRateLimited = "rate_limited";
     public const string FallbackProtocolError = "protocol_error";
@@ -91,6 +92,7 @@ public static class WireConstants
     public const int UnityMaxAudioChannels = 2;
 
     public const int HighQualityMaxHeight = 2160;
+    public const int DefaultMaxHeight = 1080;
 
     public static readonly string[] ExtensionBackedVideoCodecs = { "h265", "vp9", "av1" };
 

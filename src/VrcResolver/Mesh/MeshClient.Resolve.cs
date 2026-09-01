@@ -87,7 +87,7 @@ internal sealed partial class MeshClient : IAsyncDisposable
         }
         catch (TaskCanceledException)
         {
-            return MakeFallbackResult(id, WireConstants.FallbackServerUnreachable);
+            return MakeFallbackResult(id, WireConstants.FallbackClientDeadlineExceeded);
         }
     }
 

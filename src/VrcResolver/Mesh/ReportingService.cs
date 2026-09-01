@@ -103,6 +103,7 @@ internal static partial class ReportingService
             WireConstants.ReasonUnityUnsupportedFormat => "Unknown",
             WireConstants.ReasonWarpDown => "NetworkError",
             WireConstants.FallbackServerUnreachable => "",
+            WireConstants.FallbackClientDeadlineExceeded => "",
             WireConstants.FallbackDiscoveryInProgress => "",
             WireConstants.FallbackRateLimited => "",
             WireConstants.FallbackProtocolError => "",

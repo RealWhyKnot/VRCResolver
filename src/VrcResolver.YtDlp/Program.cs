@@ -11,7 +11,6 @@ namespace VrcResolver.YtDlp;
 internal static partial class Program
 {
     private static readonly TimeSpan PipeConnectTimeout = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan ResolveDeadline = TimeSpan.FromSeconds(28);
 
     private static string s_rid = "????????";
     private static int? s_serverRetryAfterMs;
@@ -90,7 +89,8 @@ internal static partial class Program
                         await TrySendOgFallbackNotifyAsync(url, reason, swTotal.ElapsedMilliseconds, result.publicMessage).ConfigureAwait(false);
 
                         exitCode = await ExecFallbackAsync(args, url,
-                            ogFailureReason => ReAskServerAsync(url, player, formatArg, swTotal, ogFailureReason)).ConfigureAwait(false);
+                            ogFailureReason => ReAskServerAsync(url, player, formatArg, swTotal, ogFailureReason),
+                            swTotal).ConfigureAwait(false);
                         outcome = "pipe-failed-og-fallback";
                     }
                 }
@@ -109,7 +109,7 @@ internal static partial class Program
     private static async Task<(string? Url, string? FallbackReason, string? PublicMessage)> ResolveOverPipeAsync(string url, string player, string? formatArg, TimeSpan? deadlineOverride = null, bool skipNativeHint = false)
     {
         var swPipe = Stopwatch.StartNew();
-        long totalDeadlineMs = (long)(deadlineOverride ?? ResolveDeadline).TotalMilliseconds;
+        long totalDeadlineMs = (long)(deadlineOverride ?? ResolveBudget.Total).TotalMilliseconds;
         int? maxHeight = ResolveRequestProfile.TryGetHeightCap(formatArg);
 
         var req = new ResolveRequest
@@ -196,7 +196,7 @@ internal static partial class Program
             var swRead = Stopwatch.StartNew();
             string? line;
             try { line = await ReadLineAsync(pipe, ctsResolve.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) { Log("pipe read TIMED OUT after " + swRead.ElapsedMilliseconds + " ms (no terminal frame within " + (int)ResolveDeadline.TotalSeconds + " s)"); return (null, WireConstants.OgFallbackReasonPipeResolveFailed, null); }
+            catch (OperationCanceledException) { Log("pipe read TIMED OUT after " + swRead.ElapsedMilliseconds + " ms (no terminal frame within " + totalDeadlineMs + " ms)"); return (null, WireConstants.OgFallbackReasonPipeResolveFailed, null); }
             catch (Exception ex) { Log("pipe read failed: " + ex.GetType().Name + ": " + ex.Message); return (null, WireConstants.OgFallbackReasonPipeResolveFailed, null); }
             if (string.IsNullOrEmpty(line)) { Log("pipe returned empty response after " + swRead.ElapsedMilliseconds + " ms"); return (null, WireConstants.OgFallbackReasonPipeResolveFailed, null); }
 
@@ -362,7 +362,7 @@ internal static partial class Program
             Log("re-ask skipped: content gone upstream");
             return null;
         }
-        long remainingMs = (long)ResolveDeadline.TotalMilliseconds - swTotal.ElapsedMilliseconds;
+        long remainingMs = (long)ResolveBudget.Total.TotalMilliseconds - swTotal.ElapsedMilliseconds;
         if (remainingMs < 3000)
         {
             Log("re-ask skipped: remaining_budget_ms=" + remainingMs);
@@ -379,7 +379,7 @@ internal static partial class Program
             {
                 Log("re-ask waiting delay_ms=" + hint + " per server hint");
                 await Task.Delay(hint).ConfigureAwait(false);
-                remainingMs = (long)ResolveDeadline.TotalMilliseconds - swTotal.ElapsedMilliseconds;
+                remainingMs = (long)ResolveBudget.Total.TotalMilliseconds - swTotal.ElapsedMilliseconds;
             }
         }
         Log("re-ask start remaining_budget_ms=" + remainingMs);
@@ -399,7 +399,9 @@ internal static partial class Program
         return TryWrapForTrustGateway(retry.Url!);
     }
 
-    private static async Task<int> ExecFallbackAsync(string[] args, string? url, Func<string, Task<string?>>? reAskAsync = null)
+    private const int OgTimeoutExitCode = 1;
+
+    private static async Task<int> ExecFallbackAsync(string[] args, string? url, Func<string, Task<string?>>? reAskAsync = null, Stopwatch? swTotal = null)
     {
         string exeDir = AppContext.BaseDirectory;
 
@@ -439,33 +441,43 @@ internal static partial class Program
 
             var stdoutTask = proc.StandardOutput.ReadToEndAsync();
             var stderrTask = proc.StandardError.ReadToEndAsync();
-            using var ctsOg = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            var ogBudget = ResolveBudget.OgWindow(swTotal?.Elapsed ?? TimeSpan.Zero, reAskAsync != null);
+            using var ctsOg = new CancellationTokenSource(ogBudget);
+            string ogStdout;
+            string ogStderr;
+            int ogExit;
+            bool ogTimedOut = false;
             try
             {
                 await proc.WaitForExitAsync(ctsOg.Token).ConfigureAwait(false);
+                ogStdout = await stdoutTask.ConfigureAwait(false);
+                ogStderr = await stderrTask.ConfigureAwait(false);
+                ogExit = proc.ExitCode;
             }
             catch (OperationCanceledException)
             {
-                Log("FALLBACK og: no exit after 5 min -- killing process tree, emitting empty stdout");
                 try { proc.Kill(entireProcessTree: true); } catch { }
                 try { await proc.WaitForExitAsync().ConfigureAwait(false); } catch { }
-                return 0;
+                ogStdout = "";
+                ogStderr = "";
+                ogExit = OgTimeoutExitCode;
+                ogTimedOut = true;
             }
-            string ogStdout = await stdoutTask.ConfigureAwait(false);
-            string ogStderr = await stderrTask.ConfigureAwait(false);
             sw.Stop();
 
-            Log("FALLBACK og: exit=" + proc.ExitCode + " elapsed_ms=" + sw.ElapsedMilliseconds + " stdout_bytes=" + ogStdout.Length + " stderr_bytes=" + ogStderr.Length);
+            Log("FALLBACK og: exit=" + ogExit + " timed_out=" + ogTimedOut
+                + " budget_ms=" + (int)ogBudget.TotalMilliseconds
+                + " elapsed_ms=" + sw.ElapsedMilliseconds + " stdout_bytes=" + ogStdout.Length + " stderr_bytes=" + ogStderr.Length);
             if (ogStdout.Length > 0)
                 Log("FALLBACK og stdout-preview: " + Preview(ogStdout, 240));
             if (ogStderr.Length > 0)
                 Log("FALLBACK og stderr-preview: " + Preview(ogStderr, 240));
 
-            if (proc.ExitCode != 0 && !string.IsNullOrEmpty(url))
+            if (ogExit != 0 && !string.IsNullOrEmpty(url))
             {
-                string failureReason = ClassifyOgFailure(ogStderr);
+                string failureReason = ogTimedOut ? "timeout" : ClassifyOgFailure(ogStderr);
                 string preview = ogStderr.Length > 0 ? Preview(ogStderr.Trim(), 200) : "";
-                await TrySendOgFailedNotifyAsync(url, failureReason, proc.ExitCode, preview, sw.ElapsedMilliseconds).ConfigureAwait(false);
+                await TrySendOgFailedNotifyAsync(url, failureReason, ogExit, preview, sw.ElapsedMilliseconds).ConfigureAwait(false);
 
                 if (reAskAsync != null)
                 {
@@ -497,7 +509,7 @@ internal static partial class Program
                 ourStderr.Flush();
             }
 
-            return proc.ExitCode;
+            return ogExit;
         }
         catch (Exception ex)
         {
