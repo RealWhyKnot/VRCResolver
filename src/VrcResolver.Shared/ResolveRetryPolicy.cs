@@ -28,4 +28,11 @@ public static class ResolveRetryPolicy
         1 => 2250,
         _ => 2250,
     };
+
+    public static int? RetryDelayMs(string? reason, int? retryAfterMs, int attempt, long remainingBudgetMs)
+    {
+        if (reason == WireConstants.FallbackDiscoveryInProgress && retryAfterMs is int hint)
+            return hint <= Math.Min(5000, remainingBudgetMs - MinBudgetForRetryMs) ? hint : null;
+        return NextDelayMs(attempt);
+    }
 }

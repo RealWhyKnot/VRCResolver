@@ -102,4 +102,39 @@ public class ResolveRetryPolicyTests
     {
         Assert.False(ResolveRetryPolicy.ShouldRetry(reason, 0, 30_000));
     }
+
+    [Fact]
+    public void RetryDelayMs_small_hint_is_honored_as_the_delay()
+    {
+        Assert.Equal(2000, ResolveRetryPolicy.RetryDelayMs(
+            WireConstants.FallbackDiscoveryInProgress, retryAfterMs: 2000, attempt: 0, remainingBudgetMs: 24000));
+    }
+
+    [Fact]
+    public void RetryDelayMs_large_hint_stops_retrying()
+    {
+        Assert.Null(ResolveRetryPolicy.RetryDelayMs(
+            WireConstants.FallbackDiscoveryInProgress, retryAfterMs: 25000, attempt: 0, remainingBudgetMs: 26000));
+    }
+
+    [Fact]
+    public void RetryDelayMs_without_a_hint_keeps_the_blind_ladder()
+    {
+        Assert.Equal(750, ResolveRetryPolicy.RetryDelayMs(
+            WireConstants.FallbackDiscoveryInProgress, retryAfterMs: null, attempt: 0, remainingBudgetMs: 26000));
+    }
+
+    [Fact]
+    public void RetryDelayMs_hint_that_would_strand_the_ladder_stops_retrying()
+    {
+        Assert.Null(ResolveRetryPolicy.RetryDelayMs(
+            WireConstants.FallbackDiscoveryInProgress, retryAfterMs: 4800, attempt: 0, remainingBudgetMs: 6000));
+    }
+
+    [Fact]
+    public void RetryDelayMs_other_reasons_ignore_the_hint()
+    {
+        Assert.Equal(2250, ResolveRetryPolicy.RetryDelayMs(
+            WireConstants.FallbackServerUnreachable, retryAfterMs: 25000, attempt: 1, remainingBudgetMs: 26000));
+    }
 }

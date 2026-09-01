@@ -98,7 +98,7 @@ internal sealed partial class MeshClient
                     _inflightCids.TryRemove(mp.Id!, out _);
                     if (_pending.TryRemove(mp.Id!, out var tcs))
                     {
-                        tcs.TrySetResult(new MeshResolveResult(jsonFrame, WireConstants.ActionFallbackNative, mp.Reason));
+                        tcs.TrySetResult(new MeshResolveResult(jsonFrame, WireConstants.ActionFallbackNative, mp.Reason, mp.RetryAfterMs));
                     }
                     return;
                 }

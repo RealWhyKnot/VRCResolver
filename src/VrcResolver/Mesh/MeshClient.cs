@@ -8,7 +8,7 @@ using VrcResolver.Shared;
 
 namespace VrcResolver;
 
-internal readonly record struct MeshResolveResult(byte[] Frame, string Action, string? Reason);
+internal readonly record struct MeshResolveResult(byte[] Frame, string Action, string? Reason, int? RetryAfterMs = null);
 
 internal sealed partial class MeshClient : IAsyncDisposable
 {

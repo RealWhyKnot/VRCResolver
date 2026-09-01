@@ -33,6 +33,15 @@ internal sealed partial class MeshClient
                     if (doc.RootElement.TryGetProperty("reason", out var reasonEl) && reasonEl.ValueKind == JsonValueKind.String)
                         reason = reasonEl.GetString();
 
+                    int? retryAfterMs = null;
+                    if (action == WireConstants.ActionFallbackNative
+                        && doc.RootElement.TryGetProperty("retry_after_ms", out var retryEl)
+                        && retryEl.ValueKind == JsonValueKind.Number
+                        && retryEl.TryGetInt32(out int retryAfter))
+                    {
+                        retryAfterMs = retryAfter;
+                    }
+
                     string? resolvedUrl = null;
                     if (action == WireConstants.ActionResolved
                         && doc.RootElement.TryGetProperty("url", out var urlEl)
@@ -67,7 +76,7 @@ internal sealed partial class MeshClient
                     if (_pending.TryRemove(id, out var tcs))
                     {
                         if (action == WireConstants.ActionResolved) _reconnectAttempt = 0;
-                        tcs.TrySetResult(new MeshResolveResult(payload, action, reason));
+                        tcs.TrySetResult(new MeshResolveResult(payload, action, reason, retryAfterMs));
                     }
                     return;
                 }

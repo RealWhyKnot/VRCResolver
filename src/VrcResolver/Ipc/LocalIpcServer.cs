@@ -278,7 +278,14 @@ internal sealed partial class LocalIpcServer : IDisposable
                             (long)(deadlineUtc - DateTime.UtcNow).TotalMilliseconds)
                         && !perReqCts.Token.IsCancellationRequested)
                     {
-                        int delayMs = ResolveRetryPolicy.NextDelayMs(retriesSent);
+                        int? delayHint = ResolveRetryPolicy.RetryDelayMs(result.Reason, result.RetryAfterMs,
+                            retriesSent, (long)(deadlineUtc - DateTime.UtcNow).TotalMilliseconds);
+                        if (delayHint is not int delayMs)
+                        {
+                            Logger.WriteFileOnly("[ipc] retry skipped id=" + id + CidSuffix(cid)
+                                + " retry_after_ms=" + result.RetryAfterMs + " -- forwarding fallback");
+                            break;
+                        }
                         Logger.WriteFileOnly("[ipc] retry id=" + id + CidSuffix(cid)
                             + " reason=" + LogUtil.SanitizeForConsole(result.Reason ?? "?", 32)
                             + " attempt=" + (retriesSent + 2)

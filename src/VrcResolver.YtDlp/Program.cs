@@ -13,12 +13,13 @@ internal static partial class Program
     private static readonly TimeSpan PipeConnectTimeout = TimeSpan.FromSeconds(1);
 
     private static string s_rid = "????????";
-    private static int? s_serverRetryAfterMs;
+    private static long? s_serverRetryAtElapsedMs;
+    private static readonly Stopwatch s_clock = Stopwatch.StartNew();
 
     private static async Task<int> Main(string[] args)
     {
         s_rid = Guid.NewGuid().ToString("N")[..8];
-        var swTotal = Stopwatch.StartNew();
+        var swTotal = s_clock;
 
         try
         {
@@ -221,7 +222,9 @@ internal static partial class Program
 
             if (resp.Action == WireConstants.ActionFallbackNative)
             {
-                s_serverRetryAfterMs = resp.RetryAfterMs;
+                s_serverRetryAtElapsedMs = resp.RetryAfterMs is int retryAfter
+                    ? s_clock.ElapsedMilliseconds + retryAfter
+                    : null;
                 Log("response action=fallback_native id=" + (resp.Id ?? "?")[..Math.Min(8, (resp.Id ?? "?").Length)]
                     + " reason=" + (resp.Reason ?? "?")
                     + " retry_after_ms=" + (resp.RetryAfterMs?.ToString() ?? "-")
@@ -362,26 +365,19 @@ internal static partial class Program
             Log("re-ask skipped: content gone upstream");
             return null;
         }
-        long remainingMs = (long)ResolveBudget.Total.TotalMilliseconds - swTotal.ElapsedMilliseconds;
-        if (remainingMs < 3000)
+        long? delayMs = ResolveBudget.ReAskDelayMs(swTotal.ElapsedMilliseconds, s_serverRetryAtElapsedMs);
+        if (delayMs is not long delay)
         {
-            Log("re-ask skipped: remaining_budget_ms=" + remainingMs);
+            Log("re-ask skipped: elapsed_ms=" + swTotal.ElapsedMilliseconds
+                + " retry_at_elapsed_ms=" + (s_serverRetryAtElapsedMs?.ToString() ?? "-"));
             return null;
         }
-        if (s_serverRetryAfterMs is int hint)
+        if (delay > 0)
         {
-            if (hint > remainingMs - 2000)
-            {
-                Log("re-ask skipped: server retry_after_ms=" + hint + " remaining_budget_ms=" + remainingMs);
-                return null;
-            }
-            if (hint > 0)
-            {
-                Log("re-ask waiting delay_ms=" + hint + " per server hint");
-                await Task.Delay(hint).ConfigureAwait(false);
-                remainingMs = (long)ResolveBudget.Total.TotalMilliseconds - swTotal.ElapsedMilliseconds;
-            }
+            Log("re-ask waiting delay_ms=" + delay + " per server hint");
+            await Task.Delay((int)delay).ConfigureAwait(false);
         }
+        long remainingMs = (long)ResolveBudget.Total.TotalMilliseconds - swTotal.ElapsedMilliseconds;
         Log("re-ask start remaining_budget_ms=" + remainingMs);
         var retry = await ResolveOverPipeAsync(url, player, formatArg,
             TimeSpan.FromMilliseconds(Math.Max(2000, remainingMs - 250)),
@@ -403,6 +399,23 @@ internal static partial class Program
 
     private static async Task<int> ExecFallbackAsync(string[] args, string? url, Func<string, Task<string?>>? reAskAsync = null, Stopwatch? swTotal = null)
     {
+        async Task<int> ReAskOrFail(string failureReason)
+        {
+            if (reAskAsync != null)
+            {
+                string? retryUrl = null;
+                try { retryUrl = await reAskAsync(failureReason).ConfigureAwait(false); }
+                catch (Exception rex) { Log("re-ask threw: " + rex.GetType().Name + ": " + rex.Message); }
+                if (!string.IsNullOrEmpty(retryUrl))
+                {
+                    Log("re-ask resolved without og host=" + LogUtil.BareHost(retryUrl!));
+                    TryWriteUrlToStdout(retryUrl!);
+                    return 0;
+                }
+            }
+            return 1;
+        }
+
         string exeDir = AppContext.BaseDirectory;
 
         string knownHashesPath = Path.Combine(AppPaths.StateRoot(), "wrapper_hashes.txt");
@@ -416,8 +429,8 @@ internal static partial class Program
 
         if (ogPath == null)
         {
-            Log("FALLBACK no-og: no usable vanilla yt-dlp found -- emitting empty stdout, exit 0");
-            return 0;
+            Log("FALLBACK no-og: no usable vanilla yt-dlp found");
+            return await ReAskOrFail("no_og_binary").ConfigureAwait(false);
         }
 
         Log("FALLBACK og: spawning " + ogPath + " with " + args.Length + " args");
@@ -437,11 +450,16 @@ internal static partial class Program
         try
         {
             using var proc = Process.Start(psi);
-            if (proc == null) { Log("FALLBACK og: Process.Start returned null"); return 0; }
+            if (proc == null)
+            {
+                Log("FALLBACK og: Process.Start returned null");
+                return await ReAskOrFail("og_spawn_failed").ConfigureAwait(false);
+            }
 
             var stdoutTask = proc.StandardOutput.ReadToEndAsync();
             var stderrTask = proc.StandardError.ReadToEndAsync();
-            var ogBudget = ResolveBudget.OgWindow(swTotal?.Elapsed ?? TimeSpan.Zero, reAskAsync != null);
+            var ogBudget = ResolveBudget.OgWindow(swTotal?.Elapsed ?? TimeSpan.Zero, reAskAsync != null,
+                s_serverRetryAtElapsedMs);
             using var ctsOg = new CancellationTokenSource(ogBudget);
             string ogStdout;
             string ogStderr;
@@ -515,7 +533,7 @@ internal static partial class Program
         {
             sw.Stop();
             Log("FALLBACK og: exec failed: " + ex.GetType().Name + ": " + ex.Message + " elapsed_ms=" + sw.ElapsedMilliseconds);
-            return 0;
+            return await ReAskOrFail("og_exec_failed").ConfigureAwait(false);
         }
     }
 
