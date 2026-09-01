@@ -11,6 +11,12 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
+_No notable changes since the last release._
+
+---
+
+## [v2026.9.1.0](https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.9.1.0) - 2026-09-01
+
 ### Added
 - **terminal:** Complete as you type, suggest on typos, and edit mid-line (ea3d61a)
 - **client:** Add a high quality option for the best rung a source offers (d7c4a1b)
