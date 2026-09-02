@@ -39,6 +39,7 @@ public static class WireConstants
     public const string OgFallbackReasonPipeConnectFailed = "pipe_connect_failed";
     public const string OgFallbackReasonPipeResolveFailed = "pipe_resolve_failed";
     public const string OgFallbackReasonServerFallbackNative = "server_fallback_native";
+    public const string ServerReasonValidationFailedPrefix = "validation_failed_";
     public const string OgFallbackReasonNoUrlDiagnostic = "no_url_diagnostic";
     public const string OgFallbackReasonPriorLoadFailure = "prior_load_failure";
     public const string OgFallbackReasonAvProIncompatible = "avpro_incompatible";

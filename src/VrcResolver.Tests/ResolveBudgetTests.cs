@@ -7,6 +7,27 @@ namespace VrcResolver.Tests;
 public class ResolveBudgetTests
 {
     [Fact]
+    public void ReAskIsRedundant_after_a_validation_reject_with_no_hint()
+    {
+        Assert.True(ResolveBudget.ReAskIsRedundant("validation_failed_http_403", retryAtElapsedMs: null));
+        Assert.True(ResolveBudget.ReAskIsRedundant("validation_failed_range_fetch_error", retryAtElapsedMs: null));
+    }
+
+    [Fact]
+    public void ReAskIsRedundant_never_when_the_server_gave_a_hint()
+    {
+        Assert.False(ResolveBudget.ReAskIsRedundant("validation_failed_http_403", retryAtElapsedMs: 5000));
+    }
+
+    [Fact]
+    public void ReAskIsRedundant_never_for_other_reasons()
+    {
+        Assert.False(ResolveBudget.ReAskIsRedundant("discovery_in_progress", retryAtElapsedMs: null));
+        Assert.False(ResolveBudget.ReAskIsRedundant("all_configs_failed", retryAtElapsedMs: null));
+        Assert.False(ResolveBudget.ReAskIsRedundant(null, retryAtElapsedMs: null));
+    }
+
+    [Fact]
     public void OgWindow_when_rung1_consumed_the_budget_falls_back_to_the_reserve()
     {
         Assert.Equal(ResolveBudget.OgReserve,

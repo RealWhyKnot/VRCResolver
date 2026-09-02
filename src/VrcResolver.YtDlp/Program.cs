@@ -14,6 +14,7 @@ internal static partial class Program
 
     private static string s_rid = "????????";
     private static long? s_serverRetryAtElapsedMs;
+    private static string? s_serverFallbackReason;
     private static readonly Stopwatch s_clock = Stopwatch.StartNew();
 
     private static async Task<int> Main(string[] args)
@@ -225,6 +226,7 @@ internal static partial class Program
                 s_serverRetryAtElapsedMs = resp.RetryAfterMs is int retryAfter
                     ? s_clock.ElapsedMilliseconds + retryAfter
                     : null;
+                if (!skipNativeHint) s_serverFallbackReason = resp.Reason;
                 Log("response action=fallback_native id=" + (resp.Id ?? "?")[..Math.Min(8, (resp.Id ?? "?").Length)]
                     + " reason=" + (resp.Reason ?? "?")
                     + " retry_after_ms=" + (resp.RetryAfterMs?.ToString() ?? "-")
@@ -363,6 +365,11 @@ internal static partial class Program
         if (ogFailureReason == "content_not_found")
         {
             Log("re-ask skipped: content gone upstream");
+            return null;
+        }
+        if (ResolveBudget.ReAskIsRedundant(s_serverFallbackReason, s_serverRetryAtElapsedMs))
+        {
+            Log("re-ask skipped: server already re-raced reason=" + s_serverFallbackReason);
             return null;
         }
         long? delayMs = ResolveBudget.ReAskDelayMs(swTotal.ElapsedMilliseconds, s_serverRetryAtElapsedMs);

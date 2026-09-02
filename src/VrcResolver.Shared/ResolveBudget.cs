@@ -1,3 +1,5 @@
+using System;
+
 namespace VrcResolver.Shared;
 
 public static class ResolveBudget
@@ -17,6 +19,11 @@ public static class ResolveBudget
     public static bool ReAskFits(long? retryAtElapsedMs)
         => retryAtElapsedMs is not long retryAt
             || (long)Total.TotalMilliseconds - retryAt >= ReAskMinWindowMs;
+
+    public static bool ReAskIsRedundant(string? serverReason, long? retryAtElapsedMs)
+        => retryAtElapsedMs is null
+            && serverReason != null
+            && serverReason.StartsWith(WireConstants.ServerReasonValidationFailedPrefix, StringComparison.Ordinal);
 
     public static long? ReAskDelayMs(long elapsedMs, long? retryAtElapsedMs)
     {
