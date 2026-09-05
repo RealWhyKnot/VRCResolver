@@ -15,6 +15,7 @@ internal static partial class Program
     private static string s_rid = "????????";
     private static long? s_serverRetryAtElapsedMs;
     private static string? s_serverFallbackReason;
+    private static string? s_lastRequestId;
     private static readonly Stopwatch s_clock = Stopwatch.StartNew();
 
     private static async Task<int> Main(string[] args)
@@ -88,6 +89,7 @@ internal static partial class Program
                     else
                     {
                         string reason = result.fallbackReason ?? WireConstants.OgFallbackReasonPipeResolveFailed;
+                        s_serverFallbackReason ??= reason;
                         await TrySendOgFallbackNotifyAsync(url, reason, swTotal.ElapsedMilliseconds, result.publicMessage).ConfigureAwait(false);
 
                         exitCode = await ExecFallbackAsync(args, url,
@@ -134,6 +136,7 @@ internal static partial class Program
                 : WireConstants.AvProMaxAudioChannels,
             SkipNativeHint = skipNativeHint ? true : null,
         };
+        s_lastRequestId = req.Id;
 
         var swRequest = Stopwatch.StartNew();
         int connectRetriesSent = 0;
@@ -406,6 +409,22 @@ internal static partial class Program
 
     private static async Task<int> ExecFallbackAsync(string[] args, string? url, Func<string, Task<string?>>? reAskAsync = null, Stopwatch? swTotal = null)
     {
+        bool terminalFailureLogged = false;
+        string terminalPlayer = ResolveRequestProfile.InferPlayer(ResolveRequestProfile.ExtractDashFValue(args));
+
+        void LogTerminalFailure(string bundledReason)
+        {
+            if (terminalFailureLogged) return;
+            terminalFailureLogged = true;
+            Log(TerminalFailureLog.Build(
+                s_lastRequestId ?? s_rid,
+                string.IsNullOrEmpty(url) ? "?" : LogUtil.BareHost(url),
+                terminalPlayer,
+                s_serverFallbackReason ?? "?",
+                bundledReason,
+                swTotal?.ElapsedMilliseconds ?? 0));
+        }
+
         async Task<int> ReAskOrFail(string failureReason)
         {
             if (reAskAsync != null)
@@ -420,6 +439,7 @@ internal static partial class Program
                     return 0;
                 }
             }
+            LogTerminalFailure(failureReason);
             return 1;
         }
 
@@ -534,6 +554,8 @@ internal static partial class Program
                 ourStderr.Flush();
             }
 
+            if (ogExit != 0)
+                LogTerminalFailure(ogTimedOut ? "timeout" : ClassifyOgFailure(ogStderr));
             return ogExit;
         }
         catch (Exception ex)
