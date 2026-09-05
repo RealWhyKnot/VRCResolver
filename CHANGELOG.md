@@ -13,6 +13,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ### Fixed
 - **wrapper:** Skip the post-og re-ask when the server already re-raced (cc1393f)
+- **wrapper:** Record combined terminal resolve failures (e5cb872)
 
 ---
 
