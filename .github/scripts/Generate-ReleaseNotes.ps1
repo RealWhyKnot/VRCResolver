@@ -223,6 +223,36 @@ $AuthorHandleMap = @{
     'WhyKnot' = 'RealWhyKnot'
 }
 
+function Get-LoginsBySha([string]$Repo, [string]$PrevTag, [string]$Tag) {
+    $map = @{}
+    if (-not $Repo) { return $map }
+    $endpoint = if ($PrevTag) { "repos/$Repo/compare/$PrevTag...$Tag" } else { "repos/$Repo/commits?sha=$Tag&per_page=100" }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $json = & gh api $endpoint 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $json) { return $map }
+        $data = $json | ConvertFrom-Json
+        $commits = if ($PrevTag) { @($data.commits) } else { @($data) }
+        foreach ($c in $commits) {
+            if ($c.sha -and $c.author -and $c.author.login) { $map[$c.sha] = $c.author.login }
+        }
+    }
+    catch {
+        return @{}
+    }
+    finally {
+        $ErrorActionPreference = $prev
+        $global:LASTEXITCODE = 0
+    }
+    return $map
+}
+
+$loginsBySha = @{}
+if (-not $changelogNotes) {
+    $loginsBySha = Get-LoginsBySha -Repo $Repo -PrevTag $prevTag -Tag $Tag
+}
+
 $entries = foreach ($line in $lines) {
     if ($line -match '\[skip changelog\]') { continue }
     $parts = $line -split "`t", 4
@@ -230,7 +260,8 @@ $entries = foreach ($line in $lines) {
     $sha = $parts[0]
     $short = $parts[1]
     $author = $parts[2]
-    if ($AuthorHandleMap.ContainsKey($author)) { $author = $AuthorHandleMap[$author] }
+    if ($loginsBySha.ContainsKey($sha)) { $author = $loginsBySha[$sha] }
+    elseif ($AuthorHandleMap.ContainsKey($author)) { $author = $AuthorHandleMap[$author] }
     $subject = $parts[3]
 
     $subject = $subject -replace '\s*\(\d{4}\.\d+\.\d+\.\d+-[A-Fa-f0-9]+\)\s*', ' '
