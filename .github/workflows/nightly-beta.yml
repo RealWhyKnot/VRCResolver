@@ -33,7 +33,6 @@ jobs:
           ./.github/scripts/Test-NightlyBetaPlan.ps1
           ./.github/scripts/Test-UpdateChangelog.ps1
           ./.github/scripts/Test-GenerateReleaseNotes.ps1
-          ./.github/scripts/Test-ReleaseVersionSequence.ps1
 
       - name: Plan nightly beta
         id: plan

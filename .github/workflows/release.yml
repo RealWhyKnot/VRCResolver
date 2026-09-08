@@ -62,7 +62,6 @@ jobs:
         run: |
           ./.github/scripts/Test-WorkflowSyntax.ps1
           ./.github/scripts/Test-UpdateChangelog.ps1
-          ./.github/scripts/Test-ReleaseVersionSequence.ps1
 
       - name: Fetch release tags
         shell: pwsh
@@ -73,8 +72,9 @@ jobs:
           $tags | Sort-Object | ForEach-Object { Write-Host "release-tag=$_" }
 
       - name: Validate release version sequence
-        shell: pwsh
-        run: ./.github/scripts/Assert-ReleaseVersionSequence.ps1 -Tag '${{ steps.release_tag.outputs.tag }}'
+        uses: RealWhyKnot/workflows/version-sequence@v1
+        with:
+          tag: '${{ steps.release_tag.outputs.tag }}'
 
       - name: Test release notes generator
         shell: pwsh
