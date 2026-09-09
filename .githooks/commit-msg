@@ -1,27 +1,58 @@
 #!/usr/bin/env bash
+# Local mirror of the shared commit-msg-check workflow. Settings live in
+# .githooks/hook-config so this file stays identical across every repo.
 
-set -euo pipefail
+set -eu
 
 msg_file="$1"
 [ -f "$msg_file" ] || exit 0
 
+CHECK_STAMP=1
+STAMP_PATTERN='\([0-9]{4}\.[0-9]+\.[0-9]+\.[0-9]+(-([A-Fa-f0-9]{4}|beta))?\)'
+CHECK_CONVENTIONAL=0
+CONVENTIONAL_PATTERN='^(feat|fix|chore|ci|docs|refactor|test|perf|diag|style)(\([a-z0-9-]+\))?!?: .+'
+FORBIDDEN_BODY_PATTERN=''
+
+config="$(dirname "$0")/hook-config"
+# shellcheck source=/dev/null
+[ -f "$config" ] && . "$config"
+
 subject="$(grep -m1 -vE '^(#|$)' "$msg_file" || true)"
 [ -n "$subject" ] || exit 0
 
-pattern='\([0-9]{4}\.[0-9]+\.[0-9]+\.[0-9]+(-([A-Fa-f0-9]{4}|beta))?\)'
-count=$( ( printf '%s\n' "$subject" | grep -oE "$pattern" || true ) | grep -c . || true )
-count=${count//[^0-9]/}
-[ -n "$count" ] || count=0
+case "$subject" in
+  Merge\ *|Revert\ *|fixup!\ *|squash!\ *) is_merge=1 ;;
+  *) is_merge=0 ;;
+esac
 
-if [ "${count:-0}" -gt 1 ]; then
+fail() {
   echo "" >&2
-  echo "commit-msg: subject contains $count build-version stamps; expected at most one." >&2
+  echo "commit-msg: $1" >&2
   echo "" >&2
   echo "  subject: $subject" >&2
   echo "" >&2
-  echo "Remove stale version trailers so only one (YYYY.M.D.N...) stamp remains." >&2
-  echo "" >&2
   exit 1
+}
+
+if [ "$CHECK_STAMP" = "1" ]; then
+  count=$( ( printf '%s\n' "$subject" | grep -oE "$STAMP_PATTERN" || true ) | grep -c . || true )
+  count=$(printf '%s' "$count" | tr -cd '0-9')
+  [ -n "$count" ] || count=0
+  if [ "$count" -gt 1 ]; then
+    fail "subject contains $count build-version stamps; expected at most one."
+  fi
+fi
+
+if [ "$CHECK_CONVENTIONAL" = "1" ] && [ "$is_merge" = "0" ]; then
+  if ! printf '%s\n' "$subject" | grep -qE "$CONVENTIONAL_PATTERN"; then
+    fail "subject is not a conventional commit."
+  fi
+fi
+
+if [ -n "$FORBIDDEN_BODY_PATTERN" ] && [ "$is_merge" = "0" ]; then
+  if grep -qiE "$FORBIDDEN_BODY_PATTERN" "$msg_file"; then
+    fail "message references an issue number or an upstream repository."
+  fi
 fi
 
 exit 0

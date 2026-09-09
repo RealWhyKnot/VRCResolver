@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
+# Append the current build version to the commit subject. Settings live in
+# .githooks/hook-config so this file stays identical across every repo.
 
 set -eu
 
 msg_file="$1"
 source="${2:-}"
-pattern='\([0-9]{4}\.[0-9]+\.[0-9]+\.[0-9]+(-([A-Fa-f0-9]{4}|beta))?\)'
+
+STAMP_PATTERN='\([0-9]{4}\.[0-9]+\.[0-9]+\.[0-9]+(-([A-Fa-f0-9]{4}|beta))?\)'
+
+config="$(dirname "$0")/hook-config"
+# shellcheck source=/dev/null
+[ -f "$config" ] && . "$config"
 
 case "$source" in
   merge|squash) exit 0 ;;
@@ -12,7 +19,7 @@ esac
 
 if [ "$source" != "commit" ]; then
   subject="$(grep -m1 -vE '^(#|$)' "$msg_file" || true)"
-  if printf '%s\n' "$subject" | grep -qE "$pattern"; then
+  if printf '%s\n' "$subject" | grep -qE "$STAMP_PATTERN"; then
     echo "" >&2
     echo "prepare-commit-msg: subject already contains a build-version stamp." >&2
     echo "" >&2
@@ -43,6 +50,6 @@ fi
 
 [ -n "$version" ] || exit 0
 
-if ! grep -qE "$pattern" "$msg_file"; then
+if ! grep -qE "$STAMP_PATTERN" "$msg_file"; then
   sed -i "1s/\$/ ($version)/" "$msg_file"
 fi
