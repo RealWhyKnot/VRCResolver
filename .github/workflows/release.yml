@@ -34,28 +34,9 @@ jobs:
 
       - name: Resolve release tag
         id: release_tag
-        shell: pwsh
-        run: |
-          $tag = '${{ github.event.inputs.tag }}'
-          if ([string]::IsNullOrWhiteSpace($tag)) {
-            $tag = '${{ github.ref_name }}'
-          }
-          if ($tag -notmatch '^v\d{4}\.\d+\.\d+\.\d+(-([A-Fa-f0-9]{4}|beta))?$') {
-            throw "tag '$tag' does not match vYYYY.M.D.N, vYYYY.M.D.N-XXXX, or vYYYY.M.D.N-beta."
-          }
-          git rev-parse --verify --quiet "refs/tags/$tag^{commit}" *> $null
-          if ($LASTEXITCODE -ne 0) {
-            throw "tag '$tag' does not exist in the checked-out repository."
-          }
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          Write-Host "tag=$tag"
-
-      - name: Detect beta tag
-        id: beta
-        shell: pwsh
-        run: |
-          $isBeta = '${{ steps.release_tag.outputs.tag }}' -match '^v\d{4}\.\d+\.\d+\.\d+-beta$'
-          "is_beta=$($isBeta.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+        uses: RealWhyKnot/workflows/resolve-tag@v1
+        with:
+          tag: ${{ github.event.inputs.tag }}
 
       - name: Validate PowerShell and changelog scripts
         shell: pwsh
@@ -195,7 +176,7 @@ jobs:
           "input_path=$notesPath" >> $env:GITHUB_OUTPUT
           # gh release create accepts the asset paths as positional arguments after the tag.
           $extra = @()
-          if ('${{ steps.beta.outputs.is_beta }}' -eq 'true') { $extra = @('--prerelease','--latest=false') }
+          if ('${{ steps.release_tag.outputs.prerelease }}' -eq 'true') { $extra = @('--prerelease','--latest=false') }
           gh release create $tag $zip $integrity --title $tag --notes-file $notesPath @extra
 
       - name: Verify published release body matches input
