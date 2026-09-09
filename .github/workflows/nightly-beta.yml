@@ -1,4 +1,4 @@
-name: Nightly Beta Releases
+name: Nightly beta
 
 on:
   schedule:
@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: write
   contents: write
+  actions: write
 
 concurrency:
   group: nightly-beta-release
@@ -15,62 +15,12 @@ concurrency:
 
 jobs:
   tag:
-    name: Create beta tag when proxy changed
-    runs-on: windows-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Validate planner
-        shell: pwsh
-        run: |
-          ./.github/scripts/Test-WorkflowSyntax.ps1
-          ./.github/scripts/Test-NightlyBetaPlan.ps1
-          ./.github/scripts/Test-UpdateChangelog.ps1
-          ./.github/scripts/Test-GenerateReleaseNotes.ps1
-
-      - name: Plan nightly beta
-        id: plan
-        shell: pwsh
-        run: |
-          git fetch --tags --force
-          ./.github/scripts/Get-NightlyBetaPlan.ps1
-
-      - name: Report no changes
-        if: ${{ steps.plan.outputs.has_changes != 'true' }}
-        shell: pwsh
-        run: Write-Host "No proxy changes since the latest release tag."
-
-      - name: Create beta tag and dispatch release
-        if: ${{ steps.plan.outputs.has_changes == 'true' }}
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ steps.plan.outputs.next_tag }}
-          CHANGED_PATH_COUNT: ${{ steps.plan.outputs.changed_path_count }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
-            throw "GITHUB_TOKEN is required to push and dispatch beta releases."
-          }
-          if ([string]::IsNullOrWhiteSpace($env:TAG_NAME)) {
-            throw "Planner did not return a beta tag."
-          }
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a $env:TAG_NAME -m "vrcresolver nightly beta $env:TAG_NAME"
-          if ($LASTEXITCODE -ne 0) { throw "Could not create beta tag $env:TAG_NAME" }
-
-          $remote = "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git"
-          git push $remote "refs/tags/$env:TAG_NAME"
-          if ($LASTEXITCODE -ne 0) { throw "Could not push beta tag $env:TAG_NAME" }
-
-          gh workflow run release.yml --repo "${{ github.repository }}" --ref main --field "tag=$env:TAG_NAME"
-          if ($LASTEXITCODE -ne 0) { throw "Could not dispatch release workflow for $env:TAG_NAME" }
-
-          Write-Host "Pushed $env:TAG_NAME for $env:CHANGED_PATH_COUNT changed release input path(s)."
+    uses: RealWhyKnot/workflows/.github/workflows/nightly-beta-scripted.yml@v1
+    with:
+      runs-on: windows-latest
+      validate-scripts: |
+        ./.github/scripts/Test-WorkflowSyntax.ps1
+        ./.github/scripts/Test-NightlyBetaPlan.ps1
+        ./.github/scripts/Test-UpdateChangelog.ps1
+        ./.github/scripts/Test-GenerateReleaseNotes.ps1
+      no-changes-message: No proxy changes since the latest release tag.
