@@ -66,15 +66,26 @@ internal static class HostsManager
         return false;
     }
 
+    private static int s_promptInFlight;
+
     public static void EnsureBypassEntryOrPrompt()
     {
         if (IsBypassActive()) return;
-        ConsoleUx.Write(LogComponent.Hosts, "adding entry for public-instance support -- UAC prompt incoming.");
-        if (!ReexecElevated(AddArg)) return;
-        if (IsBypassActive())
-            ConsoleUx.Write(LogComponent.Hosts, "added " + MarkerIp + " " + MarkerHost);
-        else
-            ConsoleUx.Warn(LogComponent.Hosts, "entry not present after elevation -- public-instance support may not work.");
+        if (Interlocked.CompareExchange(ref s_promptInFlight, 1, 0) != 0) return;
+        try
+        {
+            if (IsBypassActive()) return;
+            ConsoleUx.Write(LogComponent.Hosts, "adding entry for public-instance support -- UAC prompt incoming.");
+            if (!ReexecElevated(AddArg)) return;
+            if (IsBypassActive())
+                ConsoleUx.Write(LogComponent.Hosts, "added " + MarkerIp + " " + MarkerHost);
+            else
+                ConsoleUx.Warn(LogComponent.Hosts, "entry not present after elevation -- public-instance support may not work.");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref s_promptInFlight, 0);
+        }
     }
 
     public static void RemoveBypassEntryIfPresent()
