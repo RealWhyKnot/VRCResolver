@@ -75,6 +75,13 @@ internal static partial class Program
             string logDir = AppPaths.LogsDir();
             Directory.CreateDirectory(logDir);
             string logPath = Path.Combine(logDir, "yt-dlp-wrapper.log");
+            try
+            {
+                var info = new FileInfo(logPath);
+                if (info.Exists && info.Length > 5 * 1024 * 1024)
+                    File.Move(logPath, logPath + ".old", overwrite: true);
+            }
+            catch { }
             var fs = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
             s_logWriter = new StreamWriter(fs, Encoding.UTF8) { AutoFlush = false, NewLine = "\n" };
             return s_logWriter;

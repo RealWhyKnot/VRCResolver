@@ -112,6 +112,7 @@ public static class Logger
         try { _writer?.Dispose(); } catch { }
         _writer = null;
         if (_logDir == null) return;
+        PruneOld();
         string ts = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff");
         string path = Path.Combine(_logDir, $"{_component}-{ts}.log");
         var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);

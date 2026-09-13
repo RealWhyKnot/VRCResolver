@@ -17,6 +17,10 @@ internal static partial class Program
     private static string? s_serverFallbackReason;
     private static string? s_lastRequestId;
     private static readonly Stopwatch s_clock = Stopwatch.StartNew();
+    private static Stream? s_stdoutStream;
+    private static Stream StdoutStream => s_stdoutStream ??= Console.OpenStandardOutput();
+    private static Stream? s_stderrStream;
+    private static Stream StderrStream => s_stderrStream ??= Console.OpenStandardError();
 
     private static async Task<int> Main(string[] args)
     {
@@ -79,7 +83,7 @@ internal static partial class Program
                     {
                         string toEmit = TryWrapForTrustGateway(result.resolved!);
                         TryWriteUrlToStdout(toEmit);
-                        bool wrapped = !ReferenceEquals(toEmit, result.resolved);
+                        bool wrapped = !string.Equals(toEmit, result.resolved, StringComparison.Ordinal);
                         Log("emitted resolved URL to stdout host=" + LogUtil.BareHost(toEmit)
                             + " bytes=" + toEmit.Length
                             + " trust_gateway=" + (wrapped ? "wrapped" : "passthrough"));
@@ -541,17 +545,15 @@ internal static partial class Program
 
             if (ogStdout.Length > 0)
             {
-                using var ourStdout = Console.OpenStandardOutput();
                 byte[] bytes = Encoding.UTF8.GetBytes(ogStdout);
-                ourStdout.Write(bytes, 0, bytes.Length);
-                ourStdout.Flush();
+                StdoutStream.Write(bytes, 0, bytes.Length);
+                StdoutStream.Flush();
             }
             if (ogStderr.Length > 0)
             {
-                using var ourStderr = Console.OpenStandardError();
                 byte[] bytes = Encoding.UTF8.GetBytes(ogStderr);
-                ourStderr.Write(bytes, 0, bytes.Length);
-                ourStderr.Flush();
+                StderrStream.Write(bytes, 0, bytes.Length);
+                StderrStream.Flush();
             }
 
             if (ogExit != 0)
@@ -572,9 +574,8 @@ internal static partial class Program
         {
             string output = url.Trim() + "\n";
             byte[] bytes = Encoding.UTF8.GetBytes(output);
-            using var stdout = Console.OpenStandardOutput();
-            stdout.Write(bytes, 0, bytes.Length);
-            stdout.Flush();
+            StdoutStream.Write(bytes, 0, bytes.Length);
+            StdoutStream.Flush();
         }
         catch (Exception ex)
         {
