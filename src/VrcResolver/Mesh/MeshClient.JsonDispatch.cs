@@ -93,6 +93,7 @@ internal sealed partial class MeshClient
 
                     if (welcome != null)
                     {
+                        _reconnectAttempt = 0;
                         int negotiated = Math.Clamp(
                             welcome.ProtocolVersion,
                             1,

@@ -163,7 +163,7 @@ internal sealed partial class MeshClient
 
     private async Task PumpAsync(CancellationToken ct)
     {
-        var pumpCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var pumpCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         Task hbTask = HeartbeatLoopAsync(pumpCts.Token);
 
         try
@@ -220,7 +220,11 @@ internal sealed partial class MeshClient
             if (ws is not { State: WebSocketState.Open }) return;
             DateTime sentAt = DateTime.UtcNow;
             try { await SendTextFrameAsync(PingFrame, ct).ConfigureAwait(false); }
-            catch { return; }
+            catch
+            {
+                try { ws.Abort(); } catch { }
+                return;
+            }
             try { await Task.Delay(PongDeadline, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
 
