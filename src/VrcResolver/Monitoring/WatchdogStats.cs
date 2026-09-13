@@ -64,18 +64,28 @@ internal static class WatchdogStats
 
     public static void RecordRelayBytes(string targetUrl, long bytes)
     {
-        RecordRelayBytesAt(targetUrl, bytes, DateTime.UtcNow);
+        RecordRelayBytesAt(targetUrl, IsUpstreamTarget(targetUrl), bytes, DateTime.UtcNow);
+    }
+
+    public static void RecordRelayBytes(string targetUrl, bool isUpstreamTarget, long bytes)
+    {
+        RecordRelayBytesAt(targetUrl, isUpstreamTarget, bytes, DateTime.UtcNow);
     }
 
     internal static void RecordRelayBytesAt(string targetUrl, long bytes, DateTime nowUtc)
+        => RecordRelayBytesAt(targetUrl, IsUpstreamTarget(targetUrl), bytes, nowUtc);
+
+    internal static void RecordRelayBytesAt(string targetUrl, bool isUpstreamTarget, long bytes, DateTime nowUtc)
     {
         if (bytes <= 0) return;
         Interlocked.Add(ref _relayBytesTotal, bytes);
-        if (IsUpstreamTarget(targetUrl))
+        if (isUpstreamTarget)
             Interlocked.Add(ref _upstreamRelayBytesTotal, bytes);
         RecordRelayBandwidth(bytes, nowUtc);
         TouchRelay(targetUrl, bytes, nowUtc);
     }
+
+    public static bool ClassifyUpstreamTarget(string targetUrl) => IsUpstreamTarget(targetUrl);
 
     public static WatchdogActivitySnapshot GetActivitySnapshot()
     {

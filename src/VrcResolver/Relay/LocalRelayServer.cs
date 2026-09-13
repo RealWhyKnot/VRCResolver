@@ -296,6 +296,7 @@ internal sealed partial class LocalRelayServer : IDisposable
 
             using var upstream = await resp.Content.ReadAsStreamAsync(_cts.Token).ConfigureAwait(false);
             byte[] buf = new byte[CopyBufferSize];
+            bool isUpstreamTarget = WatchdogStats.ClassifyUpstreamTarget(targetUrl);
             while (!_cts.IsCancellationRequested)
             {
                 using var idle = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
@@ -309,9 +310,22 @@ internal sealed partial class LocalRelayServer : IDisposable
                     return;
                 }
                 if (n == 0) break;
-                await ctx.Response.OutputStream.WriteAsync(buf.AsMemory(0, n), _cts.Token).ConfigureAwait(false);
+                idle.CancelAfter(BodyIdleTimeout);
+                using (idle.Token.Register(static state => { try { ((System.Net.HttpListenerResponse)state!).Abort(); } catch { } }, ctx.Response))
+                {
+                    try
+                    {
+                        await ctx.Response.OutputStream.WriteAsync(buf.AsMemory(0, n), _cts.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception) when (idle.IsCancellationRequested && !_cts.IsCancellationRequested)
+                    {
+                        failure = "body_write_timeout";
+                        ConsoleUx.Warn(LogComponent.Relay, "client write stalled for " + ShortUrl(targetUrl));
+                        return;
+                    }
+                }
                 bytesOut += n;
-                WatchdogStats.RecordRelayBytes(targetUrl, n);
+                WatchdogStats.RecordRelayBytes(targetUrl, isUpstreamTarget, n);
             }
             if (s_verbose) Verbose("req=" + reqId + " -> " + ctx.Response.StatusCode
                 + " stream bytes-out=" + bytesOut + " elapsed=" + (Environment.TickCount64 - t0) + "ms");

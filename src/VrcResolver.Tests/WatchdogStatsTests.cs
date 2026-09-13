@@ -25,6 +25,23 @@ public class WatchdogStatsTests
     }
 
     [Fact]
+    public void RecordRelayBytes_PrecomputedFlagMatchesPerUrlClassification()
+    {
+        WatchdogStats.ResetForTests();
+
+        string upstream = "https://us1.vrcresolver.com/api/proxy/segment.ts";
+        Assert.True(WatchdogStats.ClassifyUpstreamTarget(upstream));
+        Assert.False(WatchdogStats.ClassifyUpstreamTarget("https://example.com/video.ts"));
+
+        WatchdogStats.RecordRelayBytes(upstream, true, 100);
+        WatchdogStats.RecordRelayBytes("https://example.com/video.ts", false, 25);
+
+        WatchdogActivitySnapshot snapshot = WatchdogStats.GetActivitySnapshot();
+        Assert.Equal(125, snapshot.RelayBytesTotal);
+        Assert.Equal(100, snapshot.UpstreamRelayBytesTotal);
+    }
+
+    [Fact]
     public void ActivitySnapshot_ReportsRecentRelayActivity()
     {
         var now = DateTime.UtcNow;
