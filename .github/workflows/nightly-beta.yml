@@ -24,3 +24,6 @@ jobs:
         ./.github/scripts/Test-UpdateChangelog.ps1
         ./.github/scripts/Test-GenerateReleaseNotes.ps1
       no-changes-message: No proxy changes since the latest release tag.
+      ignore-paths: |
+        src/VrcResolver.Tests/**
+        data/wrapper_hashes.txt
