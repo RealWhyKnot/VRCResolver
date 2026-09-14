@@ -10,7 +10,7 @@ msg_file="$1"
 CHECK_STAMP=1
 STAMP_PATTERN='\([0-9]{4}\.[0-9]+\.[0-9]+\.[0-9]+(-([A-Fa-f0-9]{4}|beta))?\)'
 CHECK_CONVENTIONAL=0
-CONVENTIONAL_PATTERN='^(feat|fix|chore|ci|docs|refactor|test|perf|diag|style)(\([a-z0-9-]+\))?!?: .+'
+CONVENTIONAL_PATTERN='^(feat|fix|chore|ci|docs|refactor|revert|test|perf|diag|style)(\([a-z0-9-]+\))?!?: .+'
 FORBIDDEN_BODY_PATTERN=''
 
 config="$(dirname "$0")/hook-config"

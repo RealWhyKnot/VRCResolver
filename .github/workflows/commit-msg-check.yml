@@ -11,3 +11,5 @@ permissions:
 jobs:
   check:
     uses: RealWhyKnot/workflows/.github/workflows/commit-msg-check.yml@v1
+    with:
+      check-conventional: true
