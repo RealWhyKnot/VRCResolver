@@ -17,6 +17,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **ytdlp:** Rotate the wrapper log and share one stdout stream (b16c385)
 - **relay:** Time out stalled client writes (7bc5bff)
 - **mesh:** Abort half-dead sockets and reset backoff on welcome (183c4a6)
+- **release:** Credit authors by profile link instead of a mention (1ff9858)
 
 ---
 
