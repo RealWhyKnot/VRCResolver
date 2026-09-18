@@ -219,6 +219,15 @@ if (-not $changelogNotes) {
 $lines = @()
 if ($raw) { $lines = $raw -split "`r?`n" | Where-Object { $_ } }
 
+function Format-AuthorCredit {
+    param([string] $Author)
+
+    if (-not $Author) { return "" }
+    if ($Author -match '\[bot]$') { return $Author }
+    if ($Author -notmatch '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$') { return $Author }
+    return "[$Author](https://github.com/$Author)"
+}
+
 $AuthorHandleMap = @{
     'WhyKnot' = 'RealWhyKnot'
 }
@@ -413,14 +422,14 @@ elseif ($useGroups) {
         [void]$sb.AppendLine("### $($g.Name)")
         foreach ($t in $g.Group) {
             $e = $t.Entry
-            [void]$sb.AppendLine("- $($e.Subject) by @$($e.Author) in $($e.Short)")
+            [void]$sb.AppendLine("- $($e.Subject) by $(Format-AuthorCredit $e.Author) in $($e.Short)")
         }
         [void]$sb.AppendLine()
     }
 }
 else {
     foreach ($e in $entries) {
-        [void]$sb.AppendLine("- $($e.Subject) by @$($e.Author) in $($e.Short)")
+        [void]$sb.AppendLine("- $($e.Subject) by $(Format-AuthorCredit $e.Author) in $($e.Short)")
     }
     [void]$sb.AppendLine()
 }
