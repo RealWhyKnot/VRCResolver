@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 namespace VrcResolver.Shared;
@@ -6,6 +7,9 @@ public static partial class ToolsDirSweeper
 {
     [GeneratedRegex(@"^yt-dlp(-og)?\.exe\.(new|stale)-", RegexOptions.IgnoreCase)]
     private static partial Regex SidecarPattern();
+
+    [GeneratedRegex(@"^_MEI(\d{1,9})$", RegexOptions.IgnoreCase)]
+    private static partial Regex PyInstallerTempPattern();
 
     private static readonly string[] LiteralResidueNames =
     {
@@ -39,6 +43,32 @@ public static partial class ToolsDirSweeper
             }
         }
         catch { }
+
+        try
+        {
+            foreach (string path in Directory.EnumerateDirectories(toolsDir))
+            {
+                Match m = PyInstallerTempPattern().Match(Path.GetFileName(path));
+                if (!m.Success) continue;
+                if (!int.TryParse(m.Groups[1].Value, out int pid)) continue;
+                if (IsProcessAlive(pid)) continue;
+                try { Directory.Delete(path, recursive: true); }
+                catch { }
+            }
+        }
+        catch { }
+    }
+
+    private static bool IsProcessAlive(int pid)
+    {
+        if (pid <= 0) return true;
+        try
+        {
+            using Process p = Process.GetProcessById(pid);
+            return !p.HasExited;
+        }
+        catch (ArgumentException) { return false; }
+        catch { return true; }
     }
 
     private static readonly string[] LegacyInstallToolsFiles =

@@ -25,6 +25,14 @@ public class ToolsDirSweeperTests : IDisposable
         return path;
     }
 
+    private string MakeDir(string name)
+    {
+        string path = Path.Combine(_tempDir, name);
+        Directory.CreateDirectory(path);
+        File.WriteAllText(Path.Combine(path, "python313.dll"), "");
+        return path;
+    }
+
     [Fact]
     public void Sweep_deletes_known_sidecars_and_leaves_everything_else()
     {
@@ -92,5 +100,29 @@ public class ToolsDirSweeperTests : IDisposable
 
         var survivors = Directory.GetFiles(_tempDir).Select(Path.GetFileName).Order().ToArray();
         Assert.Equal(new[] { "yt-dlp-wrapper.log.bak", "yt-dlp.exe" }, survivors);
+    }
+
+    [Fact]
+    public void Sweep_deletes_pyinstaller_temp_dirs_whose_owning_process_is_gone()
+    {
+        MakeDir("_MEI999999998");
+        MakeDir("_MEI" + Environment.ProcessId);
+        MakeDir("_MEInotapid");
+        MakeDir("_MEI");
+        MakeDir("notes");
+        Touch("yt-dlp.exe");
+
+        ToolsDirSweeper.Sweep(_tempDir);
+
+        var survivors = Directory.GetDirectories(_tempDir).Select(Path.GetFileName).Order().ToArray();
+        var expected = new[]
+        {
+            "_MEI",
+            "_MEI" + Environment.ProcessId,
+            "_MEInotapid",
+            "notes",
+        }.Order().ToArray();
+        Assert.Equal(expected, survivors);
+        Assert.Equal(new[] { "yt-dlp.exe" }, Directory.GetFiles(_tempDir).Select(Path.GetFileName).ToArray());
     }
 }
