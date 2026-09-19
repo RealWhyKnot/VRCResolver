@@ -18,6 +18,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **relay:** Time out stalled client writes (7bc5bff)
 - **mesh:** Abort half-dead sockets and reset backoff on welcome (183c4a6)
 - **release:** Credit authors by profile link instead of a mention (1ff9858)
+- **patch:** Sweep orphaned PyInstaller temp dirs from the VRChat tools dir (89476c5)
 
 ---
 
