@@ -18,6 +18,8 @@ internal sealed partial class VrcLogMonitor : IDisposable
     private static partial Regex SwitchedResolutionRegex();
     [GeneratedRegex(@"\bfwidth=(\d{2,5})\b.*\bfheight=(\d{2,5})\b", RegexOptions.IgnoreCase)]
     private static partial Regex AvProStateResolutionRegex();
+    [GeneratedRegex(@"uSpeak: SetInputDevice \d+ \((\d+) total")]
+    private static partial Regex AudioDeviceCountRegex();
 
     private readonly MeshClient _mesh;
     private readonly ResolveCache? _cache;
@@ -42,6 +44,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
     private readonly Dictionary<string, (int Height, DateTime At)> _deliveredHeights = new();
     private CancellationTokenSource? _playingFeedbackCts;
     private string? _playingFeedbackUrl;
+    private bool _audioDevicesMissing;
 
     public VrcLogMonitor(
         MeshClient mesh,
@@ -126,6 +129,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
                         bool firstFile = currentFile.Length == 0;
                         currentFile = latest.FullName;
                         lastSize = InitialReadOffsetForNewFile(latest.Length, firstFile);
+                        _audioDevicesMissing = false;
                         if (!firstFile) _onNewVrchatSession?.Invoke();
                     }
                     if (latest.Length > lastSize)
@@ -173,6 +177,19 @@ internal sealed partial class VrcLogMonitor : IDisposable
             if (line.Contains("[Behaviour] OnLeftRoom") || line.Contains("[Behaviour] Entering Room:"))
             {
                 StopWatchingPlayback("world_change");
+                continue;
+            }
+
+            var audioMatch = AudioDeviceCountRegex().Match(line);
+            if (audioMatch.Success)
+            {
+                bool missing = audioMatch.Groups[1].Value == "0";
+                if (missing && !_audioDevicesMissing)
+                    ConsoleUx.Warn(LogComponent.VrcLog,
+                        "VRChat found no audio devices; AVPro videos can fail to load until Windows audio recovers");
+                else if (!missing && _audioDevicesMissing)
+                    ConsoleUx.Write(LogComponent.VrcLog, "VRChat's audio devices are back");
+                _audioDevicesMissing = missing;
                 continue;
             }
 
@@ -363,6 +380,8 @@ internal sealed partial class VrcLogMonitor : IDisposable
         return state.Success
             && TryParseResolution(state.Groups[1].Value, state.Groups[2].Value, out width, out height);
     }
+
+    internal bool AudioDevicesMissingForTests => _audioDevicesMissing;
 
     internal int? GetObservedDeliveredHeightForTests(string url)
     {

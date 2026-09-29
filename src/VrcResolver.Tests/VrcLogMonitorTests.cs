@@ -174,6 +174,24 @@ public sealed class VrcLogMonitorTests
         Assert.True(gate.ShouldShortCircuit(meshConnected: false, out _));
     }
 
+    [Fact]
+    public void Tracks_when_vrchat_reports_no_audio_devices()
+    {
+        using var monitor = new VrcLogMonitor(new MeshClient());
+
+        monitor.ProcessNewContent(
+            "2026.09.29 13:23:29 Debug      -  uSpeak: SetInputDevice 0 (0 total, index out of range, setting to default device) 'No device available'\n");
+        Assert.True(monitor.AudioDevicesMissingForTests);
+
+        monitor.ProcessNewContent(
+            "2026.09.29 13:24:09 Debug      -  uSpeak: SetInputDevice 0 (0 total, index out of range, setting to default device) 'No device available'\n");
+        Assert.True(monitor.AudioDevicesMissingForTests);
+
+        monitor.ProcessNewContent(
+            "2026.09.29 13:26:28 Debug      -  uSpeak: SetInputDevice 0 (5 total) 'Microphone (2- fifine Microphone)'\n");
+        Assert.False(monitor.AudioDevicesMissingForTests);
+    }
+
     private static ResolveResponse MakeResolved(string playbackUrl)
     {
         return new ResolveResponse
