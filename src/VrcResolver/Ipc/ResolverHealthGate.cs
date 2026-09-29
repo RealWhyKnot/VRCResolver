@@ -39,11 +39,11 @@ internal sealed class ResolverHealthGate
                     if (meshConnected && _now() >= _openUntil)
                     {
                         _state = State.HalfOpenProbe;
+                        _verdictSince = _now();
                         return false;
                     }
                     return true;
                 case State.HalfOpenProbe:
-                    return true;
                 case State.HalfOpenVerdict:
                     if (_now() - _verdictSince >= _verdictTimeout)
                     {

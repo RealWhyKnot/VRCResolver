@@ -190,4 +190,22 @@ public sealed class ResolverHealthGateTests
         gate.RecordResolveOutcome(healthy: false, resolved: false);
         Assert.Equal(ResolverHealthGate.Transition.Opened, gate.RecordResolveOutcome(healthy: false, resolved: false));
     }
+
+    [Fact]
+    public void ProbeThatNeverReportsAnOutcomeStopsBlockingAfterVerdictTimeout()
+    {
+        var now = T0;
+        var gate = MakeGate(() => now);
+        gate.RecordPlaybackFailure();
+        gate.RecordPlaybackFailure();
+        Assert.Equal(ResolverHealthGate.Transition.Opened, gate.RecordPlaybackFailure());
+
+        now += Cooldown + TimeSpan.FromSeconds(1);
+        Assert.False(gate.ShouldShortCircuit(meshConnected: true, out _));
+        Assert.True(gate.ShouldShortCircuit(meshConnected: true, out _));
+
+        now += Verdict;
+        Assert.False(gate.ShouldShortCircuit(meshConnected: true, out var transition));
+        Assert.Equal(ResolverHealthGate.Transition.Closed, transition);
+    }
 }
