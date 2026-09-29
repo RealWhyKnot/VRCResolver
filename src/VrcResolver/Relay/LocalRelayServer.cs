@@ -9,12 +9,12 @@ namespace VrcResolver;
 [SupportedOSPlatform("windows")]
 internal sealed partial class LocalRelayServer : IDisposable
 {
-    private static readonly TimeSpan UpstreamHeaderDeadline = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan BodyIdleTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan ManifestBodyDeadline = TimeSpan.FromSeconds(30);
     private const int CopyBufferSize = 80 * 1024;
 
     private readonly int _port;
+    private readonly TimeSpan _upstreamHeaderDeadline;
+    private readonly TimeSpan _bodyIdleTimeout;
+    private readonly TimeSpan _manifestBodyDeadline;
     private readonly string _scheme;
     private readonly HttpListener _listener;
     private readonly CancellationTokenSource _cts = new();
@@ -34,9 +34,12 @@ internal sealed partial class LocalRelayServer : IDisposable
     {
     }
 
-    internal LocalRelayServer(int port, string scheme, HttpMessageHandler? upstreamHandler)
+    internal LocalRelayServer(int port, string scheme, HttpMessageHandler? upstreamHandler, TimeSpan? timeout = null)
     {
         _port = port;
+        _upstreamHeaderDeadline = timeout ?? TimeSpan.FromSeconds(30);
+        _bodyIdleTimeout = timeout ?? TimeSpan.FromSeconds(30);
+        _manifestBodyDeadline = timeout ?? TimeSpan.FromSeconds(30);
         _scheme = TrustGatewayUrlBuilder.IsAllowedGatewayScheme(scheme)
             ? scheme.ToLowerInvariant()
             : "http";
@@ -116,7 +119,7 @@ internal sealed partial class LocalRelayServer : IDisposable
     private async Task HandleAsync(HttpListenerContext ctx)
     {
         using var reqCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-        reqCts.CancelAfter(UpstreamHeaderDeadline);
+        reqCts.CancelAfter(_upstreamHeaderDeadline);
         string targetUrl = "";
         string path = "";
         string method = "?";
@@ -245,7 +248,7 @@ internal sealed partial class LocalRelayServer : IDisposable
                 }
 
                 using var manifestCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                manifestCts.CancelAfter(ManifestBodyDeadline);
+                manifestCts.CancelAfter(_manifestBodyDeadline);
                 using var manifestStream = await resp.Content.ReadAsStreamAsync(manifestCts.Token).ConfigureAwait(false);
 
                 ctx.Response.StatusCode = (int)resp.StatusCode;
@@ -320,7 +323,7 @@ internal sealed partial class LocalRelayServer : IDisposable
             while (!_cts.IsCancellationRequested)
             {
                 using var idle = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                idle.CancelAfter(BodyIdleTimeout);
+                idle.CancelAfter(_bodyIdleTimeout);
                 int n;
                 try { n = await upstream.ReadAsync(buf.AsMemory(), idle.Token).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (!_cts.IsCancellationRequested && idle.IsCancellationRequested)
@@ -330,7 +333,7 @@ internal sealed partial class LocalRelayServer : IDisposable
                     return;
                 }
                 if (n == 0) break;
-                idle.CancelAfter(BodyIdleTimeout);
+                idle.CancelAfter(_bodyIdleTimeout);
                 using (idle.Token.Register(static state => { try { ((System.Net.HttpListenerResponse)state!).Abort(); } catch { } }, ctx.Response))
                 {
                     try
