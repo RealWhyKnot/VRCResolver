@@ -11,6 +11,9 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
+### Changed
+- **wrapper:** Move relay wrapping and request building into shared (0b4dc6d)
+
 ### Fixed
 - **release:** Resolve author handles from the commits api (d357371)
 - **hosts:** Single-flight the uac prompt (9b89b5a)
@@ -19,6 +22,12 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **mesh:** Abort half-dead sockets and reset backoff on welcome (183c4a6)
 - **release:** Credit authors by profile link instead of a mention (1ff9858)
 - **patch:** Sweep orphaned PyInstaller temp dirs from the VRChat tools dir (89476c5)
+- **console:** Turn off QuickEdit so selecting text in the window cannot stall resolves (58fcd0e)
+- **relay:** Stop leaking player connections and fall back to direct links when the relay jams (094da26)
+- **relay:** Enforce the netsh timeout during HTTPS setup (67eda5b)
+- **mesh:** Bound websocket connect and send so one stall cannot block every resolve (32b404b)
+- **ipc:** Time out a resolver health probe that never reports back (a961d7b)
+- **patch:** Keep watching when the bundled wrapper goes missing instead of halting (0bc0a61)
 
 ---
 
