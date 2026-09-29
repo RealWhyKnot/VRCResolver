@@ -46,6 +46,7 @@ internal static class Program
 
         Logger.Install("watchdog");
         Logger.SetDevConsoleDiagnostics(BuildInfo.IsDevBuild);
+        Logger.WriteFileOnly("[console] quick_edit=" + TerminalCapabilities.DisableQuickEdit());
 
         ReportingService.Initialize();
 
