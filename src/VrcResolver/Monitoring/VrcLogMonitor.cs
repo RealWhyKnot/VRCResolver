@@ -170,6 +170,12 @@ internal sealed partial class VrcLogMonitor : IDisposable
             string line = rawLine.Trim();
             if (string.IsNullOrEmpty(line)) continue;
 
+            if (line.Contains("[Behaviour] OnLeftRoom") || line.Contains("[Behaviour] Entering Room:"))
+            {
+                StopWatchingPlayback("world_change");
+                continue;
+            }
+
             var openingMatch = AvProOpeningRegex().Match(line);
             if (openingMatch.Success)
             {
@@ -504,6 +510,18 @@ internal sealed partial class VrcLogMonitor : IDisposable
     }
 
     internal readonly record struct PlaybackFailureRecovery(int Evicted, bool OgHintArmed);
+
+    private void StopWatchingPlayback(string reason)
+    {
+        string? watched = _activePlaybackUrl ?? _lastOpeningUrl;
+        CancelStallWatchdog();
+        CancelPlayingFeedbackLoop();
+        _lastOpeningUrl = null;
+        _activePlaybackUrl = null;
+        _activePlaybackAt = default;
+        if (watched != null)
+            Logger.WriteFileOnly("[vrclog] stopped watching " + LogUtil.RedactUrl(watched) + " reason=" + reason);
+    }
 
     private void CancelStallWatchdog()
     {

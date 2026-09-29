@@ -137,6 +137,43 @@ public sealed class VrcLogMonitorTests
         Assert.False(gate.ShouldShortCircuit(meshConnected: false, out _));
     }
 
+    [Fact]
+    public async Task Leaving_the_world_mid_load_is_not_a_failed_play()
+    {
+        var gate = new ResolverHealthGate();
+        using var monitor = new VrcLogMonitor(new MeshClient(), cache: null, ogFallbackHint: null, health: gate,
+            silentStallWindow: TimeSpan.FromMilliseconds(100));
+        monitor.MarkPlaybackFailureForTests("https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=a");
+        monitor.MarkPlaybackFailureForTests("https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=b");
+
+        monitor.ProcessNewContent(
+            "2026.09.29 13:23:56 Debug      -  [AVProVideo] Opening https://us1.vrcresolver.com/api/proxy/manifest.mp4?q=c (offset 0) with API MediaFoundation\n"
+            + "2026.09.29 13:23:59 Debug      -  [Behaviour] OnLeftRoom\n"
+            + "2026.09.29 13:24:00 Error      -  [AVProVideo] Error: Loading failed.  File not found, codec not supported, video resolution too high or insufficient system resources.\n");
+        await Task.Delay(400);
+
+        Assert.False(gate.ShouldShortCircuit(meshConnected: false, out _));
+    }
+
+    [Fact]
+    public async Task A_stalled_play_in_the_same_world_still_counts()
+    {
+        var gate = new ResolverHealthGate();
+        using var monitor = new VrcLogMonitor(new MeshClient(), cache: null, ogFallbackHint: null, health: gate,
+            silentStallWindow: TimeSpan.FromMilliseconds(100));
+        monitor.MarkPlaybackFailureForTests("https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=a");
+        monitor.MarkPlaybackFailureForTests("https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=b");
+
+        monitor.ProcessNewContent(
+            "2026.09.29 13:24:01 Debug      -  [Behaviour] Entering Room: Hazy Glow\n"
+            + "2026.09.29 13:24:16 Debug      -  [AVProVideo] Opening https://us1.vrcresolver.com/api/proxy/manifest.mp4?q=c (offset 0) with API MediaFoundation\n");
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        while (!gate.ShouldShortCircuit(meshConnected: false, out _) && DateTime.UtcNow < deadline)
+            await Task.Delay(25);
+        Assert.True(gate.ShouldShortCircuit(meshConnected: false, out _));
+    }
+
     private static ResolveResponse MakeResolved(string playbackUrl)
     {
         return new ResolveResponse
