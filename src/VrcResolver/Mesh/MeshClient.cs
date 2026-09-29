@@ -15,6 +15,8 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private static readonly TimeSpan ApexAttemptTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan PongDeadline = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan SendDeadline = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ConnectDeadline = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan ApexReResolveAfter = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan WelcomeTimeout = TimeSpan.FromSeconds(1);
     private static readonly int[] ReconnectCapsSec = { 1, 2, 4, 8, 16, 30 };
@@ -144,12 +146,25 @@ internal sealed partial class MeshClient : IAsyncDisposable
         var ws = _ws;
         if (ws is not { State: WebSocketState.Open }) return false;
 
-        await _sendGate.WaitAsync(ct).ConfigureAwait(false);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(SendDeadline);
+        try { await _sendGate.WaitAsync(deadline.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            Logger.WriteFileOnly("[mesh] send skipped: another send has been stuck for over " + SendDeadline.TotalSeconds + "s");
+            return false;
+        }
         try
         {
             if (ws.State != WebSocketState.Open) return false;
-            await ws.SendAsync(payload, WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
+            await ws.SendAsync(payload, WebSocketMessageType.Text, true, deadline.Token).ConfigureAwait(false);
             return true;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            ConsoleUx.Warn(LogComponent.Mesh, "send stalled for " + SendDeadline.TotalSeconds + "s; dropping the connection to reconnect");
+            try { ws.Abort(); } catch { }
+            return false;
         }
         finally
         {

@@ -25,7 +25,11 @@ internal sealed partial class MeshClient
                 };
 
                 var wsUri = ServerEndpoints.MeshWebSocketUrlForHost(node);
-                await _ws.ConnectAsync(wsUri, ct).ConfigureAwait(false);
+                using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                {
+                    connectCts.CancelAfter(ConnectDeadline);
+                    await _ws.ConnectAsync(wsUri, connectCts.Token).ConfigureAwait(false);
+                }
 
                 _isV3Connection = ShouldSendClientHello(_ws.SubProtocol);
                 Logger.WriteFileOnly("[mesh][v3] negotiated subprotocol="
