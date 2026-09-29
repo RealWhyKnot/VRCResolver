@@ -35,7 +35,6 @@ internal static class LocalRelayHitchDetector
     private const long ManifestSlowTotalMs = 2500;
     private const long ServerGenerationWaitMs = 1000;
     private const long RetryWindowMs = 15000;
-    private const long LateNextSegmentRequestMs = 6500;
     private const int MaxTrackedStreams = 256;
 
     private static readonly ConcurrentDictionary<string, StreamState> s_streams = new();
@@ -198,9 +197,6 @@ internal static class LocalRelayHitchDetector
                 reasons.Add("segment-skip");
             else if (state.LastSegment >= 0 && segment < state.LastSegment)
                 reasons.Add("segment-backtrack");
-            else if (state.LastSegment >= 0 && segment == state.LastSegment + 1
-                && gapMs > LateNextSegmentRequestMs)
-                reasons.Add("late-next-segment-request");
 
             state.LastSegment = segment;
             state.LastSeenUtc = nowUtc;

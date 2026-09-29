@@ -489,6 +489,30 @@ public class LocalRelayServerTests
         Assert.Equal(42, retry.Value.PreviousSegment);
     }
 
+    [Fact]
+    public void HitchDetector_IgnoresSteadyPlaybackPacing()
+    {
+        LocalRelayHitchDetector.ResetForTests();
+        var now = new DateTime(2026, 9, 29, 18, 26, 52, DateTimeKind.Utc);
+        for (int segment = 3; segment < 12; segment++)
+        {
+            var sample = new LocalRelayTimingSample(
+                "GET",
+                "/play/c629a1455fd0/seg_" + segment.ToString("D6") + ".ts",
+                "https://proxy.whyknot.dev/api/proxy/lazy-hls/wk_fe89cc94bd139c30p/seg_" + segment.ToString("D6") + ".ts",
+                206,
+                HeaderMilliseconds: 70,
+                TotalMilliseconds: 100,
+                BytesOut: 326556,
+                LazyHlsState: "HIT",
+                LazyHlsWaitMilliseconds: -1,
+                LazyHlsGenerator: null,
+                Failure: null);
+            Assert.Null(LocalRelayHitchDetector.AnalyzeForTests(sample, now));
+            now = now.AddSeconds(7.2);
+        }
+    }
+
     private static string ExtractTargetParam(string localized)
     {
         const string marker = "?target=";
