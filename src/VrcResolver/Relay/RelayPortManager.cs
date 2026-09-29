@@ -80,6 +80,12 @@ internal sealed class RelayPortManager
         return true;
     }
 
+    public void Republish(string scheme)
+    {
+        WritePortFile(CurrentPort);
+        WriteSchemeFile(scheme);
+    }
+
     public void WriteSchemeFile(string scheme)
     {
         if (!TrustGatewayUrlBuilder.IsAllowedGatewayScheme(scheme))

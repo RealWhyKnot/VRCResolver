@@ -24,6 +24,8 @@ internal sealed partial class VrcLogMonitor : IDisposable
     private readonly ResolveCache? _cache;
     private readonly OgFallbackHint? _ogFallbackHint;
     private readonly ResolverHealthGate? _health;
+    private readonly Func<int, bool>? _onRelayWedged;
+    private readonly Action? _onNewVrchatSession;
     private readonly CancellationTokenSource _cts = new();
     private Task? _loop;
 
@@ -41,12 +43,20 @@ internal sealed partial class VrcLogMonitor : IDisposable
     private CancellationTokenSource? _playingFeedbackCts;
     private string? _playingFeedbackUrl;
 
-    public VrcLogMonitor(MeshClient mesh, ResolveCache? cache = null, OgFallbackHint? ogFallbackHint = null, ResolverHealthGate? health = null)
+    public VrcLogMonitor(
+        MeshClient mesh,
+        ResolveCache? cache = null,
+        OgFallbackHint? ogFallbackHint = null,
+        ResolverHealthGate? health = null,
+        Func<int, bool>? onRelayWedged = null,
+        Action? onNewVrchatSession = null)
     {
         _mesh = mesh;
         _ogFallbackHint = ogFallbackHint;
         _cache = cache;
         _health = health;
+        _onRelayWedged = onRelayWedged;
+        _onNewVrchatSession = onNewVrchatSession;
     }
 
     private bool IsAttributedToUs(string canonicalUrl)
@@ -114,6 +124,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
                         bool firstFile = currentFile.Length == 0;
                         currentFile = latest.FullName;
                         lastSize = InitialReadOffsetForNewFile(latest.Length, firstFile);
+                        if (!firstFile) _onNewVrchatSession?.Invoke();
                     }
                     if (latest.Length > lastSize)
                     {
@@ -265,6 +276,13 @@ internal sealed partial class VrcLogMonitor : IDisposable
             if (activeUrl == null) return;
 
             int ms = (int)(DateTime.UtcNow - activeAt).TotalMilliseconds;
+            if (TryHandleWedgedRelay(activeUrl, ms))
+            {
+                CancelPlayingFeedbackLoop();
+                _activePlaybackUrl = null;
+                _activePlaybackAt = default;
+                return;
+            }
             string reportedUrl = CanonicalPlaybackObservationUrl(activeUrl);
             int? deliveredHeight = TryGetDeliveredHeight(reportedUrl, out int height) ? height : null;
             _ = _mesh.SendPlaybackFeedbackAsync(
@@ -280,6 +298,16 @@ internal sealed partial class VrcLogMonitor : IDisposable
                 + (fallback.Evicted > 0 ? " evicted=" + fallback.Evicted : "")
                 + (fallback.OgHintArmed ? " og_hint=armed" : ""));
         });
+    }
+
+    internal bool TryHandleWedgedRelay(string openedUrl, int ms)
+    {
+        if (_onRelayWedged == null || !RelayActivity.LooksWedged(openedUrl, out int port)) return false;
+        bool handled = _onRelayWedged(port);
+        ConsoleUx.Warn(LogComponent.VrcLog, "relay_pool_wedged ms=" + ms + " port=" + port
+            + ": VRChat never reached the local relay"
+            + (handled ? "" : "; counting as a failed play"));
+        return handled;
     }
 
     internal PlaybackFailureRecovery MarkPlaybackFailureForTests(string reportedUrl) => MarkPlaybackFailure(reportedUrl);

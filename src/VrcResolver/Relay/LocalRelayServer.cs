@@ -11,6 +11,7 @@ internal sealed partial class LocalRelayServer : IDisposable
 {
     private static readonly TimeSpan UpstreamHeaderDeadline = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan BodyIdleTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ManifestBodyDeadline = TimeSpan.FromSeconds(30);
     private const int CopyBufferSize = 80 * 1024;
 
     private readonly int _port;
@@ -26,7 +27,14 @@ internal sealed partial class LocalRelayServer : IDisposable
     private const int MaxInFlight = 128;
     private int _inFlight;
 
+    public string Scheme => _scheme;
+
     public LocalRelayServer(int port, string scheme = "http")
+        : this(port, scheme, null)
+    {
+    }
+
+    internal LocalRelayServer(int port, string scheme, HttpMessageHandler? upstreamHandler)
     {
         _port = port;
         _scheme = TrustGatewayUrlBuilder.IsAllowedGatewayScheme(scheme)
@@ -42,7 +50,7 @@ internal sealed partial class LocalRelayServer : IDisposable
             ConnectTimeout = TimeSpan.FromSeconds(15),
             ConnectCallback = GuardedRelayConnect.Callback,
         };
-        _http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        _http = new HttpClient(upstreamHandler ?? handler) { Timeout = Timeout.InfiniteTimeSpan };
     }
 
     public void Start()
@@ -76,6 +84,12 @@ internal sealed partial class LocalRelayServer : IDisposable
         {
             HttpListenerContext ctx;
             try { ctx = await _listener.GetContextAsync().ConfigureAwait(false); }
+            catch (HttpListenerException ex) when (!_cts.IsCancellationRequested && _listener.IsListening)
+            {
+                ConsoleUx.Warn(LogComponent.Relay, "accept failed: " + ex.Message);
+                try { await Task.Delay(100, _cts.Token).ConfigureAwait(false); } catch { break; }
+                continue;
+            }
             catch (HttpListenerException) { break; }
             catch (ObjectDisposedException) { break; }
             catch (Exception ex)
@@ -84,6 +98,7 @@ internal sealed partial class LocalRelayServer : IDisposable
                 ConsoleUx.Warn(LogComponent.Relay, "accept failed: " + ex.Message);
                 continue;
             }
+            RelayActivity.Record(ctx.Request.Url?.AbsolutePath);
             if (Interlocked.Increment(ref _inFlight) > MaxInFlight)
             {
                 Interlocked.Decrement(ref _inFlight);
@@ -117,6 +132,7 @@ internal sealed partial class LocalRelayServer : IDisposable
         long t0 = s_verbose ? Environment.TickCount64 : 0;
         long upstreamHeaderMs = -1;
         long bytesOut = 0;
+        bool bodyStarted = false;
         try
         {
             path = ctx.Request.Url?.AbsolutePath ?? "";
@@ -228,7 +244,9 @@ internal sealed partial class LocalRelayServer : IDisposable
                         + upstreamContentLength.Value);
                 }
 
-                using var manifestStream = await resp.Content.ReadAsStreamAsync(_cts.Token).ConfigureAwait(false);
+                using var manifestCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                manifestCts.CancelAfter(ManifestBodyDeadline);
+                using var manifestStream = await resp.Content.ReadAsStreamAsync(manifestCts.Token).ConfigureAwait(false);
 
                 ctx.Response.StatusCode = (int)resp.StatusCode;
                 CopyResponseHeaders(
@@ -241,6 +259,7 @@ internal sealed partial class LocalRelayServer : IDisposable
                     out int passedManifestHeaders,
                     out int droppedManifestHeaders);
                 ctx.Response.SendChunked = true;
+                bodyStarted = true;
 
                 Encoding? inputEncoding = TryResolveCharsetEncoding(
                     resp.Content.Headers.ContentType?.CharSet);
@@ -249,7 +268,7 @@ internal sealed partial class LocalRelayServer : IDisposable
                     inputEncoding,
                     ctx.Response.OutputStream,
                     LocalRelayManifestLocalizer.MaxManifestBytes,
-                    _cts.Token).ConfigureAwait(false);
+                    manifestCts.Token).ConfigureAwait(false);
                 if (localizeResult.Exceeded)
                 {
                     ConsoleUx.Warn(LogComponent.Relay,
@@ -294,6 +313,7 @@ internal sealed partial class LocalRelayServer : IDisposable
                 return;
             }
 
+            bodyStarted = true;
             using var upstream = await resp.Content.ReadAsStreamAsync(_cts.Token).ConfigureAwait(false);
             byte[] buf = new byte[CopyBufferSize];
             bool isUpstreamTarget = WatchdogStats.ClassifyUpstreamTarget(targetUrl);
@@ -327,6 +347,12 @@ internal sealed partial class LocalRelayServer : IDisposable
                 bytesOut += n;
                 WatchdogStats.RecordRelayBytes(targetUrl, isUpstreamTarget, n);
             }
+            if (resp.Content.Headers.ContentLength is long declared && bytesOut < declared && !_cts.IsCancellationRequested)
+            {
+                failure = "upstream_short_body";
+                ConsoleUx.Warn(LogComponent.Relay, "upstream ended early (" + bytesOut + "/" + declared
+                    + " bytes) for " + ShortUrl(targetUrl));
+            }
             if (s_verbose) Verbose("req=" + reqId + " -> " + ctx.Response.StatusCode
                 + " stream bytes-out=" + bytesOut + " elapsed=" + (Environment.TickCount64 - t0) + "ms");
         }
@@ -341,6 +367,15 @@ internal sealed partial class LocalRelayServer : IDisposable
             if (s_verbose) Verbose("req=" + reqId + " client-disconnect (IOException: " + ioe.Message + ") bytes-out=" + bytesOut);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (OperationCanceledException)
+        {
+            failure = "upstream_timeout";
+            ConsoleUx.Warn(LogComponent.Relay, "upstream timed out for " + ShortUrl(targetUrl));
+            if (!bodyStarted)
+            {
+                try { ctx.Response.StatusCode = 504; } catch { }
+            }
+        }
         catch (Exception ex)
         {
             failure = ex.GetType().Name;
@@ -366,7 +401,14 @@ internal sealed partial class LocalRelayServer : IDisposable
                     failure));
             }
 
-            try { ctx.Response.Close(); } catch { }
+            if (bodyStarted && failure != null)
+            {
+                try { ctx.Response.Abort(); } catch { }
+            }
+            else
+            {
+                try { ctx.Response.Close(); } catch { try { ctx.Response.Abort(); } catch { } }
+            }
         }
     }
 

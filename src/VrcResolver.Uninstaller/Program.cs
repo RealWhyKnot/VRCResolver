@@ -23,6 +23,7 @@ internal static class Program
         errors += RunStep("restore-yt-dlp", RestoreYtDlp);
         errors += RunStep("remove-hosts", () => RemoveHostsEntry(watchdogExe));
         errors += RunStep("remove-relay-tls", () => RemoveRelayTls(watchdogExe));
+        errors += RunStep("restore-wininet-limit", () => WinInetConnectionLimit.Restore(Console.WriteLine));
         errors += RunStep("wipe-state", WipeState);
         errors += RunStep("schedule-self-delete", () => ScheduleInstallDirDelete(installDir));
 

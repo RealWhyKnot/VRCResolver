@@ -177,6 +177,9 @@ internal static class Program
         s_ipc.Start();
         _ = s_mesh.StartAsync();
 
+        try { WinInetConnectionLimit.Ensure(msg => ConsoleUx.Write(LogComponent.Relay, msg)); }
+        catch (Exception ex) { ConsoleUx.Warn(LogComponent.Relay, "could not raise WinINet connection limit: " + ex.Message); }
+
         s_relayPort = new RelayPortManager();
         if (s_relayPort.Initialize())
         {
@@ -197,7 +200,14 @@ internal static class Program
             ConsoleUx.Warn(LogComponent.Relay, "could not reserve a local video port -- public-instance local video disabled.");
         }
 
-        s_logmon = new VrcLogMonitor(s_mesh, s_resolveCache, s_ogFallbackHint, s_healthGate);
+        RelayBypass? relayBypass = s_relay != null ? new RelayBypass(s_relayPort, s_relay.Scheme) : null;
+        s_logmon = new VrcLogMonitor(
+            s_mesh,
+            s_resolveCache,
+            s_ogFallbackHint,
+            s_healthGate,
+            relayBypass == null ? null : relayBypass.Engage,
+            relayBypass == null ? null : relayBypass.Release);
         s_logmon.Start();
 
         if (!s_patcher.Start())
