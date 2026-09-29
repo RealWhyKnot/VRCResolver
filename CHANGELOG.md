@@ -11,6 +11,9 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
+### Added
+- **vrclog:** Warn when VRChat starts with no audio devices (26f83c1)
+
 ### Changed
 - **wrapper:** Move relay wrapping and request building into shared (0b4dc6d)
 
