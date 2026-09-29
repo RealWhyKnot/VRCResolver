@@ -8,7 +8,6 @@ namespace VrcResolver;
 internal sealed partial class VrcLogMonitor : IDisposable
 {
     private static readonly TimeSpan AvProOpenFailCorrelationWindow = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan SilentStallWindow = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan DeliveredHeightTtl = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan PlayingFeedbackInterval = TimeSpan.FromSeconds(15);
     private const int MaxDeliveredHeightEntries = 64;
@@ -26,6 +25,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
     private readonly ResolverHealthGate? _health;
     private readonly Func<int, bool>? _onRelayWedged;
     private readonly Action? _onNewVrchatSession;
+    private readonly TimeSpan _silentStallWindow;
     private readonly CancellationTokenSource _cts = new();
     private Task? _loop;
 
@@ -49,7 +49,8 @@ internal sealed partial class VrcLogMonitor : IDisposable
         OgFallbackHint? ogFallbackHint = null,
         ResolverHealthGate? health = null,
         Func<int, bool>? onRelayWedged = null,
-        Action? onNewVrchatSession = null)
+        Action? onNewVrchatSession = null,
+        TimeSpan? silentStallWindow = null)
     {
         _mesh = mesh;
         _ogFallbackHint = ogFallbackHint;
@@ -57,6 +58,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
         _health = health;
         _onRelayWedged = onRelayWedged;
         _onNewVrchatSession = onNewVrchatSession;
+        _silentStallWindow = silentStallWindow ?? TimeSpan.FromSeconds(12);
     }
 
     private bool IsAttributedToUs(string canonicalUrl)
@@ -258,7 +260,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
 
         _ = Task.Run(async () =>
         {
-            try { await Task.Delay(SilentStallWindow, newCts.Token).ConfigureAwait(false); }
+            try { await Task.Delay(_silentStallWindow, newCts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
             catch (ObjectDisposedException) { return; }
 
