@@ -298,15 +298,14 @@ internal static class LocalRelayTlsManager
             RedirectStandardError = true,
         };
         proc.Start();
-        string stdout = proc.StandardOutput.ReadToEnd();
-        string stderr = proc.StandardError.ReadToEnd();
-        proc.WaitForExit(15000);
-        if (!proc.HasExited)
+        Task<string> stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        Task<string> stderrTask = proc.StandardError.ReadToEndAsync();
+        if (!proc.WaitForExit(15000))
         {
-            try { proc.Kill(); } catch { }
-            return (1, stdout, stderr + " netsh timed out");
+            try { proc.Kill(entireProcessTree: true); } catch { }
+            return (1, "", "netsh timed out");
         }
-        return (proc.ExitCode, stdout, stderr);
+        return (proc.ExitCode, stdoutTask.GetAwaiter().GetResult(), stderrTask.GetAwaiter().GetResult());
     }
 
     private static bool ReexecElevated(string args)
