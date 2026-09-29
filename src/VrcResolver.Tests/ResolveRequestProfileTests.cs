@@ -45,4 +45,27 @@ public sealed class ResolveRequestProfileTests
         Assert.Null(ResolveRequestProfile.ExtractDashFValue(new[] { "https://x", "-f" }));
         Assert.Null(ResolveRequestProfile.ExtractDashFValue(new[] { "--format=best", "https://x" }));
     }
+
+    [Theory]
+    [InlineData("(mp4/best)[height<=?4096][height>=?64][width>=?64]", "avpro", 4096)]
+    [InlineData("(mp4/best)[height<=?720][height>=?64][width>=?64]", "unity", 720)]
+    public void BuildWrapperRequest_CarriesEverythingTheServerNeedsFromVrchat(string format, string expectedPlayer, int expectedHeight)
+    {
+        string player = ResolveRequestProfile.InferPlayer(format);
+        ResolveRequest req = ResolveRequestProfile.BuildWrapperRequest("https://youtu.be/x", player, format, skipNativeHint: true);
+
+        Assert.Equal(expectedPlayer, req.Player);
+        Assert.Equal(WireConstants.ActionResolve, req.Action);
+        Assert.Equal(32, req.Id.Length);
+        Assert.Equal("https://youtu.be/x", req.Url);
+        Assert.Equal(expectedHeight, req.MaxHeight);
+        Assert.Equal(format, req.VrchatFormatArg);
+        Assert.Equal(WireConstants.ClientProtocolVersion, req.ProtocolVersion);
+        Assert.True(req.SkipNativeHint);
+        bool unity = player == WireConstants.PlayerUnity;
+        Assert.Equal(unity ? WireConstants.UnityAcceptProtocols : WireConstants.AvProAcceptProtocols, req.AcceptProtocols);
+        Assert.Equal(unity ? WireConstants.UnityAcceptCodecs : WireConstants.AvProAcceptCodecs, req.AcceptCodecs);
+        Assert.Equal(unity ? WireConstants.UnityMaxAudioChannels : WireConstants.AvProMaxAudioChannels, req.MaxAudioChannels);
+        Assert.Null(ResolveRequestProfile.BuildWrapperRequest("https://youtu.be/x", player, format).SkipNativeHint);
+    }
 }

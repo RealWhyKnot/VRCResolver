@@ -34,6 +34,46 @@ public static class TrustGatewayUrlBuilder
         return true;
     }
 
+    public static string WrapForRelay(string stateRoot, string url, bool probeRelay = false)
+    {
+        if (string.IsNullOrEmpty(url)) return url;
+
+        int? port = ReadRelayPort(stateRoot);
+        if (!port.HasValue) return url;
+        if (probeRelay && !RelayLiveness.IsListening(port.Value)) return url;
+
+        return TryBuild(port.Value, url, session: null, ReadRelayScheme(stateRoot), out string localUrl)
+            ? localUrl
+            : url;
+    }
+
+    private static int? ReadRelayPort(string stateRoot)
+    {
+        try
+        {
+            string portFile = Path.Combine(stateRoot, "relay_port.txt");
+            if (!File.Exists(portFile)) return null;
+            string text = File.ReadAllText(portFile).Trim();
+            if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int p)
+                && p > 1024 && p < 65536) return p;
+        }
+        catch { }
+        return null;
+    }
+
+    private static string ReadRelayScheme(string stateRoot)
+    {
+        try
+        {
+            string schemeFile = Path.Combine(stateRoot, "relay_scheme.txt");
+            if (!File.Exists(schemeFile)) return "http";
+            string text = File.ReadAllText(schemeFile).Trim();
+            return IsAllowedGatewayScheme(text) ? text.ToLowerInvariant() : "http";
+        }
+        catch { }
+        return "http";
+    }
+
     public static bool TryExtractTarget(string localUrl, out string targetUrl)
     {
         targetUrl = "";

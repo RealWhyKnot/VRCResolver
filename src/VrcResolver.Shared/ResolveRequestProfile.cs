@@ -37,6 +37,25 @@ public static class ResolveRequestProfile
         return null;
     }
 
+    public static ResolveRequest BuildWrapperRequest(string url, string player, string? formatArg, bool skipNativeHint = false)
+    {
+        bool unity = player == WireConstants.PlayerUnity;
+        return new ResolveRequest
+        {
+            Action = WireConstants.ActionResolve,
+            Id = Guid.NewGuid().ToString("N"),
+            Url = url,
+            Player = player,
+            MaxHeight = TryGetHeightCap(formatArg),
+            ProtocolVersion = WireConstants.ClientProtocolVersion,
+            VrchatFormatArg = formatArg,
+            AcceptProtocols = unity ? WireConstants.UnityAcceptProtocols : WireConstants.AvProAcceptProtocols,
+            AcceptCodecs = unity ? WireConstants.UnityAcceptCodecs : WireConstants.AvProAcceptCodecs,
+            MaxAudioChannels = unity ? WireConstants.UnityMaxAudioChannels : WireConstants.AvProMaxAudioChannels,
+            SkipNativeHint = skipNativeHint ? true : null,
+        };
+    }
+
     public static string InferPlayer(string? formatArg)
     {
         int? heightCap = TryGetHeightCap(formatArg);

@@ -118,28 +118,7 @@ internal static partial class Program
     {
         var swPipe = Stopwatch.StartNew();
         long totalDeadlineMs = (long)(deadlineOverride ?? ResolveBudget.Total).TotalMilliseconds;
-        int? maxHeight = ResolveRequestProfile.TryGetHeightCap(formatArg);
-
-        var req = new ResolveRequest
-        {
-            Action = WireConstants.ActionResolve,
-            Id = Guid.NewGuid().ToString("N"),
-            Url = url,
-            Player = player,
-            MaxHeight = maxHeight,
-            ProtocolVersion = WireConstants.ClientProtocolVersion,
-            VrchatFormatArg = formatArg,
-            AcceptProtocols = player == WireConstants.PlayerUnity
-                ? WireConstants.UnityAcceptProtocols
-                : WireConstants.AvProAcceptProtocols,
-            AcceptCodecs = player == WireConstants.PlayerUnity
-                ? WireConstants.UnityAcceptCodecs
-                : WireConstants.AvProAcceptCodecs,
-            MaxAudioChannels = player == WireConstants.PlayerUnity
-                ? WireConstants.UnityMaxAudioChannels
-                : WireConstants.AvProMaxAudioChannels,
-            SkipNativeHint = skipNativeHint ? true : null,
-        };
+        var req = ResolveRequestProfile.BuildWrapperRequest(url, player, formatArg, skipNativeHint);
         s_lastRequestId = req.Id;
 
         var swRequest = Stopwatch.StartNew();
