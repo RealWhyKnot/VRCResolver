@@ -68,6 +68,13 @@ internal sealed partial class MeshClient
                     ConsoleUx.Warn(LogComponent.Mesh, "disconnected (error): "
                         + ex.GetType().Name + ": " + LogUtil.SanitizeForConsole(ex.Message, 160));
                 }
+                else
+                {
+                    Exception root = ex.GetBaseException();
+                    Logger.WriteFileOnly("[mesh] reconnect attempt " + _reconnectAttempt + " failed: "
+                        + ex.GetType().Name + " (" + root.GetType().Name + ": "
+                        + LogUtil.SanitizeForConsole(root.Message, 160) + ")");
+                }
                 _wasConnected = false;
                 FailAllPending(WireConstants.FallbackServerUnreachable);
                 if (string.Equals(_currentNodeHost, ServerEndpoints.ProxyHost, StringComparison.OrdinalIgnoreCase)
