@@ -28,6 +28,10 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **mesh:** Bound websocket connect and send so one stall cannot block every resolve (32b404b)
 - **ipc:** Time out a resolver health probe that never reports back (a961d7b)
 - **patch:** Keep watching when the bundled wrapper goes missing instead of halting (0bc0a61)
+- **mesh:** Log why each failed reconnect attempt failed (a6255ae)
+- **relay:** Drop the late-segment hitch warning that fired on normal playback pacing (3233f51)
+- **ipc:** Keep videos on our resolver while VRChat's own resolver is blocked on that site (4cdb236)
+- **vrclog:** Stop counting a play cut short by a world change as a failure (41e9ae7)
 
 ---
 
