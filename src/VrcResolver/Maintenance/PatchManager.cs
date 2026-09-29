@@ -17,7 +17,6 @@ internal sealed class PatchManager : IDisposable
     private readonly string? _vrcToolsDir;
     private Task? _loop;
     private DateTime _lastPatchTime = DateTime.MinValue;
-    private bool _halted;
     private int _started;
     private int _stopping;
 
@@ -28,10 +27,9 @@ internal sealed class PatchManager : IDisposable
 
     private TickOutcome _lastTickOutcome = TickOutcome.None;
 
-    private enum TickOutcome { None, Match, Locked, Reapplied, ReapplyFailed, BackupCreated, InitialStaged, Waiting, UnknownTarget, BackupLost }
+    private enum TickOutcome { None, Match, Locked, Reapplied, ReapplyFailed, BackupCreated, InitialStaged, Waiting, UnknownTarget, BackupLost, WrapperMissing }
 
     public string? VrcToolsDir => _vrcToolsDir;
-    public bool Halted => _halted;
 
     public static void LogVrcProcessState()
     {
@@ -230,7 +228,6 @@ internal sealed class PatchManager : IDisposable
 
     private void TickOnce()
     {
-        if (_halted) return;
         if (string.IsNullOrEmpty(_vrcToolsDir)) return;
 
         string targetPath = Path.Combine(_vrcToolsDir, "yt-dlp.exe");
@@ -294,7 +291,15 @@ internal sealed class PatchManager : IDisposable
 
         if (!File.Exists(_patchedYtDlpPath))
         {
-            Halt("patched_binary_missing");
+            if (_lastTickOutcome != TickOutcome.WrapperMissing)
+            {
+                bool restored = false;
+                try { restored = RestoreYtDlpInTools(_vrcToolsDir); }
+                catch (Exception ex) { ConsoleUx.Warn(LogComponent.Patch, "restore after missing wrapper threw: " + ex.Message); }
+                _lastTickOutcome = TickOutcome.WrapperMissing;
+                ConsoleUx.Warn(LogComponent.Patch, "our yt-dlp wrapper is missing from " + _patchedYtDlpPath
+                    + "; VRChat uses its own resolver until the file is back (restored=" + restored + ")");
+            }
             return;
         }
 
@@ -410,25 +415,6 @@ internal sealed class PatchManager : IDisposable
             ConsoleUx.Warn(LogComponent.Patch, "" + stage + " still failing after " + _consecutiveLockFailures + " ticks ("
                 + ex.GetType().Name + ": " + LogUtil.SanitizeForConsole(ex.Message, 120) + ")");
         }
-    }
-
-    private void Halt(string reason)
-    {
-        _halted = true;
-        bool restored = false;
-        if (!string.IsNullOrEmpty(_vrcToolsDir))
-        {
-            try { restored = RestoreYtDlpInTools(_vrcToolsDir); }
-            catch (Exception ex) { ConsoleUx.Warn(LogComponent.Patch, "halt restore threw: " + ex.Message); }
-            ToolsDirSweeper.Sweep(_vrcToolsDir);
-        }
-
-        ConsoleUx.Fatal("VRCResolver halted -- Reinstall VRCResolver; reason=" + reason + " restored=" + restored);
-        try { Console.Title = "VRCResolver -- HALTED (" + reason + ")"; } catch { }
-
-        try { File.WriteAllText(_haltFlagPath, DateTime.UtcNow.ToString("o") + " " + reason); }
-        catch (Exception ex) { ConsoleUx.Warn(LogComponent.Patch, "could not write halt.flag: " + ex.Message); }
-        _cts.Cancel();
     }
 
     internal static void AtomicCopy(string src, string dst)

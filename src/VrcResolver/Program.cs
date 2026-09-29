@@ -484,8 +484,7 @@ internal static class Program
         var patcher = s_patcher;
         if (patcher != null)
         {
-            sb.AppendLine("patch:   halted=" + patcher.Halted
-                + " vrcToolsDir=" + (patcher.VrcToolsDir ?? "<null>"));
+            sb.AppendLine("patch:   vrcToolsDir=" + (patcher.VrcToolsDir ?? "<null>"));
         }
         else
         {
