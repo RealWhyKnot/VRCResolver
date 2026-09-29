@@ -227,7 +227,7 @@ internal sealed partial class LocalIpcServer : IDisposable
                 return;
             }
 
-            if (_health != null)
+            if (_health != null && !BypassesHealthGate(req, _ogFallbackHint))
             {
                 bool paused = _health.ShouldShortCircuit(_mesh.IsConnected, out var gateCheck);
                 if (gateCheck == ResolverHealthGate.Transition.Closed)
@@ -423,6 +423,10 @@ internal sealed partial class LocalIpcServer : IDisposable
             pipe.Dispose();
         }
     }
+
+    internal static bool BypassesHealthGate(ResolveRequest req, OgFallbackHint? ogFallbackHint)
+        => req.SkipNativeHint == true
+           || (ogFallbackHint != null && ogFallbackHint.IsOgBlocked(req.Url));
 
     internal static bool IsHealthyOutcome(string? failReason, string outcome, string? serverReason)
         => (failReason == null || failReason == WireConstants.FallbackClientDeadlineExceeded)

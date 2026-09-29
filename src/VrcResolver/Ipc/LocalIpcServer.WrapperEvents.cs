@@ -59,10 +59,13 @@ internal sealed partial class LocalIpcServer : IDisposable
 
         int evicted = 0;
         bool hintCleared = false;
+        bool newlyBlocked = false;
         if (!string.IsNullOrEmpty(notify.Url))
         {
             try { evicted = _cache?.EvictByUrl(notify.Url) ?? 0; }
             catch { }
+            if (IsSiteWideOgBlock(notify.Reason))
+                newlyBlocked = _ogFallbackHint?.RecordOgBlocked(notify.Url) ?? false;
             hintCleared = _ogFallbackHint?.TryClear(notify.Url) ?? false;
         }
 
@@ -77,6 +80,14 @@ internal sealed partial class LocalIpcServer : IDisposable
         ConsoleUx.Warn(
             LogComponent.Wrapper,
             "!! og also failed " + host + " reason=" + reason + " exit=" + notify.ExitCode + hint);
+        if (newlyBlocked)
+        {
+            string site = OgFallbackHint.SiteKey(notify.Url);
+            ConsoleUx.Warn(
+                LogComponent.Wrapper,
+                "VRChat's own resolver is blocked on " + site + ", so " + site
+                    + " videos stay on our resolver for " + (int)OgFallbackHint.OgBlockedTtl.TotalMinutes + " min");
+        }
         Logger.WriteFileOnly(
             "[wrapper] wrapper_og_failed rid=" + LogUtil.SanitizeForConsole(notify.Rid ?? "?", 16) +
             " host=" + host +
@@ -95,6 +106,9 @@ internal sealed partial class LocalIpcServer : IDisposable
                 detail: detail, correlationIdOverride: notify.Rid);
         }
     }
+
+    internal static bool IsSiteWideOgBlock(string? wrapperReason)
+        => wrapperReason is "sign_in_required" or "cf_403" or "rate_limited";
 
     internal static string OgFailedDetailFor(string? wrapperReason) => wrapperReason switch
     {

@@ -124,7 +124,7 @@ internal sealed class ResolverHealthGate
         lock (_lock)
         {
             _playbackStreak = 0;
-            if (_state == State.HalfOpenProbe || _state == State.HalfOpenVerdict)
+            if (_state != State.Closed)
             {
                 CloseLocked();
                 return Transition.Closed;

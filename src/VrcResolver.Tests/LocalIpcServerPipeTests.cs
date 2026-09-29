@@ -100,4 +100,86 @@ public class LocalIpcServerPipeTests
         Assert.Equal(WireConstants.ActionFallbackNative, resp.Action);
         Assert.Equal(WireConstants.OgFallbackReasonResolverUnhealthy, resp.Reason);
     }
+
+    [Fact]
+    public async Task OpenHealthGate_LetsTheWrapperReAskThrough()
+    {
+        var resp = await RoundTripAsync(
+            "{\"action\":\"resolve\",\"id\":\"x1\",\"url\":\"https://example.com/v\",\"player\":\"avpro\",\"skip_native_hint\":true}",
+            health: OpenGate());
+        Assert.Equal(WireConstants.ActionFallbackNative, resp.Action);
+        Assert.Equal(WireConstants.FallbackServerUnreachable, resp.Reason);
+    }
+
+    [Fact]
+    public async Task OpenHealthGate_KeepsSitesWithBlockedOgOnTheServer()
+    {
+        var hint = new OgFallbackHint();
+        hint.RecordOgBlocked("https://youtu.be/abc");
+        var resp = await RoundTripAsync(
+            "{\"action\":\"resolve\",\"id\":\"x1\",\"url\":\"https://www.youtube.com/watch?v=def\",\"player\":\"avpro\"}",
+            ogHint: hint,
+            health: OpenGate());
+        Assert.Equal(WireConstants.ActionFallbackNative, resp.Action);
+        Assert.Equal(WireConstants.FallbackServerUnreachable, resp.Reason);
+    }
+
+    [Fact]
+    public async Task PriorLoadFailure_DoesNotSendABlockedSiteToOg()
+    {
+        var hint = new OgFallbackHint();
+        hint.RecordLoadFailure("https://youtu.be/abc");
+        hint.RecordOgBlocked("https://youtu.be/abc");
+        var resp = await RoundTripAsync(
+            "{\"action\":\"resolve\",\"id\":\"x1\",\"url\":\"https://youtu.be/abc\",\"player\":\"avpro\"}",
+            ogHint: hint);
+        Assert.Equal(WireConstants.ActionFallbackNative, resp.Action);
+        Assert.Equal(WireConstants.FallbackServerUnreachable, resp.Reason);
+    }
+
+    [Theory]
+    [InlineData("sign_in_required", true)]
+    [InlineData("cf_403", true)]
+    [InlineData("rate_limited", true)]
+    [InlineData("content_not_found", false)]
+    [InlineData("timeout", false)]
+    public async Task OgFailedNotify_BlocksOgForTheSiteOnlyForSiteWideReasons(string reason, bool expectBlocked)
+    {
+        var hint = new OgFallbackHint();
+        hint.RecordLoadFailure("https://youtu.be/abc");
+        string pipeName = "vrcresolver.test." + Guid.NewGuid().ToString("N");
+        var server = new LocalIpcServer(new MeshClient(), null, hint, null);
+        server.StartForTests(pipeName);
+        try
+        {
+            using (var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+            {
+                await client.ConnectAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
+                byte[] payload = Encoding.UTF8.GetBytes(
+                    "{\"action\":\"wrapper_og_failed\",\"url\":\"https://youtu.be/abc\",\"reason\":\"" + reason
+                    + "\",\"exit_code\":1,\"rid\":\"r1\"}\n");
+                await client.WriteAsync(payload);
+                await client.FlushAsync();
+            }
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (hint.LiveEntryCountForTests() > 0 && DateTime.UtcNow < deadline)
+                await Task.Delay(25);
+            Assert.Equal(0, hint.LiveEntryCountForTests());
+            Assert.Equal(expectBlocked, hint.IsOgBlocked("https://www.youtube.com/watch?v=zzz"));
+        }
+        finally
+        {
+            await server.StopAsync();
+            server.Dispose();
+        }
+    }
+
+    private static ResolverHealthGate OpenGate()
+    {
+        var gate = new ResolverHealthGate();
+        for (int i = 0; i < ResolverHealthGate.OpenThreshold; i++)
+            gate.RecordResolveOutcome(healthy: false, resolved: false);
+        return gate;
+    }
 }

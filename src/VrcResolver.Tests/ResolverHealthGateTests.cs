@@ -176,6 +176,18 @@ public sealed class ResolverHealthGateTests
         Assert.Equal(ResolverHealthGate.Transition.Opened, gate.RecordPlaybackFailure());
     }
 
+    [Fact]
+    public void ConfirmedPlaybackClosesTheGateDuringCooldown()
+    {
+        var now = T0;
+        var gate = MakeGate(() => now);
+        Open(gate);
+
+        Assert.True(gate.ShouldShortCircuit(meshConnected: true, out _));
+        Assert.Equal(ResolverHealthGate.Transition.Closed, gate.RecordPlaybackConfirmed());
+        Assert.False(gate.ShouldShortCircuit(meshConnected: true, out _));
+    }
+
     [Theory]
     [InlineData(WireConstants.OgFallbackReasonResolverUnhealthy)]
     [InlineData(WireConstants.OgFallbackReasonResolvedUrlRejected)]
