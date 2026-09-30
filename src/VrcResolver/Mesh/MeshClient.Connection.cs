@@ -9,6 +9,7 @@ internal sealed partial class MeshClient
     {
         while (!ct.IsCancellationRequested)
         {
+            MeshLink? link = null;
             try
             {
                 string node = await ResolveNodeHostAsync(ct).ConfigureAwait(false);
@@ -24,7 +25,7 @@ internal sealed partial class MeshClient
                     ServerMaxWindowBits = 15,
                 };
 
-                var wsUri = ServerEndpoints.MeshWebSocketUrlForHost(node);
+                var wsUri = _meshUriForHost(node);
                 using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
                 {
                     connectCts.CancelAfter(ConnectDeadline);
@@ -54,6 +55,9 @@ internal sealed partial class MeshClient
                 _lastPongUtc = DateTime.UtcNow;
 
                 ArmWelcomeTimeout(_welcomeTcs!, ct);
+                var readyLink = link = new MeshLink();
+                var linkWs = _ws;
+                _ = _welcomeTcs!.Task.ContinueWith(_ => MarkLinkReady(readyLink, linkWs), TaskScheduler.Default);
 
                 ConsoleUx.Write(LogComponent.Mesh, "connected node=" + node);
 
@@ -76,7 +80,6 @@ internal sealed partial class MeshClient
                         + LogUtil.SanitizeForConsole(root.Message, 160) + ")");
                 }
                 _wasConnected = false;
-                FailAllPending(WireConstants.FallbackServerUnreachable);
                 if (string.Equals(_currentNodeHost, ServerEndpoints.ProxyHost, StringComparison.OrdinalIgnoreCase)
                     && string.IsNullOrEmpty(_cachedNodeHost))
                 {
@@ -92,8 +95,8 @@ internal sealed partial class MeshClient
             }
             finally
             {
+                MarkLinkDown(link);
                 _welcomeTcs?.TrySetResult(null);
-                FailAllPending(WireConstants.FallbackServerUnreachable);
                 try { _ws?.Dispose(); } catch { }
                 _ws = null;
             }
@@ -125,6 +128,49 @@ internal sealed partial class MeshClient
         _isMsgpackFormat = false;
         _currentNodeHost = node;
         _welcomeTcs = new TaskCompletionSource<WelcomeFrame?>(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private void MarkLinkReady(MeshLink link, ClientWebSocket? ws)
+    {
+        if (link.Down.Task.IsCompleted || ws is not { State: WebSocketState.Open }) return;
+        link.WasReady = true;
+        Volatile.Write(ref _readyLink, link);
+        Interlocked.Exchange(ref _linkReady,
+            new TaskCompletionSource<MeshLink>(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult(link);
+    }
+
+    private void MarkLinkDown(MeshLink? link)
+    {
+        if (link == null) return;
+        Interlocked.CompareExchange(ref _readyLink, null, link);
+        if (link.WasReady)
+            Interlocked.Exchange(ref _linkDownSinceTicks, DateTime.UtcNow.Ticks);
+        link.Down.TrySetResult();
+    }
+
+    private async Task<MeshLink?> WaitForLinkAsync(Task pending, CancellationToken ct)
+    {
+        while (true)
+        {
+            var next = Volatile.Read(ref _linkReady).Task;
+            var link = Volatile.Read(ref _readyLink);
+            if (link != null && !link.Down.Task.IsCompleted) return link;
+
+            var remaining = new DateTime(Interlocked.Read(ref _linkDownSinceTicks), DateTimeKind.Utc)
+                + _reconnectGrace - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero) return null;
+
+            using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var delay = Task.Delay(remaining, delayCts.Token);
+            var done = await Task.WhenAny(next, pending, delay).ConfigureAwait(false);
+            delayCts.Cancel();
+            if (done == pending) return null;
+            if (done == delay)
+            {
+                ct.ThrowIfCancellationRequested();
+                return null;
+            }
+        }
     }
 
     private void ArmWelcomeTimeout(TaskCompletionSource<WelcomeFrame?> welcomeTcs, CancellationToken ct)

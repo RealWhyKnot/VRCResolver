@@ -20,6 +20,8 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private static readonly TimeSpan ApexReResolveAfter = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan WelcomeTimeout = TimeSpan.FromSeconds(1);
     private static readonly int[] ReconnectCapsSec = { 1, 2, 4, 8, 16, 30 };
+    private TimeSpan _reconnectGrace = TimeSpan.FromSeconds(5);
+    private Func<string, Uri> _meshUriForHost = ServerEndpoints.MeshWebSocketUrlForHost;
 
     private static readonly byte[] PingFrame = "{\"action\":\"ping\"}"u8.ToArray();
     private static readonly byte[] PongFrame = "{\"action\":\"pong\"}"u8.ToArray();
@@ -63,6 +65,17 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private bool _isMsgpackFormat;
 
     private TaskCompletionSource<WelcomeFrame?>? _welcomeTcs;
+
+    private sealed class MeshLink
+    {
+        public readonly TaskCompletionSource Down = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public volatile bool WasReady;
+    }
+
+    private MeshLink? _readyLink;
+    private TaskCompletionSource<MeshLink> _linkReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private long _linkDownSinceTicks = DateTime.UtcNow.Ticks;
+
     private int _serverProtocolVersion;
     private string? _serverNode;
     private string[]? _serverFeatures;
