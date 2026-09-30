@@ -37,6 +37,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **vrclog:** Stop counting a play cut short by a world change as a failure (41e9ae7)
 - **mesh:** Resend a resolve that was in flight when the socket dropped (f24caa2)
 - **mesh:** Reset reconnect backoff when the server confirms a cached welcome (cda9268)
+- **patch:** Stop re-backing-up VRChat's yt-dlp every tick while the wrapper is missing (4aabd3a)
 
 ---
 
