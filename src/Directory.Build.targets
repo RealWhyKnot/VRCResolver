@@ -6,7 +6,12 @@
     <InvariantGlobalization>true</InvariantGlobalization>
 
     <UseSizeOptimizedLinq>true</UseSizeOptimizedLinq>
+    <Gen0MaxBudget Condition="'$(Gen0MaxBudget)' == ''">4194304</Gen0MaxBudget>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(OutputType)' == 'Exe' AND '$(IsTestProject)' != 'true' AND '$(Gen0MaxBudget)' != ''">
+    <RuntimeHostConfigurationOption Include="System.GC.Gen0MaxBudget" Value="$(Gen0MaxBudget)" />
+  </ItemGroup>
 
   <PropertyGroup Condition="'$(OutputType)' == 'Exe' AND '$(IsTestProject)' != 'true' AND '$(Configuration)' == 'Release'">
     <DebuggerSupport>false</DebuggerSupport>
