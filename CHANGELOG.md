@@ -11,7 +11,10 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
-_No notable changes since the last release._
+### Changed
+- **terminal:** Block on key input and skip unchanged idle frames; rescan the VRChat log dir every 5 s (960d706)
+- **relay:** Stop allocating per chunk and per manifest line (1bdf338)
+- **build:** Cap the gen0 GC budget at 4 MB for the shipped exes (8c07082)
 
 ---
 
