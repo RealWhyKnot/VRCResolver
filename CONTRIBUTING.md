@@ -10,7 +10,7 @@ Thanks for your interest.
 
 ## Setting up
 
-You need: Windows 10/11 x64, .NET 10 SDK, PowerShell 5.1+, Git.
+You need: Windows 10/11 x64, .NET 11 SDK, PowerShell 5.1+, Git.
 
 ```powershell
 git clone https://github.com/RealWhyKnot/VRCResolver.git
