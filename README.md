@@ -4,15 +4,11 @@ VRChat plays videos through yt-dlp. Stock yt-dlp is slow, breaks whenever YouTub
 
 Formerly WKVRCProxy.
 
-**[Report a bug](https://github.com/RealWhyKnot/VRCResolver/issues/new?template=bug_report.yml)**
+[Report a bug](https://github.com/RealWhyKnot/VRCResolver/issues/new?template=bug_report.yml)
 
-## Features
+## What you get
 
-- **Works in public worlds.** Streams are served from `localhost.youtube.com:{port}`, which AVPro's trust list accepts.
-- **Resolves on a server, not your PC.** Regional blocks and rate limits don't apply, and the server updates its yt-dlp nightly, so YouTube breakage gets fixed without you doing anything.
-- **Fast.** 2-3 seconds for a new URL, about 20 ms for a repeat.
-- **Better quality.** 1080p HLS instead of 360p mp4.
-- **Never breaks playback.** Any failure hands the URL to VRChat's original yt-dlp.
+Streams are served from `localhost.youtube.com:{port}`, which AVPro's trust list accepts, so they work in public worlds. Resolving happens on a server rather than your PC, so regional blocks and rate limits don't apply, and the server updates its yt-dlp nightly. A new URL takes 2-3 seconds and a repeat about 20 ms. You get 1080p HLS instead of 360p mp4. Any failure hands the URL to VRChat's original yt-dlp.
 
 No DRM bypass, no content hosting, no YouTube login.
 
@@ -23,8 +19,8 @@ No DRM bypass, no content hosting, no YouTube login.
 3. Run `vrcresolver.exe` and accept the one-time UAC prompt. It adds `127.0.0.1 localhost.youtube.com` to your hosts file, which public-world playback needs.
 4. Launch VRChat. When the console shows `[mesh] connected`, paste a video URL into any in-world player.
 
-**Update:** type `/update` in the console.
-**Uninstall:** run `vrcresolver.Uninstaller.exe`. It restores the original `yt-dlp.exe`, removes the hosts entry, and wipes `%LOCALAPPDATA%Low\vrcresolver\`. There is no confirmation prompt.
+Update: type `/update` in the console.
+Uninstall: run `vrcresolver.Uninstaller.exe`. It restores the original `yt-dlp.exe`, removes the hosts entry, and wipes `%LOCALAPPDATA%Low\vrcresolver\`. There is no confirmation prompt.
 
 Windows 10/11 x64. Self-contained, no installer.
 

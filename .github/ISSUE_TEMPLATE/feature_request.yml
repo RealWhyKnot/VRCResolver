@@ -16,7 +16,7 @@ body:
       label: Problem
       description: |
         What are you trying to do that vrcresolver doesn't currently support? Describe the situation, not a solution. The clearer the problem, the easier the design conversation.
-      placeholder: "When I paste a URL from <host>, the resolver returns a 480p stream even though the host serves 1080p. I'd like a way to …"
+      placeholder: "When I paste a URL from <host>, the resolver returns a 480p stream even though the host serves 1080p. I'd like a way to ..."
     validations:
       required: true
 
@@ -57,7 +57,7 @@ body:
     attributes:
       label: Contribution
       options:
-        - label: I'd be willing to open a PR for this (bonus — not required).
+        - label: I'd be willing to open a PR for this (optional).
           required: false
 
   - type: textarea

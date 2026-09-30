@@ -1,12 +1,12 @@
 # Security policy
 
-vrcresolver is alpha-stage software with **elevated trust requirements** on the user's machine: it modifies the Windows hosts file (admin), patches a binary VRChat ships (`yt-dlp.exe`), and runs a local relay HTTP server. Vulnerability reports are taken seriously even though the project is small.
+vrcresolver is alpha-stage software with elevated trust requirements on the user's machine: it modifies the Windows hosts file (admin), patches a binary VRChat ships (`yt-dlp.exe`), and runs a local relay HTTP server. Vulnerability reports are taken seriously even though the project is small.
 
 ## Reporting
 
 **Do not open a public issue for security reports.**
 
-Use **[GitHub Security Advisories](https://github.com/RealWhyKnot/VRCResolver/security/advisories/new)** — this gives a private channel and lets us coordinate a fix and disclosure timeline.
+Use [GitHub Security Advisories](https://github.com/RealWhyKnot/VRCResolver/security/advisories/new). It's a private channel where we can coordinate a fix and disclosure timeline.
 
 We try to acknowledge new reports within **7 days** and aim for an initial assessment within **14 days**. There is no bug bounty.
 
@@ -22,7 +22,7 @@ We try to acknowledge new reports within **7 days** and aim for an initial asses
 
 - VRChat client behaviour, AVPro behaviour, or the trusted-host allowlist itself.
 - Issues that require an attacker to already have admin access on the user's machine.
-- "Loading failed" / playback failures — those are functional bugs, not security issues; use the bug-report issue template.
+- "Loading failed" / playback failures are functional bugs, not security issues. Use the bug-report issue template.
 
 ## Disclosure
 

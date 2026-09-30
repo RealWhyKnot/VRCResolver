@@ -4,7 +4,7 @@ Releases are tag-driven and fully automated. Pushing a `v*` tag triggers
 [release.yml](workflows/release.yml), which builds the dist, publishes a
 GitHub release, and verifies the published body matches the input. The
 release body is generated from `git log` between the previous release base
-and the current tag -- there is no hand-written narrative path. Stable
+and the current tag. There is no hand-written narrative path. Stable
 release tags use the previous stable tag as the base, so beta release notes
 since the last stable are included when the stable release is published.
 Beta and dev tags use the nearest previous tag. If a release needs content
@@ -85,7 +85,7 @@ entirely; merge commits are excluded by `--no-merges`.
 
 The generator emits a workflow warning for each non-conforming subject so
 the operator can amend if desired. Non-conforming subjects ship under
-`Other Changes` -- no fail.
+`Other Changes` and the build doesn't fail.
 
 ## Author handle remap
 
@@ -138,8 +138,8 @@ replace via `gh release edit`.
 
 ## Extras file
 
-For content that the auto-generator can't capture -- server-side coordination
-notes, migration instructions, operational context, etc. -- create
+For content that the auto-generator can't capture, server-side coordination
+notes, migration instructions, operational context, etc., create
 a markdown file at `.github/release-extras/<tag>.md` BEFORE pushing the tag.
 The file's contents get appended verbatim below the auto section with a
 `---` separator and an `## Additional notes` heading.
@@ -191,7 +191,7 @@ promotion-branch PR flow.
 | `No commits found in range` | Check the tag's parent reachability. Either the prev-tag detection failed (push the actual prev tag) or every commit is `[skip changelog]` (push a real change before tagging). |
 | `Non-ASCII characters in release body after normalisation` | Find the offending commit subject, amend it to use ASCII, force-push the tag at the new SHA. Or add the char to `$asciiSubs` in the generator. |
 | `Voice or internal-only-vocabulary patterns in release body` | Amend the offending commit subject. Or `[skip changelog]` it if the term is genuinely unavoidable. |
-| `Generate-ReleaseNotes.ps1 returned empty output` | The script failed silently or the slice was empty. Check the workflow log for warnings; if the slice really is empty, the empty-slice guard would have already thrown -- so this is a script bug. |
+| `Generate-ReleaseNotes.ps1 returned empty output` | The script failed silently or the slice was empty. Check the workflow log for warnings; if the slice really is empty, the empty-slice guard would have already thrown, so this is a script bug. |
 | `Release body still differs after auto-correct` | A GitHub-side issue. Compare the input file in the runner artifacts against what `gh release view` returns. Often a trailing-whitespace or unicode-form difference. |
 | `createCommitOnBranch returned GraphQL errors` | Main moved after the workflow read its head, or GitHub rejected the file update. Re-run the workflow after main settles; if it repeats, inspect the GraphQL error text and push the same CHANGELOG.md promotion in the next source commit. |
 
@@ -201,7 +201,7 @@ The workflow + scripts are versioned alongside the code. Changes go through
 the same PR-or-direct-to-main flow as anything else. After landing a
 workflow change, the next genuine release exercises it. If the workflow
 breaks mid-release, the tag is already pushed and gh's partial state may
-need cleanup -- in extreme cases, `gh release delete <tag> --cleanup-tag`
+need cleanup. In extreme cases, `gh release delete <tag> --cleanup-tag`
 and re-tag at the same SHA after the fix.
 
 The build pipeline cosmetic fixes (e.g. tweaking the IsDevBuild detection

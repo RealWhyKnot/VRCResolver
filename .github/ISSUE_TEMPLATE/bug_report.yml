@@ -1,12 +1,12 @@
 name: Bug report
-description: vrcresolver is misbehaving — a URL doesn't resolve, doesn't play, the patcher can't reach VRChat, the UI is broken, etc.
+description: vrcresolver is misbehaving: a URL doesn't resolve or play, the patcher can't reach VRChat, the UI is broken, etc.
 title: "[bug] "
 labels: ["bug", "needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for filing a report. vrcresolver is alpha — most "video doesn't play" reports come down to one of:
+        Thanks for filing a report. vrcresolver is alpha. Most "video doesn't play" reports come down to one of:
         - a strategy returned a URL AVPro can't actually play (look for "Demoted" chips in the Logs view),
         - the hosts-file mapping `127.0.0.1 localhost.youtube.com` didn't take (declined UAC, AV blocked it),
         - the host needs a direct connection and isn't on the deny-list (`vr-m.net` etc.).
@@ -38,7 +38,7 @@ body:
     id: vrchat
     attributes:
       label: VRChat build
-      description: Visible in VRChat's Settings → System.
+      description: Visible in VRChat's Settings -> System.
       placeholder: "VRChat 2026.x.x"
     validations:
       required: false
@@ -47,7 +47,7 @@ body:
     id: windows
     attributes:
       label: Windows version
-      description: `Windows + R` → type `winver` → press Enter.
+      description: `Windows + R` -> type `winver` -> press Enter.
       placeholder: "Windows 11 26200"
     validations:
       required: false
@@ -68,8 +68,8 @@ body:
     id: url
     attributes:
       label: Failing URL (or domain)
-      description: Redact the path if private — the host is what matters most. If it's not a URL bug, write `n/a`.
-      placeholder: "https://example.com/watch?v=… or just `example.com`"
+      description: Redact the path if private. The host is what matters most. If it's not a URL bug, write `n/a`.
+      placeholder: "https://example.com/watch?v=... or just `example.com`"
     validations:
       required: true
 
@@ -80,10 +80,10 @@ body:
       description: VRChat's output log is at `%LOCALAPPDATA%Low\VRChat\VRChat\output_log_*.txt`.
       options:
         - "Unsure / didn't check"
-        - "Yes — exactly that message"
+        - "Yes, exactly that message"
         - "No"
         - "Different AVPro error (paste it under 'Anything else')"
-        - "n/a — not a playback bug"
+        - "n/a: not a playback bug"
     validations:
       required: true
 
@@ -93,13 +93,13 @@ body:
       label: Was the URL relay-wrapped or direct-connect?
       description: |
         In the **Logs** tab (filter to the failing request's correlation ID), look for:
-        - `URL relay-wrapped on port …` → wrapped
-        - `Relay wrap skipped for <host>` → direct
+        - `URL relay-wrapped on port ...` -> wrapped
+        - `Relay wrap skipped for <host>` -> direct
       options:
         - "Unknown / didn't see either log line"
-        - "Relay-wrapped (`URL relay-wrapped on port …`)"
-        - "Direct-connect (`Relay wrap skipped for …`)"
-        - "n/a — not a playback bug"
+        - "Relay-wrapped (`URL relay-wrapped on port ...`)"
+        - "Direct-connect (`Relay wrap skipped for ...`)"
+        - "n/a: not a playback bug"
     validations:
       required: true
 
@@ -111,9 +111,9 @@ body:
         Open `C:\Windows\System32\drivers\etc\hosts` (read-only OK). Look for `127.0.0.1 localhost.youtube.com`.
       options:
         - "Unsure"
-        - "Yes — entry is present"
-        - "No — entry missing"
-        - "n/a — not a playback bug"
+        - "Yes, entry is present"
+        - "No, entry missing"
+        - "n/a: not a playback bug"
     validations:
       required: true
 
@@ -122,7 +122,7 @@ body:
     attributes:
       label: Strategies seen in the Logs view (tick all that appeared for the failing request)
       description: |
-        Helps us tell where in the cascade things broke. Tick the ones you saw in the correlation-ID block — leave unticked if not a playback bug.
+        Helps us tell where in the cascade things broke. Tick the ones you saw in the correlation-ID block. Leave unticked if not a playback bug.
       options:
         - label: "`tier0:streamlink` (Twitch / live-HLS)"
         - label: "`tier1:plain`"
@@ -135,21 +135,21 @@ body:
         - label: "`tier2:cloud-whyknot`"
         - label: "`tier3:yt-dlp-og` (VRChat's pinned yt-dlp)"
         - label: "`tier4:passthrough`"
-        - label: "Strategy was demoted — `Strategy demoted` line appeared"
+        - label: "Strategy was demoted (`Strategy demoted` line appeared)"
 
   - type: textarea
     id: logs
     attributes:
       label: Logs view output (correlation-ID block)
       description: |
-        From the **Logs** tab in the UI, paste every line for the failing request. Each request has a correlation ID like `[a1b2c3d4]` — grab the whole block from `Starting resolution for: …` through to the failure or final resolution. Don't summarize; paste verbatim. If the bug isn't a resolution issue, paste any relevant log lines you can find (the `%LOCALAPPDATA%Low\vrcresolver\logs\` files carry the same content).
+        From the **Logs** tab in the UI, paste every line for the failing request. Each request has a correlation ID like `[a1b2c3d4]`. Grab the whole block from `Starting resolution for: ...` through to the failure or final resolution. Don't summarize; paste verbatim. If the bug isn't a resolution issue, paste any relevant log lines you can find (the `%LOCALAPPDATA%Low\vrcresolver\logs\` files carry the same content).
       render: text
       placeholder: |
-        [a1b2c3d4] Starting resolution for: https://…
+        [a1b2c3d4] Starting resolution for: https://...
         [a1b2c3d4] [tier1:plain] yt-dlp ok in 320ms
         [a1b2c3d4] URL relay-wrapped on port 23119
         [a1b2c3d4] [WARNING] [Playback] AVPro rejected resolved URL from 'tier1:plain'
-        …
+        ...
     validations:
       required: true
 
@@ -162,7 +162,7 @@ body:
         1. Launched vrcresolver, then VRChat.
         2. Joined world "Movie & Chill".
         3. Pasted the URL above into the player.
-        4. Player showed "Loading…" indefinitely.
+        4. Player showed "Loading..." indefinitely.
     validations:
       required: true
 

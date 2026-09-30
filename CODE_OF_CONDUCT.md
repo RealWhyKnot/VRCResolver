@@ -6,7 +6,7 @@ The full text is published at: https://www.contributor-covenant.org/version/2/1/
 
 ## TL;DR
 
-Be respectful. Assume good faith. Critique ideas, not people. Harassment, personal attacks, sexualised content, and discriminatory language are not welcome — in issues, PRs, Discussions, or anywhere else tied to this project.
+Be respectful. Assume good faith. Critique ideas, not people. Harassment, personal attacks, sexualised content, and discriminatory language are not welcome in issues, PRs, Discussions, or anywhere else tied to this project.
 
 ## Scope
 

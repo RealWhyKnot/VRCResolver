@@ -34,7 +34,7 @@ Tokens that the resolver could not compute render as the literal token string. T
 
 ## Editing existing templates
 
-Templates are read verbatim and pass through the same scrub gates as commit subjects. Avoid marketing puffery, internal-tooling vocabulary, AI-shaped phrasing, and any character outside printable ASCII. The list of forbidden patterns lives in `Generate-ReleaseNotes.ps1` near the bottom.
+Templates are read verbatim and pass through the same scrub gates as commit subjects. Avoid marketing language, internal-tooling vocabulary, and any character outside printable ASCII. The list of forbidden patterns lives in `Generate-ReleaseNotes.ps1` near the bottom.
 
 ## Skipping a section
 
