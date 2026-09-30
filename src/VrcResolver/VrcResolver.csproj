@@ -13,7 +13,7 @@
     <Product>VRCResolver</Product>
     <AssemblyTitle>VRCResolver watchdog</AssemblyTitle>
 
-    <NoWarn>$(NoWarn);IL2026;IL2055;IL2057;IL2060;IL2066;IL2067;IL2070;IL2071;IL2104;IL3050;IL3053</NoWarn>
+    <NoWarn>$(NoWarn);IL2104;IL3053</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

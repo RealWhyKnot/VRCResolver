@@ -4,7 +4,6 @@
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <PublishReadyToRun>true</PublishReadyToRun>
 
     <UseSizeOptimizedLinq>true</UseSizeOptimizedLinq>
   </PropertyGroup>
