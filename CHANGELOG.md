@@ -35,6 +35,8 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **relay:** Drop the late-segment hitch warning that fired on normal playback pacing (3233f51)
 - **ipc:** Keep videos on our resolver while VRChat's own resolver is blocked on that site (4cdb236)
 - **vrclog:** Stop counting a play cut short by a world change as a failure (41e9ae7)
+- **mesh:** Resend a resolve that was in flight when the socket dropped (f24caa2)
+- **mesh:** Reset reconnect backoff when the server confirms a cached welcome (cda9268)
 
 ---
 
