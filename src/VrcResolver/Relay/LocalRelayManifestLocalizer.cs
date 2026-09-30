@@ -13,6 +13,9 @@ internal static partial class LocalRelayManifestLocalizer
 {
     public const int MaxManifestBytes = 64 * 1024 * 1024;
 
+    private const int FlushThresholdChars = 8 * 1024;
+    private const int LargeLineChars = 4 * 1024;
+
     private static readonly HashSet<string> s_manifestExts = new(StringComparer.OrdinalIgnoreCase)
     {
         "m3u8",
@@ -91,6 +94,7 @@ internal static partial class LocalRelayManifestLocalizer
         bool changed = false;
         bool exceeded = false;
         bool first = true;
+        int buffered = 0;
         try
         {
             while (true)
@@ -105,12 +109,28 @@ internal static partial class LocalRelayManifestLocalizer
 
                 if (!first)
                 {
-                    await writer.WriteAsync('\n').ConfigureAwait(false);
+                    writer.Write('\n');
                     charsOut++;
+                    buffered++;
                 }
                 first = false;
 
-                await writer.WriteAsync(localized.AsMemory(), ct).ConfigureAwait(false);
+                if (localized.Length >= LargeLineChars)
+                {
+                    await writer.FlushAsync(ct).ConfigureAwait(false);
+                    await writer.WriteAsync(localized.AsMemory(), ct).ConfigureAwait(false);
+                    buffered = 0;
+                }
+                else
+                {
+                    writer.Write(localized);
+                    buffered += localized.Length;
+                    if (buffered >= FlushThresholdChars)
+                    {
+                        await writer.FlushAsync(ct).ConfigureAwait(false);
+                        buffered = 0;
+                    }
+                }
                 charsOut += localized.Length;
 
                 if (charsOut > maxChars)
@@ -131,18 +151,30 @@ internal static partial class LocalRelayManifestLocalizer
 
     private static string LocalizeLine(string line)
     {
-        string localized = RewriteAbsoluteFirstPartyProxyUrls(line);
-        if (!localized.StartsWith("#", StringComparison.Ordinal)
+        string localized = line.Contains("://", StringComparison.Ordinal)
+            ? RewriteAbsoluteFirstPartyProxyUrls(line)
+            : line;
+        if (!localized.StartsWith('#')
             && !string.IsNullOrWhiteSpace(localized))
         {
-            string trimmed = localized.Trim();
+            ReadOnlySpan<char> trimmed = localized.AsSpan().Trim();
             if (!trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
-                && TryBuildLocalRelativeTarget(trimmed, out string replacement))
+                && TryBuildLocalRelativeTarget(
+                    trimmed.Length == localized.Length ? localized : trimmed.ToString(),
+                    out string replacement))
             {
-                int start = localized.IndexOf(trimmed, StringComparison.Ordinal);
-                localized = localized.Substring(0, start)
-                    + replacement
-                    + localized.Substring(start + trimmed.Length);
+                if (trimmed.Length == localized.Length)
+                {
+                    localized = replacement;
+                }
+                else
+                {
+                    int start = localized.AsSpan().IndexOf(trimmed, StringComparison.Ordinal);
+                    localized = string.Concat(
+                        localized.AsSpan(0, start),
+                        replacement,
+                        localized.AsSpan(start + trimmed.Length));
+                }
             }
         }
         return localized;
@@ -181,8 +213,19 @@ internal static partial class LocalRelayManifestLocalizer
 
     private static string StableTargetNamespace(string targetUrl)
     {
-        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(targetUrl));
-        return Convert.ToHexString(hash, 0, 8).ToLowerInvariant();
+        Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
+        int max = Encoding.UTF8.GetMaxByteCount(targetUrl.Length);
+        if (max > 1024)
+        {
+            SHA256.HashData(Encoding.UTF8.GetBytes(targetUrl), hash);
+        }
+        else
+        {
+            Span<byte> bytes = stackalloc byte[1024];
+            int written = Encoding.UTF8.GetBytes(targetUrl, bytes);
+            SHA256.HashData(bytes[..written], hash);
+        }
+        return Convert.ToHexStringLower(hash[..8]);
     }
 
     private static bool HasManifestExtension(string path)

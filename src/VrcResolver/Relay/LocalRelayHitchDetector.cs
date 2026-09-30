@@ -90,7 +90,17 @@ internal static class LocalRelayHitchDetector
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
             return false;
 
-        string[] parts = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return TryParseLazyHlsSegmentPath(uri.AbsolutePath, out streamId, out segment);
+    }
+
+    private static bool TryParseLazyHlsSegmentPath(string path, out string streamId, out int segment)
+    {
+        streamId = "";
+        segment = -1;
+        if (!path.Contains("lazy-hls", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        string[] parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         for (int i = 0; i < parts.Length - 2; i++)
         {
             if (!string.Equals(parts[i], "lazy-hls", StringComparison.OrdinalIgnoreCase))
@@ -116,42 +126,51 @@ internal static class LocalRelayHitchDetector
         if (!string.Equals(sample.Method, "GET", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        var reasons = new List<string>(4);
-        bool isLazySegment = TryParseLazyHlsSegment(sample.TargetUrl, out string streamId, out int segment);
-        bool isSegment = isLazySegment || IsLikelySegment(sample.LocalPath, sample.TargetUrl);
-        bool isManifest = !isSegment && IsLikelyManifest(sample.LocalPath, sample.TargetUrl);
+        List<string>? reasons = null;
+        string streamId = "";
+        int segment = -1;
+        bool isLazySegment = false;
+        string path = sample.TargetUrl;
+        if (Uri.TryCreate(sample.TargetUrl, UriKind.Absolute, out var uri))
+        {
+            path = uri.AbsolutePath;
+            isLazySegment = TryParseLazyHlsSegmentPath(path, out streamId, out segment);
+        }
+
+        bool isSegment = isLazySegment || EndsWithSegmentExtension(path) || EndsWithSegmentExtension(sample.LocalPath);
+        bool isManifest = !isSegment && (EndsWithManifestExtension(path) || EndsWithManifestExtension(sample.LocalPath));
 
         int previousSegment = -1;
         long gapMs = -1;
         if (isSegment)
         {
             if (sample.StatusCode >= 400)
-                reasons.Add("segment-http-" + sample.StatusCode.ToString(CultureInfo.InvariantCulture));
+                AddReason(ref reasons, "segment-http-" + sample.StatusCode.ToString(CultureInfo.InvariantCulture));
             if (!string.IsNullOrWhiteSpace(sample.Failure))
-                reasons.Add("segment-" + sample.Failure);
+                AddReason(ref reasons, "segment-" + sample.Failure);
             if (sample.HeaderMilliseconds >= SegmentSlowHeaderMs)
-                reasons.Add("slow-upstream-headers");
+                AddReason(ref reasons, "slow-upstream-headers");
             if (sample.TotalMilliseconds >= SegmentSlowTotalMs)
-                reasons.Add("slow-segment-total");
+                AddReason(ref reasons, "slow-segment-total");
             if (sample.LazyHlsWaitMilliseconds >= ServerGenerationWaitMs)
-                reasons.Add("server-generation-wait");
+                AddReason(ref reasons, "server-generation-wait");
 
             if (isLazySegment)
-                AddSequenceReasons(streamId, segment, nowUtc, reasons, out previousSegment, out gapMs);
+                AddSequenceReasons(streamId, segment, nowUtc, ref reasons, out previousSegment, out gapMs);
         }
         else if (isManifest)
         {
             if (sample.StatusCode >= 400)
-                reasons.Add("manifest-http-" + sample.StatusCode.ToString(CultureInfo.InvariantCulture));
+                AddReason(ref reasons, "manifest-http-" + sample.StatusCode.ToString(CultureInfo.InvariantCulture));
             if (!string.IsNullOrWhiteSpace(sample.Failure))
-                reasons.Add("manifest-" + sample.Failure);
+                AddReason(ref reasons, "manifest-" + sample.Failure);
             if (sample.HeaderMilliseconds >= ManifestSlowHeaderMs)
-                reasons.Add("slow-manifest-headers");
+                AddReason(ref reasons, "slow-manifest-headers");
             if (sample.TotalMilliseconds >= ManifestSlowTotalMs)
-                reasons.Add("slow-manifest-total");
+                AddReason(ref reasons, "slow-manifest-total");
         }
 
-        if (reasons.Count == 0)
+        if (reasons == null)
             return null;
 
         return new LocalRelayHitchDiagnostic(
@@ -165,11 +184,17 @@ internal static class LocalRelayHitchDetector
             sample.TotalMilliseconds);
     }
 
+    private static void AddReason(ref List<string>? reasons, string reason)
+    {
+        reasons ??= new List<string>(4);
+        reasons.Add(reason);
+    }
+
     private static void AddSequenceReasons(
         string streamId,
         int segment,
         DateTime nowUtc,
-        List<string> reasons,
+        ref List<string>? reasons,
         out int previousSegment,
         out long gapMs)
     {
@@ -192,11 +217,11 @@ internal static class LocalRelayHitchDetector
                 gapMs = Math.Max(0, (long)(nowUtc - state.LastSeenUtc).TotalMilliseconds);
 
             if (state.LastSegment == segment && gapMs >= 0 && gapMs <= RetryWindowMs)
-                reasons.Add("segment-retry");
+                AddReason(ref reasons, "segment-retry");
             else if (state.LastSegment >= 0 && segment > state.LastSegment + 1)
-                reasons.Add("segment-skip");
+                AddReason(ref reasons, "segment-skip");
             else if (state.LastSegment >= 0 && segment < state.LastSegment)
-                reasons.Add("segment-backtrack");
+                AddReason(ref reasons, "segment-backtrack");
 
             state.LastSegment = segment;
             state.LastSeenUtc = nowUtc;
@@ -209,32 +234,16 @@ internal static class LocalRelayHitchDetector
             s_streams.TryRemove(oldKey, out _);
     }
 
-    private static bool IsLikelySegment(string localPath, string targetUrl)
-    {
-        string path = PathFor(targetUrl);
-        return EndsWithAny(path, ".ts", ".m4s", ".mp4")
-            || EndsWithAny(localPath, ".ts", ".m4s", ".mp4");
-    }
+    private static bool EndsWithSegmentExtension(string? value)
+        => value != null
+            && (value.EndsWith(".ts", StringComparison.OrdinalIgnoreCase)
+                || value.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase)
+                || value.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase));
 
-    private static bool IsLikelyManifest(string localPath, string targetUrl)
-    {
-        string path = PathFor(targetUrl);
-        return EndsWithAny(path, ".m3u8", ".mpd")
-            || EndsWithAny(localPath, ".m3u8", ".mpd");
-    }
-
-    private static string PathFor(string url)
-    {
-        return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.AbsolutePath : url;
-    }
-
-    private static bool EndsWithAny(string value, params string[] suffixes)
-    {
-        foreach (string suffix in suffixes)
-            if ((value ?? "").EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-                return true;
-        return false;
-    }
+    private static bool EndsWithManifestExtension(string? value)
+        => value != null
+            && (value.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)
+                || value.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase));
 
     private static bool TryParseSegmentFile(string name, out int segment)
     {

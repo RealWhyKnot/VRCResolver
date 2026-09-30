@@ -82,7 +82,7 @@ internal static class WatchdogStats
         if (isUpstreamTarget)
             Interlocked.Add(ref _upstreamRelayBytesTotal, bytes);
         RecordRelayBandwidth(bytes, nowUtc);
-        TouchRelay(targetUrl, bytes, nowUtc);
+        TouchRelay(isUpstreamTarget, nowUtc);
     }
 
     public static bool ClassifyUpstreamTarget(string targetUrl) => IsUpstreamTarget(targetUrl);
@@ -152,11 +152,11 @@ internal static class WatchdogStats
         }
     }
 
-    private static void TouchRelay(string targetUrl, long bytes, DateTime nowUtc)
+    private static void TouchRelay(bool isUpstreamTarget, DateTime nowUtc)
     {
         long nowTicks = nowUtc.Ticks;
         Interlocked.Exchange(ref _lastRelayTicksUtc, nowTicks);
-        if (bytes > 0 && IsUpstreamTarget(targetUrl))
+        if (isUpstreamTarget)
             Interlocked.Exchange(ref _lastUpstreamRelayTicksUtc, nowTicks);
     }
 

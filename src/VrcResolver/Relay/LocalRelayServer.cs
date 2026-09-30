@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Net;
 using System.Runtime.Versioning;
@@ -318,27 +319,29 @@ internal sealed partial class LocalRelayServer : IDisposable
 
             bodyStarted = true;
             using var upstream = await resp.Content.ReadAsStreamAsync(_cts.Token).ConfigureAwait(false);
-            byte[] buf = new byte[CopyBufferSize];
-            bool isUpstreamTarget = WatchdogStats.ClassifyUpstreamTarget(targetUrl);
-            while (!_cts.IsCancellationRequested)
+            byte[] buf = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+            try
             {
+                Memory<byte> chunk = buf.AsMemory(0, CopyBufferSize);
+                bool isUpstreamTarget = WatchdogStats.ClassifyUpstreamTarget(targetUrl);
                 using var idle = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                idle.CancelAfter(_bodyIdleTimeout);
-                int n;
-                try { n = await upstream.ReadAsync(buf.AsMemory(), idle.Token).ConfigureAwait(false); }
-                catch (OperationCanceledException) when (!_cts.IsCancellationRequested && idle.IsCancellationRequested)
+                using var abortOnStall = idle.Token.Register(static state => { try { ((System.Net.HttpListenerResponse)state!).Abort(); } catch { } }, ctx.Response);
+                while (!_cts.IsCancellationRequested)
                 {
-                    failure = "body_idle_timeout";
-                    ConsoleUx.Warn(LogComponent.Relay, "stream idle timeout for " + ShortUrl(targetUrl));
-                    return;
-                }
-                if (n == 0) break;
-                idle.CancelAfter(_bodyIdleTimeout);
-                using (idle.Token.Register(static state => { try { ((System.Net.HttpListenerResponse)state!).Abort(); } catch { } }, ctx.Response))
-                {
+                    idle.CancelAfter(_bodyIdleTimeout);
+                    int n;
+                    try { n = await upstream.ReadAsync(chunk, idle.Token).ConfigureAwait(false); }
+                    catch (OperationCanceledException) when (!_cts.IsCancellationRequested && idle.IsCancellationRequested)
+                    {
+                        failure = "body_idle_timeout";
+                        ConsoleUx.Warn(LogComponent.Relay, "stream idle timeout for " + ShortUrl(targetUrl));
+                        return;
+                    }
+                    if (n == 0) break;
+                    idle.CancelAfter(_bodyIdleTimeout);
                     try
                     {
-                        await ctx.Response.OutputStream.WriteAsync(buf.AsMemory(0, n), _cts.Token).ConfigureAwait(false);
+                        await ctx.Response.OutputStream.WriteAsync(chunk[..n], _cts.Token).ConfigureAwait(false);
                     }
                     catch (Exception) when (idle.IsCancellationRequested && !_cts.IsCancellationRequested)
                     {
@@ -346,9 +349,13 @@ internal sealed partial class LocalRelayServer : IDisposable
                         ConsoleUx.Warn(LogComponent.Relay, "client write stalled for " + ShortUrl(targetUrl));
                         return;
                     }
+                    bytesOut += n;
+                    WatchdogStats.RecordRelayBytes(targetUrl, isUpstreamTarget, n);
                 }
-                bytesOut += n;
-                WatchdogStats.RecordRelayBytes(targetUrl, isUpstreamTarget, n);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buf);
             }
             if (resp.Content.Headers.ContentLength is long declared && bytesOut < declared && !_cts.IsCancellationRequested)
             {
