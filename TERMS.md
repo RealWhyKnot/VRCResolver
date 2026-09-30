@@ -84,13 +84,13 @@ not stored on our servers. When you close the tab, the share stops working.
 
 The Service reaches other people's systems, and in some cases your browser reaches them directly:
 
-- **Upstream media hosts.** Whatever the URL you paste points at. Their terms apply to their
+- Upstream media hosts. Whatever the URL you paste points at. Their terms apply to their
   material.
-- **The Internet Archive.** Archive browsing queries archive.org from your own browser. We do not
+- The Internet Archive. Archive browsing queries archive.org from your own browser. We do not
   proxy it, we do not host it, and archive.org's terms and privacy policy apply to that traffic.
-- **Popcorn (vr-m.net).** A third-party catalogue we query on your behalf. We neither operate it nor
+- Popcorn (vr-m.net). A third-party catalogue we query on your behalf. We neither operate it nor
   control what it returns.
-- **Cloudflare.** Sits in front of the Service as a network and security layer.
+- Cloudflare. Sits in front of the Service as a network and security layer.
 
 We do not control these services. We do not warrant their availability, accuracy, or lawfulness, and
 we accept no liability for them. Links and integrations are not endorsements. If a third party
