@@ -21,6 +21,7 @@ public class MeshResendAfterDropTests
     {
         private readonly HttpListener _listener = new();
         private readonly Func<int, WebSocket, string, Task> _onResolve;
+        private readonly Task? _laterConnectionsGate;
         private readonly CancellationTokenSource _cts = new();
         private int _connections;
 
@@ -28,9 +29,10 @@ public class MeshResendAfterDropTests
         public int Port { get; }
         public int Connections => Volatile.Read(ref _connections);
 
-        public FakeMeshServer(Func<int, WebSocket, string, Task> onResolve, Func<int, WebSocket, Task>? onConnect = null)
+        public FakeMeshServer(Func<int, WebSocket, string, Task> onResolve, Func<int, WebSocket, Task>? onConnect = null, Task? laterConnectionsGate = null)
         {
             _onResolve = onResolve;
+            _laterConnectionsGate = laterConnectionsGate;
             var probe = new TcpListener(IPAddress.Loopback, 0);
             probe.Start();
             Port = ((IPEndPoint)probe.LocalEndpoint).Port;
@@ -58,6 +60,7 @@ public class MeshResendAfterDropTests
                     ctx.Response.Close();
                     continue;
                 }
+                if (_laterConnectionsGate != null && Connections >= 1) await _laterConnectionsGate;
                 var wsCtx = await ctx.AcceptWebSocketAsync(null);
                 int index = Interlocked.Increment(ref _connections);
                 _ = ServeAsync(index, wsCtx.WebSocket, onConnect);
@@ -163,20 +166,27 @@ public class MeshResendAfterDropTests
     [Fact]
     public async Task Resolve_asked_while_reconnecting_waits_for_the_new_connection()
     {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = new FakeMeshServer(
             (conn, ws, id) => FakeMeshServer.ResolvedAsync(ws, id),
             (conn, ws) =>
             {
                 if (conn == 1) ws.Abort();
                 return Task.CompletedTask;
-            });
+            },
+            gate.Task);
         await using var client = ClientFor(server.Port, TimeSpan.FromSeconds(5));
         await client.StartAsync();
         await WaitUntilAsync(() => server.Connections >= 1);
         await WaitUntilAsync(() => !client.IsConnected);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var result = await client.ResolveAsync(Request(), cts.Token);
+        var pending = client.ResolveAsync(Request(), cts.Token);
+        await Task.Delay(300);
+        Assert.False(pending.IsCompleted);
+        Assert.Equal(1, server.Connections);
+        gate.SetResult();
+        var result = await pending;
 
         Assert.Equal(WireConstants.ActionResolved, result.Action);
         Assert.Equal(2, server.Resolves.ToArray()[0].Connection);
