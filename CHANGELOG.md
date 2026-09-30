@@ -11,6 +11,12 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
+_No notable changes since the last release._
+
+---
+
+## [v2026.9.30.0](https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.9.30.0) - 2026-09-30
+
 ### Added
 - **vrclog:** Warn when VRChat starts with no audio devices (26f83c1)
 
