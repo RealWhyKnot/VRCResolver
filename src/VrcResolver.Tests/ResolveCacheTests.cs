@@ -8,6 +8,7 @@ public class ResolveCacheTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly string _path;
+    private readonly List<ResolveCache> _caches = new();
 
     public ResolveCacheTests()
     {
@@ -18,7 +19,15 @@ public class ResolveCacheTests : IDisposable
 
     public void Dispose()
     {
+        foreach (var cache in _caches) cache.FlushNow();
         try { Directory.Delete(_tempDir, recursive: true); } catch { }
+    }
+
+    private ResolveCache NewCache()
+    {
+        var cache = new ResolveCache(_path);
+        _caches.Add(cache);
+        return cache;
     }
 
     private static ResolveResponse MakeResolved(string url, string? expiresAt)
@@ -41,14 +50,14 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Lookup_on_missing_file_returns_null()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         Assert.Null(cache.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, "req-1"));
     }
 
     [Fact]
     public void Store_then_Lookup_round_trips_with_id_restamped()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddHours(2).ToString("o"));
 
         cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "(mp4/best)[height<=?1080]", 1080, resp);
@@ -67,7 +76,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Lookup_with_different_player_misses()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddHours(1).ToString("o"));
         cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt", 1080, resp);
 
@@ -77,7 +86,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Lookup_with_different_format_misses()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddHours(1).ToString("o"));
         cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt-A", 1080, resp);
 
@@ -87,7 +96,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Lookup_with_different_node_misses()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddHours(1).ToString("o"));
         cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", "fmt", 1080, resp);
 
@@ -97,7 +106,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Store_skips_fallback_native_responses()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         var resp = new ResolveResponse
         {
             Action = WireConstants.ActionFallbackNative,
@@ -112,7 +121,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Store_applies_fallback_default_TTL_when_server_omits_expires_at()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", expiresAt: null);
         string? effective = cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, resp);
 
@@ -126,7 +135,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Lookup_treats_expired_entry_as_miss_and_evicts_it()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddSeconds(-60).ToString("o"));
         resp.ExpiresAt = DateTime.UtcNow.AddSeconds(5).ToString("o");
         cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, resp);
@@ -140,7 +149,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void EvictByUrl_drops_all_entries_for_that_url_across_all_player_format_combos()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         string url = "https://www.youtube.com/watch?v=stale";
         string future = DateTime.UtcNow.AddHours(1).ToString("o");
 
@@ -162,7 +171,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void EvictByUrl_drops_entries_by_resolved_playback_url()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         string sourceUrl = "https://www.youtube.com/watch?v=stale";
         string playbackUrl = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=abc";
         string future = DateTime.UtcNow.AddHours(1).ToString("o");
@@ -186,7 +195,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void TryGetSourceUrlForResolved_RoundTripsAfterStore()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         const string sourceUrl = "https://www.youtube.com/watch?v=abc";
         const string playbackUrl = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=xyz";
         var resp = new ResolveResponse
@@ -207,7 +216,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void TryGetSourceUrlForResolved_FalseWhenResolvedUrlUnknown()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         Assert.False(cache.TryGetSourceUrlForResolved(
             "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=missing",
             out string source));
@@ -237,7 +246,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Cap_evicts_oldest_fetched_at_first()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         string future = DateTime.UtcNow.AddHours(1).ToString("o");
 
         for (int i = 0; i < 502; i++)
@@ -256,13 +265,13 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void Persisted_state_survives_FlushNow_and_a_fresh_instance_load()
     {
-        var first = new ResolveCache(_path);
+        var first = NewCache();
         var resp = MakeResolved("https://www.youtube.com/watch?v=persist", DateTime.UtcNow.AddHours(2).ToString("o"));
         first.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=persist", "avpro", "fmt", 1080, resp);
         first.FlushNow();
         Assert.True(File.Exists(_path));
 
-        var second = new ResolveCache(_path);
+        var second = NewCache();
         var hit = second.Lookup("us1.vrcresolver.com", "https://www.youtube.com/watch?v=persist", "avpro", "fmt", 1080, "r-after-restart");
         Assert.NotNull(hit);
         string json = System.Text.Encoding.UTF8.GetString(hit.Value.Frame);
@@ -280,7 +289,7 @@ public class ResolveCacheTests : IDisposable
             "}}";
         File.WriteAllText(_path, handCrafted);
 
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         Assert.Equal(1, cache.Count);
     }
 
@@ -288,7 +297,7 @@ public class ResolveCacheTests : IDisposable
     public void Corrupt_file_loads_as_empty_cache()
     {
         File.WriteAllText(_path, "this is not json{[}");
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         Assert.Equal(0, cache.Count);
         var resp = MakeResolved("https://www.youtube.com/watch?v=x", DateTime.UtcNow.AddHours(1).ToString("o"));
         cache.Store("us1.vrcresolver.com", "https://www.youtube.com/watch?v=x", "avpro", null, 1080, resp);
@@ -300,7 +309,7 @@ public class ResolveCacheTests : IDisposable
     {
         File.WriteAllBytes(_path, new byte[ResolveCache.MaxCacheFileBytes + 1]);
 
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         Assert.Equal(0, cache.Count);
 
         Assert.False(File.Exists(_path));
@@ -310,7 +319,7 @@ public class ResolveCacheTests : IDisposable
     [Fact]
     public void DifferentMaxHeightsDoNotShareAnEntry()
     {
-        var cache = new ResolveCache(_path);
+        var cache = NewCache();
         const string url = "https://www.youtube.com/watch?v=q";
         var resp = MakeResolved(url, DateTime.UtcNow.AddHours(1).ToString("o"));
 

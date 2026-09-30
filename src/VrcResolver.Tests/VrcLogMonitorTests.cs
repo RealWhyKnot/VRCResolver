@@ -42,7 +42,7 @@ public sealed class VrcLogMonitorTests
     public void ProcessNewContent_load_failure_arms_og_hint_before_evicting_cache()
     {
         using var temp = new TempDir();
-        var cache = new ResolveCache(temp.ResolveCachePath);
+        var cache = temp.NewCache();
         var hint = new OgFallbackHint();
         using var monitor = new VrcLogMonitor(new MeshClient(), cache, hint);
         const string sourceUrl = "https://virtualfilm.institute/watch?v=abc";
@@ -62,7 +62,7 @@ public sealed class VrcLogMonitorTests
     public void MarkPlaybackFailure_arms_og_hint_for_silent_stall_path()
     {
         using var temp = new TempDir();
-        var cache = new ResolveCache(temp.ResolveCachePath);
+        var cache = temp.NewCache();
         var hint = new OgFallbackHint();
         using var monitor = new VrcLogMonitor(new MeshClient(), cache, hint);
         const string sourceUrl = "https://virtualfilm.institute/watch?v=abc";
@@ -220,10 +220,20 @@ public sealed class VrcLogMonitorTests
             ResolveCachePath = Path.Combine(_path, "resolve_cache.json");
         }
 
+        private readonly List<ResolveCache> _caches = new();
+
         public string ResolveCachePath { get; }
+
+        public ResolveCache NewCache()
+        {
+            var cache = new ResolveCache(ResolveCachePath);
+            _caches.Add(cache);
+            return cache;
+        }
 
         public void Dispose()
         {
+            foreach (var cache in _caches) cache.FlushNow();
             try { Directory.Delete(_path, recursive: true); } catch { }
         }
     }
