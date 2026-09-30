@@ -71,16 +71,20 @@ internal sealed class PatchManager : IDisposable
     }
 
     public PatchManager(string installDir)
+        : this(installDir, VrcPathLocator.Find(), AppPaths.StateRoot())
+    {
+    }
+
+    internal PatchManager(string installDir, string? vrcToolsDir, string stateDir)
     {
         _patchedYtDlpPath = Path.Combine(installDir, "tools", "yt-dlp.exe");
         _knownHashesPath = Path.Combine(installDir, "data", "wrapper_hashes.txt");
 
-        string stateDir = AppPaths.StateRoot();
         Directory.CreateDirectory(stateDir);
         _cleanExitFlagPath = Path.Combine(stateDir, "clean_exit.flag");
         _haltFlagPath = Path.Combine(stateDir, "halt.flag");
 
-        _vrcToolsDir = VrcPathLocator.Find();
+        _vrcToolsDir = vrcToolsDir;
     }
 
     private WrapperKind ClassifyTarget(string path)
@@ -226,7 +230,7 @@ internal sealed class PatchManager : IDisposable
         }
     }
 
-    private void TickOnce()
+    internal void TickOnce()
     {
         if (string.IsNullOrEmpty(_vrcToolsDir)) return;
 
@@ -248,6 +252,12 @@ internal sealed class PatchManager : IDisposable
             WrapperKind kind = ClassifyTarget(targetPath);
             if (kind == WrapperKind.VrcBundledYtDlp)
             {
+                if (!File.Exists(_patchedYtDlpPath))
+                {
+                    EmitTickStateChange(TickOutcome.WrapperMissing,
+                        "[patch] tick: our yt-dlp wrapper is missing from " + _patchedYtDlpPath + " -- leaving VRChat's yt-dlp.exe in place");
+                    return;
+                }
                 if (IsTargetInUse(targetPath))
                 {
                     EmitTickStateChange(TickOutcome.Locked,
