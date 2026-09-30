@@ -60,7 +60,7 @@ internal sealed class InteractiveTerminal : IDisposable
         _session.Start();
         _renderer.AttachOverlay();
         _renderer.Success("interactive terminal ready; type /help for commands.");
-        _inputTask = Task.Run(() => InputLoopAsync(_cts.Token));
+        _inputTask = StartInputThread(_cts.Token);
         _renderTask = Task.Run(() => RenderLoopAsync(_cts.Token));
     }
 
@@ -83,19 +83,31 @@ internal sealed class InteractiveTerminal : IDisposable
             && !string.Equals(disabled, "true", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task InputLoopAsync(CancellationToken ct)
+    private Task StartInputThread(CancellationToken ct)
+    {
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try { InputLoop(ct); }
+            finally { done.TrySetResult(); }
+        })
+        {
+            IsBackground = true,
+            Name = "terminal-input",
+        };
+        thread.Start();
+        return done.Task;
+    }
+
+    private void InputLoop(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                if (!Console.KeyAvailable)
-                {
-                    await Task.Delay(50, ct).ConfigureAwait(false);
-                    continue;
-                }
-
-                await HandleKeyAsync(Console.ReadKey(intercept: true), ct).ConfigureAwait(false);
+                ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+                if (ct.IsCancellationRequested) return;
+                HandleKeyAsync(key, ct).GetAwaiter().GetResult();
             }
             catch (OperationCanceledException) { return; }
             catch (InvalidOperationException) { return; }

@@ -17,6 +17,18 @@ public sealed class VrcLogMonitorTests
     }
 
     [Theory]
+    [InlineData(false, 0, true)]
+    [InlineData(false, 100, true)]
+    [InlineData(true, 1000, false)]
+    [InlineData(true, 4999, false)]
+    [InlineData(true, 5000, true)]
+    [InlineData(true, -1, true)]
+    public void ShouldRescanDirectory_follows_current_file_and_cadence(bool hasCurrent, long msSinceScan, bool expected)
+    {
+        Assert.Equal(expected, VrcLogMonitor.ShouldRescanDirectory(hasCurrent, msSinceScan));
+    }
+
+    [Theory]
     [InlineData("[Always] [Video Playback] Switched to 1920x1080", 1920, 1080)]
     [InlineData("[AVProVideo] PostStateChanged: OpeningToPlaying fwidth=1280 fheight=720", 1280, 720)]
     public void TryParseObservedResolution_extracts_width_and_height(string line, int expectedWidth, int expectedHeight)

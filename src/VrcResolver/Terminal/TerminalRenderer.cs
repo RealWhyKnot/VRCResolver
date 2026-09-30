@@ -394,6 +394,7 @@ internal sealed class TerminalRenderer
     {
         private readonly TerminalRenderer _owner;
         private readonly TerminalOverlayLine _line = new();
+        private readonly TerminalFrameGate _gate = new();
 
         public Overlay(TerminalRenderer owner)
         {
@@ -408,22 +409,41 @@ internal sealed class TerminalRenderer
         public void RenderLocked()
         {
             AppSettings settings = _owner._settings();
-            TerminalFrame frame = TerminalStatusFormatter.Format(
-                _owner._snapshot(),
-                _owner._bandwidth(),
-                DateTime.UtcNow,
-                _owner._meshConnected(),
-                _owner._spinnerIndex(),
-                ConsoleWidth(),
-                _owner._input(),
-                settings.Terminal.StatusLine,
-                settings.Terminal.Animations && _owner._animationsAvailable(),
-                _owner._unicodeAvailable(),
-                _owner._inputGhost(),
-                _owner._inputCursor());
+            WatchdogActivitySnapshot snapshot = _owner._snapshot();
+            WatchdogBandwidthSnapshot bandwidth = _owner._bandwidth();
+            DateTime now = DateTime.UtcNow;
+            int width = ConsoleWidth();
+            bool animations = settings.Terminal.Animations && _owner._animationsAvailable();
+            bool unicode = _owner._unicodeAvailable();
+            string input = _owner._input();
+            string ghost = _owner._inputGhost();
+            int cursor = _owner._inputCursor();
+            int spinner = _owner._spinnerIndex();
+            bool mesh = _owner._meshConnected();
+            bool resized = _gate.LastWidth != width;
 
-            _line.RenderIfChanged(Console.Out, frame, WriteRuns);
-            ParkCaret(frame.CursorColumn);
+            if (!_gate.TryGetCached(snapshot, bandwidth, now, mesh, spinner, width, input,
+                    settings.Terminal.StatusLine, animations, unicode, ghost, cursor, out TerminalFrame? frame))
+            {
+                frame = TerminalStatusFormatter.Format(
+                    snapshot,
+                    bandwidth,
+                    now,
+                    mesh,
+                    spinner,
+                    width,
+                    input,
+                    settings.Terminal.StatusLine,
+                    animations,
+                    unicode,
+                    ghost,
+                    cursor);
+                _gate.Store(frame);
+            }
+
+            bool written = _line.RenderIfChanged(Console.Out, frame!, WriteRuns);
+            if (written || resized)
+                ParkCaret(frame!.CursorColumn);
         }
 
         private static void ParkCaret(int column)

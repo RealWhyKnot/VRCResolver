@@ -101,6 +101,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
             "VRChat", "VRChat");
         string currentFile = "";
         long lastSize = 0;
+        long lastScanTicks = 0;
 
         while (!ct.IsCancellationRequested)
         {
@@ -113,14 +114,23 @@ internal sealed partial class VrcLogMonitor : IDisposable
                 }
 
                 FileInfo? latest = null;
-                try
+                long nowTicks = Environment.TickCount64;
+                if (ShouldRescanDirectory(currentFile.Length > 0, nowTicks - lastScanTicks))
                 {
-                    latest = new DirectoryInfo(vrcDir)
-                        .GetFiles("output_log*.txt")
-                        .OrderByDescending(f => f.LastWriteTime)
-                        .FirstOrDefault();
+                    lastScanTicks = nowTicks;
+                    latest = FindLatestLogFile(vrcDir);
                 }
-                catch { }
+                else
+                {
+                    var current = new FileInfo(currentFile);
+                    if (current.Exists)
+                        latest = current;
+                    else
+                    {
+                        lastScanTicks = nowTicks;
+                        latest = FindLatestLogFile(vrcDir);
+                    }
+                }
 
                 if (latest != null)
                 {
@@ -159,6 +169,28 @@ internal sealed partial class VrcLogMonitor : IDisposable
                 ConsoleUx.Warn(LogComponent.VrcLog, "monitor error: " + ex.GetType().Name + ": " + ex.Message);
                 try { await Task.Delay(5000, ct).ConfigureAwait(false); } catch { return; }
             }
+        }
+    }
+
+    internal const long DirectoryRescanIntervalMs = 5000;
+
+    internal static bool ShouldRescanDirectory(bool hasCurrentFile, long msSinceLastScan)
+    {
+        return !hasCurrentFile || msSinceLastScan < 0 || msSinceLastScan >= DirectoryRescanIntervalMs;
+    }
+
+    private static FileInfo? FindLatestLogFile(string vrcDir)
+    {
+        try
+        {
+            return new DirectoryInfo(vrcDir)
+                .GetFiles("output_log*.txt")
+                .OrderByDescending(f => f.LastWriteTime)
+                .FirstOrDefault();
+        }
+        catch
+        {
+            return null;
         }
     }
 
