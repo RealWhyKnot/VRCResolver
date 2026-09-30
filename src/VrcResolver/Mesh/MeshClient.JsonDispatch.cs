@@ -178,6 +178,7 @@ internal sealed partial class MeshClient
                         return;
                     }
 
+                    _reconnectAttempt = 0;
                     int negotiated = Math.Clamp(
                         cached?.ProtocolVersion ?? entry.ProtocolVersion,
                         1,
