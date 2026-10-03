@@ -16,6 +16,9 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **relay:** Stop allocating per chunk and per manifest line (1bdf338)
 - **build:** Cap the gen0 GC budget at 4 MB for the shipped exes (8c07082)
 
+### Fixed
+- **vrclog:** Say when videos fail because VRChat has no sound output (7efd757)
+
 ---
 
 ## [v2026.9.30.0](https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.9.30.0) - 2026-09-30
