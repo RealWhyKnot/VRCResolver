@@ -27,6 +27,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
     private readonly ResolverHealthGate? _health;
     private readonly Func<int, bool>? _onRelayWedged;
     private readonly Action? _onNewVrchatSession;
+    private readonly Func<AudioOutputCheck> _checkAudioOutput;
     private readonly TimeSpan _silentStallWindow;
     private readonly CancellationTokenSource _cts = new();
     private Task? _loop;
@@ -53,9 +54,11 @@ internal sealed partial class VrcLogMonitor : IDisposable
         ResolverHealthGate? health = null,
         Func<int, bool>? onRelayWedged = null,
         Action? onNewVrchatSession = null,
-        TimeSpan? silentStallWindow = null)
+        TimeSpan? silentStallWindow = null,
+        Func<AudioOutputCheck>? checkAudioOutput = null)
     {
         _mesh = mesh;
+        _checkAudioOutput = checkAudioOutput ?? AudioOutputProbe.CheckDefault;
         _ogFallbackHint = ogFallbackHint;
         _cache = cache;
         _health = health;
@@ -217,8 +220,15 @@ internal sealed partial class VrcLogMonitor : IDisposable
             {
                 bool missing = audioMatch.Groups[1].Value == "0";
                 if (missing && !_audioDevicesMissing)
-                    ConsoleUx.Warn(LogComponent.VrcLog,
-                        "VRChat found no audio devices; AVPro videos can fail to load until Windows audio recovers");
+                {
+                    var audio = _checkAudioOutput();
+                    if (audio.BlocksPlayback)
+                        ConsoleUx.Error(LogComponent.VrcLog, "VRChat has no sound output: " + NoSoundReason(audio)
+                            + ". Videos will fail to load until you " + NoSoundFix);
+                    else
+                        ConsoleUx.Warn(LogComponent.VrcLog,
+                            "VRChat found no audio devices; AVPro videos can fail to load until Windows audio recovers");
+                }
                 else if (!missing && _audioDevicesMissing)
                     ConsoleUx.Write(LogComponent.VrcLog, "VRChat's audio devices are back");
                 _audioDevicesMissing = missing;
@@ -266,6 +276,18 @@ internal sealed partial class VrcLogMonitor : IDisposable
                     string failed = CanonicalPlaybackObservationUrl(observed);
                     int ms = (int)(DateTime.UtcNow - _lastOpeningAt).TotalMilliseconds;
                     _lastOpeningUrl = null;
+                    if (_audioDevicesMissing && _checkAudioOutput() is { BlocksPlayback: true } audio)
+                    {
+                        ConsoleUx.Error(LogComponent.VrcLog, "video failed to load because VRChat has no sound output: "
+                            + NoSoundReason(audio) + ". To fix it, " + NoSoundFix + " (not a resolver fault)");
+                        Logger.WriteFileOnly("[vrclog] load_failure_no_sound_output ms=" + ms + " state=" + audio.State
+                            + " url=" + LogUtil.RedactUrl(failed));
+                        CancelStallWatchdog();
+                        CancelPlayingFeedbackLoop();
+                        _activePlaybackUrl = null;
+                        _activePlaybackAt = default;
+                        continue;
+                    }
                     int? deliveredHeight = TryGetDeliveredHeight(failed, out int height) ? height : null;
                     _ = _mesh.SendPlaybackFeedbackAsync(
                         failed,
@@ -561,6 +583,16 @@ internal sealed partial class VrcLogMonitor : IDisposable
     }
 
     internal readonly record struct PlaybackFailureRecovery(int Evicted, bool OgHintArmed);
+
+    private const string NoSoundFix = "pick a different default playback device in Windows Sound settings";
+
+    internal static string NoSoundReason(AudioOutputCheck audio)
+    {
+        if (audio.State == AudioOutputState.NoDevice) return "Windows has no default playback device";
+        string device = audio.DeviceName is { Length: > 0 } name ? " '" + name + "'" : "";
+        return "Windows' default playback device" + device
+            + " is held by another app in exclusive mode (Voicemeeter, ASIO or KS outputs can do this)";
+    }
 
     private void StopWatchingPlayback(string reason)
     {

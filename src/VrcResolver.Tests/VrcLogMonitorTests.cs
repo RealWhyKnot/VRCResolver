@@ -189,7 +189,8 @@ public sealed class VrcLogMonitorTests
     [Fact]
     public void Tracks_when_vrchat_reports_no_audio_devices()
     {
-        using var monitor = new VrcLogMonitor(new MeshClient());
+        using var monitor = new VrcLogMonitor(new MeshClient(),
+            checkAudioOutput: () => new AudioOutputCheck(AudioOutputState.Ok, "Speakers"));
 
         monitor.ProcessNewContent(
             "2026.09.29 13:23:29 Debug      -  uSpeak: SetInputDevice 0 (0 total, index out of range, setting to default device) 'No device available'\n");
@@ -202,6 +203,70 @@ public sealed class VrcLogMonitorTests
         monitor.ProcessNewContent(
             "2026.09.29 13:26:28 Debug      -  uSpeak: SetInputDevice 0 (5 total) 'Microphone (2- fifine Microphone)'\n");
         Assert.False(monitor.AudioDevicesMissingForTests);
+    }
+
+    [Theory]
+    [InlineData(true, (int)AudioOutputState.InUse, false)]
+    [InlineData(true, (int)AudioOutputState.NoDevice, false)]
+    [InlineData(true, (int)AudioOutputState.Ok, true)]
+    [InlineData(true, (int)AudioOutputState.Unknown, true)]
+    [InlineData(false, (int)AudioOutputState.InUse, true)]
+    public void Load_failures_are_only_blamed_on_the_resolver_when_sound_output_works(
+        bool vrchatReportsNoDevices, int outputState, bool expectBlamed)
+    {
+        using var temp = new TempDir();
+        var cache = temp.NewCache();
+        var hint = new OgFallbackHint();
+        var gate = new ResolverHealthGate();
+        int probes = 0;
+        using var monitor = new VrcLogMonitor(new MeshClient(), cache, hint, gate,
+            checkAudioOutput: () =>
+            {
+                probes++;
+                return new AudioOutputCheck((AudioOutputState)outputState, "Speakers (3- fifine Microphone)");
+            });
+        const string sourceUrl = "https://virtualfilm.institute/watch?v=abc";
+        const string playbackUrl = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=abc";
+
+        if (vrchatReportsNoDevices)
+            monitor.ProcessNewContent(
+                "2026.10.03 11:55:55 Debug      -  uSpeak: SetInputDevice 0 (0 total, index out of range, setting to default device) 'No device available'\n");
+        for (int i = 0; i < ResolverHealthGate.OpenThreshold; i++)
+        {
+            cache.Store("us1.vrcresolver.com", sourceUrl, "avpro", null, 1080, MakeResolved(playbackUrl));
+            monitor.ProcessNewContent(
+                "[AVProVideo] Opening " + playbackUrl + "\n"
+                + "[AVProVideo] Error: Loading failed\n");
+        }
+
+        Assert.Equal(expectBlamed, gate.ShouldShortCircuit(meshConnected: false, out _));
+        Assert.Equal(expectBlamed, hint.ShouldPreferOg(sourceUrl));
+        Assert.Equal(!expectBlamed, cache.TryGetSourceUrlForResolved(playbackUrl, out _));
+        Assert.Equal(vrchatReportsNoDevices ? 1 + ResolverHealthGate.OpenThreshold : 0, probes);
+    }
+
+    [Fact]
+    public void No_sound_reason_names_the_blocked_device()
+    {
+        string busy = VrcLogMonitor.NoSoundReason(
+            new AudioOutputCheck(AudioOutputState.InUse, "Speakers (3- fifine Microphone)"));
+        Assert.Equal("Windows' default playback device 'Speakers (3- fifine Microphone)' is held by another app"
+            + " in exclusive mode (Voicemeeter, ASIO or KS outputs can do this)", busy);
+        Assert.StartsWith("Windows' default playback device is held",
+            VrcLogMonitor.NoSoundReason(new AudioOutputCheck(AudioOutputState.InUse, null)));
+        Assert.Equal("Windows has no default playback device",
+            VrcLogMonitor.NoSoundReason(new AudioOutputCheck(AudioOutputState.NoDevice, null)));
+    }
+
+    [Theory]
+    [InlineData(0, "Ok")]
+    [InlineData(4, "InUse")]
+    [InlineData(2, "NoDevice")]
+    [InlineData(6, "NoDevice")]
+    [InlineData(1, "Unknown")]
+    public void Wave_out_open_results_map_to_output_states(int openResult, string expected)
+    {
+        Assert.Equal(expected, AudioOutputProbe.Classify(openResult).ToString());
     }
 
     private static ResolveResponse MakeResolved(string playbackUrl)
