@@ -1,12 +1,12 @@
-# Terms of Service
+# Terms of service
 
 **Effective 24 August 2026.**
 
 These terms are a binding agreement between you and WhyKnot ("we", "us", the "Operator"), covering
 VRCResolver and everything that runs on vrcresolver.com. Read them before you use the service. If
-you do not accept them, do not use it.
+you don't accept them, don't use it.
 
-Nothing here is legal advice, and none of it changes rights you hold under law that cannot be
+Nothing here is legal advice, and none of it changes rights you hold under law that can't be
 signed away.
 
 ## 1. What this covers, and who can use it
@@ -20,40 +20,38 @@ the patched `yt-dlp` shim the desktop application installs. "You" means whoever 
 Using the Service means you accept these terms. That includes automated use by the desktop client
 running on your machine, which acts on your behalf.
 
-You must be at least 13 years old. If you are under 18, you may use the Service only with the
+You must be at least 13 years old. If you're under 18, you may use the Service only with the
 consent of a parent or guardian, who accepts these terms with you. If you use the Service on behalf
 of an organisation, you warrant that you can bind it.
 
-The desktop client is separately licensed under the GPL-3.0-or-later. That licence governs the
-software itself: your right to run, study, modify, and redistribute the code. These terms govern the
-hosted service the client talks to. Where the two overlap, the licence wins on questions about the
-code and these terms win on questions about the service.
+The desktop client is separately licensed under the GPL-3.0-or-later. That licence applies to the
+software itself: your right to run, study, modify, and redistribute the code. These terms apply to
+the hosted service the client talks to. Where the two overlap, the licence controls questions about
+the code and these terms control questions about the service.
 
-## 2. We carry traffic. We do not publish it
+## 2. We transmit traffic. We don't publish it
 
 <a id="s2"></a>
 
-This is the most important section in the document, so it comes early.
-
-The Service is a conduit. When you paste a link, an automated system fetches what that link points
-at and passes it back to you. Transmission is automatic, technical, passive, and transient. We do
-not choose the material, we do not choose who receives it, we do not modify its substance beyond the
+The Service is a conduit: when you paste a link, an automated system fetches what that link points
+at and passes it back to you. Transmission is automatic, technical, passive, and transient. We don't
+choose the material, we don't choose who receives it, we don't modify its substance beyond the
 format changes needed to make it playable, and no person reviews it at any point.
 
-We have no advance knowledge of what any URL resolves to. We do not maintain a catalogue of what has
-passed through, and we do not hold copies beyond the short-lived technical caches described in the
+We have no advance knowledge of what any URL resolves to. We don't maintain a catalogue of what has
+passed through, and we don't hold copies beyond the short-lived technical caches described in the
 [Privacy Policy](PRIVACY.md).
 
 It follows that:
 
 - The Service being able to resolve a link is not an endorsement of it, a representation that it is
   lawful, or a warranty that you are entitled to it.
-- We make no representation about the accuracy, legality, safety, or quality of anything that passes
-  through.
+- We don't make any representation about the accuracy, legality, safety, or quality of anything
+  that passes through.
 - Responsibility for what you request, transmit, or receive rests with you, in full.
 
-We do not host content. We do not circumvent any technological protection measure, we do not strip
-DRM, and we do not provide the means to do either. Any use of the Service to attempt that is a
+We don't host content. We don't circumvent any technological protection measure, we don't strip
+DRM, and we don't provide the means to do either. Any use of the Service to attempt that is a
 breach of these terms.
 
 ## 3. Your content and your warranties
@@ -63,53 +61,54 @@ breach of these terms.
 Every time you submit a URL, share a file over the relay, or otherwise direct the Service to fetch
 something, you warrant that:
 
-- you own the material or hold the rights and licences needed to do what you are asking for;
-- your request is lawful where you are, and would be lawful where our servers sit;
-- your request does not breach the terms of service of the platform it points at, and that you have
-  read them if you are unsure;
-- the material is not unlawful, infringing, defamatory, or otherwise something we would be exposed
-  to for carrying.
+- you own the material or have the rights and licences needed to do what you're asking for;
+- your request is lawful where you are, and would be lawful where our servers are;
+- your request doesn't breach the terms of service of the platform it points at, and that you have
+  read them if you're unsure;
+- the material isn't unlawful, infringing, defamatory, or otherwise something we would be exposed
+  to for transmitting.
 
 You keep whatever rights you already had in your own material. We claim none. You grant us only the
 narrow, non-exclusive, worldwide, royalty-free licence needed to receive, transcode, cache, and
-transmit it for the purpose of delivering it to you or to the recipient you chose, and that licence
-ends when delivery ends.
+transmit it to deliver it to you or to the recipient you chose, and that licence ends when delivery
+ends.
 
-Files shared over the peer relay are streamed from your own browser, in chunks, on demand. They are
-not stored on our servers. When you close the tab, the share stops working.
+Files shared over the peer relay are streamed from your own browser, in chunks, on demand. They
+aren't stored on our servers. When you close the tab, the share stops working.
 
 ## 4. Third-party services and content
 
 <a id="s4"></a>
 
-The Service reaches other people's systems, and in some cases your browser reaches them directly:
+The Service connects to other people's systems, and in some cases your browser connects to them
+directly:
 
 - Upstream media hosts. Whatever the URL you paste points at. Their terms apply to their
   material.
-- The Internet Archive. Archive browsing queries archive.org from your own browser. We do not
-  proxy it, we do not host it, and archive.org's terms and privacy policy apply to that traffic.
+- The Internet Archive. Archive browsing queries archive.org from your own browser. We don't
+  proxy it, we don't host it, and archive.org's terms and privacy policy apply to that traffic.
 - Popcorn (vr-m.net). A third-party catalogue we query on your behalf. We neither operate it nor
   control what it returns.
-- Cloudflare. Sits in front of the Service as a network and security layer.
+- Cloudflare. It's in front of the Service as a network and security layer.
 
-We do not control these services. We do not warrant their availability, accuracy, or lawfulness, and
-we accept no liability for them. Links and integrations are not endorsements. If a third party
-changes, breaks, or withdraws, the corresponding part of the Service may stop working with no notice
-and no remedy.
+We don't control these services. We don't warrant their availability, accuracy, or lawfulness, and
+we don't accept liability for them. Links and integrations aren't endorsements. If a third party
+changes, breaks, or withdraws, the corresponding part of the Service may stop working without notice
+or remedy.
 
 ## 5. No affiliation
 
 <a id="s5"></a>
 
-VRCResolver is an independent project. It is not affiliated with, endorsed by, sponsored by, or
+VRCResolver is an independent project. It isn't affiliated with, endorsed by, sponsored by, or
 approved by VRChat Inc., Google LLC, YouTube, the Internet Archive, SoundCloud, Twitch, or any other
 platform it can resolve links from. All trademarks belong to their owners and are used only to
 describe what the software interoperates with.
 
 Your use of any third-party platform remains governed by your agreement with that platform. Using
-VRCResolver does not change that agreement, and does not give you rights you would not otherwise
-have. If a platform's terms prohibit what you are doing, the fact that our software made it
-technically possible is not a defence, and it is your problem rather than ours.
+VRCResolver doesn't change that agreement, and doesn't give you rights you wouldn't otherwise
+have. If a platform's terms prohibit what you're doing, our software making it technically
+possible is not a defence, and it's your problem rather than ours.
 
 ## 6. Acceptable use
 
@@ -139,21 +138,21 @@ You may not:
 
 <a id="s7"></a>
 
-The Service is free, and capacity is finite and shared. It is sized for ordinary personal use:
-resolving links you are about to watch, in a world you are actually in.
+The Service is free, and capacity is finite and shared. It's sized for ordinary personal use:
+resolving links you're about to watch, in a world you're actually in.
 
 Rate limits apply per address across the resolver, the media proxy, the Popcorn endpoints, and the
-relay, and we may enforce them at any time. **We do not publish the thresholds.** Publishing them would tell abusive
-users exactly where to sit, and would tie us to numbers we adjust as load changes. They may change
-at any time without notice.
+relay, and we may enforce them at any time. **We don't publish the thresholds.** Publishing them
+would show abusive users exactly where the limits are, and would tie us to numbers we adjust as load
+changes. They may change at any time without notice.
 
 Whether your use is excessive is determined by us, acting in our sole discretion. Sustained volume
 disproportionate to ordinary personal use is excessive whether or not it trips a limit, and whether
 or not any individual request was permitted. Requests that are rejected for exceeding a limit are
 still requests: repeatedly hammering a limit is itself excessive use.
 
-We are not obliged to warn you before treating your use as excessive, and a period of tolerated
-heavy use creates no entitlement to continue.
+We aren't obliged to warn you before treating your use as excessive, and a period of tolerated
+heavy use doesn't create any entitlement to continue.
 
 ## 8. Enforcement, blocking, and termination
 
@@ -165,10 +164,10 @@ in our sole and absolute discretion. Breach of these terms is sufficient reason.
 belief that a breach is likely, or that continued access risks harm to the Service, to us, or to
 anyone else.
 
-We are under no obligation to tell you that you have been blocked, to explain why, to identify the
+We're under no obligation to tell you that you've been blocked, to explain why, to identify the
 conduct involved, to give you an opportunity to fix it, to preserve any data, or to offer an appeal
-or review. Any of these we may do as a courtesy, and doing it once creates no expectation that we
-will do it again.
+or review. We may do any of these as a courtesy, and doing it once doesn't create an expectation that
+we will do it again.
 
 Because the Service is free, no refund, credit, or compensation arises on suspension or termination.
 
@@ -185,7 +184,7 @@ If you believe material reachable through the Service infringes your copyright, 
 **contact@whyknot.dev** with:
 
 1. identification of the copyrighted work you say has been infringed;
-2. identification of the material complained of, and enough detail to locate it, meaning the exact
+2. identification of the material complained of, and enough detail to locate it, that is, the exact
    URL or request that reaches it;
 3. your name, address, telephone number, and email address;
 4. a statement that you have a good-faith belief that the use is not authorised by the copyright
@@ -199,7 +198,7 @@ Service. Because we host nothing, this usually means blocking a URL, a pattern, 
 than deleting a file. We terminate access for users who repeatedly direct the Service at infringing
 material.
 
-**We do not claim safe harbour under 17 U.S.C. 512, and we have not designated an agent under that
+**We don't claim safe harbour under 17 U.S.C. 512, and we haven't designated an agent under that
 section.** This procedure is voluntary. Operating it is not an admission that we are a service
 provider within the meaning of that section, that we have any obligation under it, or that any
 material was infringing.
@@ -211,8 +210,8 @@ material is infringing can make you liable for damages under applicable law.
 
 <a id="s10"></a>
 
-The Service is provided free of charge. There is no service level agreement, no uptime commitment,
-no support obligation, and no promise that any feature will continue to exist.
+The Service is provided free of charge. There's no service level agreement, uptime commitment or
+support obligation, and no promise that any feature will continue to exist.
 
 We may change, suspend, limit, or discontinue the Service or any part of it, at any time, for any
 reason, without notice and without liability. Features may be removed. Behaviour may change without
@@ -231,15 +230,15 @@ including the implied warranties of merchantability, fitness for a particular pu
 non-infringement, quiet enjoyment, and accuracy of data, and any warranty arising from course of
 dealing, course of performance, or usage of trade.
 
-We do not warrant that the Service will be uninterrupted, timely, secure, or error-free, that
+We don't warrant that the Service will be uninterrupted, timely, secure, or error-free, that
 defects will be corrected, that any link will resolve, that any stream will play, or that the
 Service or the servers that run it are free of harmful components. No advice or information you get
 from us, in any form, creates a warranty not stated here.
 
-The desktop client carries its own warranty disclaimer under the GPL-3.0-or-later. This section
-supplements it and does not replace it.
+The desktop client has its own warranty disclaimer under the GPL-3.0-or-later. This section
+supplements it and doesn't replace it.
 
-Some jurisdictions do not allow the exclusion of certain warranties. Where that is so, the
+Some jurisdictions don't allow the exclusion of certain warranties. Where that's so, the
 exclusions above apply to the maximum extent that jurisdiction permits, and nothing here affects
 non-excludable statutory or consumer rights you hold.
 
@@ -258,13 +257,13 @@ Our total aggregate liability for all claims relating to the Service is limited 
 the amount you actually paid us in the twelve months before the claim arose, which for a free
 service is zero, or fifty United States dollars (USD 50).
 
-These limits apply even if a limited remedy fails of its essential purpose. They are a fundamental
-basis of the bargain between us: we could not offer the Service free of charge without them.
+These limits apply even if a limited remedy fails of its essential purpose. They're a fundamental
+basis of the bargain between us: we couldn't offer the Service free of charge without them.
 
-Some jurisdictions do not allow the exclusion or limitation of certain damages. Where that is so,
+Some jurisdictions don't allow the exclusion or limitation of certain damages. Where that's so,
 our liability is limited to the smallest amount that jurisdiction permits, and nothing in this
 section excludes liability for death or personal injury caused by negligence, for fraud, or for
-anything else that cannot lawfully be excluded.
+anything else that can't lawfully be excluded.
 
 ## 13. Indemnification
 
@@ -289,49 +288,72 @@ expense, and you will cooperate with us if we do.
 
 <a id="s14"></a>
 
-**Governing law.** These terms are governed by the laws of the United States and of the state in
-which the Operator resides, without regard to conflict-of-laws rules, and without regard to the UN
-Convention on Contracts for the International Sale of Goods. We will identify that state on request
-at contact@whyknot.dev.
+### Governing law
 
-**Talk to us first.** Before filing anything, email contact@whyknot.dev with a description of the
-dispute and what you want. Most things are fixable in a message. Neither of us may start proceedings
-until 30 days after that email, unless a claim needs urgent injunctive relief.
+These terms are governed by the laws of the United States and of the state in which the Operator
+resides, without regard to conflict-of-laws rules, and without regard to the UN Convention on
+Contracts for the International Sale of Goods. We'll identify that state on request at
+contact@whyknot.dev.
 
-**Venue.** The state and federal courts serving the Operator's place of residence have exclusive
-jurisdiction over any dispute that is not resolved informally. You and we each consent to personal
-jurisdiction there and waive any objection based on venue or forum non conveniens.
+### Talk to us first
 
-**Jury trial waiver.** To the extent permitted by law, you and we each waive the right to a trial by
-jury.
+Before filing anything, email contact@whyknot.dev with a description of the dispute and what you
+want. Most things can be fixed in a message. Both of us must wait 30 days after that email before
+starting proceedings, unless a claim needs urgent injunctive relief.
 
-**No class actions.** To the extent permitted by law, claims may be brought only in an individual
-capacity. You and we each waive the right to bring or participate in a class, collective,
-consolidated, or representative action. No arbitrator or court may consolidate claims without the
-written consent of both of us.
+### Venue
 
-**Time limit.** Any claim relating to the Service must be brought within one year after it arose, or
-it is permanently barred, except where a longer period cannot be waived by law.
+The state and federal courts serving the Operator's place of residence have exclusive jurisdiction
+over any dispute that isn't resolved informally. You and we each consent to personal jurisdiction
+there and waive any objection based on venue or forum non conveniens.
 
-**Changes.** We may change these terms. The effective date at the top will change, and the current
-version is always at https://vrcresolver.com/terms. Continued use after a change means you accept
-it. If you do not accept a change, stop using the Service.
+### Jury trial waiver
 
-**Severability.** If any provision is held unenforceable, it is modified to the minimum extent
-needed to make it enforceable, or severed if it cannot be, and the rest stays in force.
+To the extent permitted by law, you and we each waive the right to a trial by jury.
 
-**No waiver.** Not enforcing a provision is not a waiver of it. A waiver is only effective if it is
-in writing.
+### No class actions
 
-**Assignment.** You may not assign or transfer these terms or any rights under them. We may assign
-them freely, including as part of a transfer of the project.
+To the extent permitted by law, claims may be brought only in an individual capacity. You and we
+each waive the right to bring or participate in a class, collective, consolidated, or representative
+action. No arbitrator or court may consolidate claims without the written consent of both of us.
 
-**Force majeure.** We are not liable for any failure or delay caused by anything beyond our
-reasonable control, including outages at hosting or network providers, upstream platform changes,
-denial-of-service attacks, and acts of government.
+### Time limit
 
-**Entire agreement.** These terms and the [Privacy Policy](PRIVACY.md) are the entire agreement
-between us about the Service, and supersede anything said before.
+Any claim relating to the Service must be brought within one year after it arose, or it is
+permanently barred, except where a longer period can't be waived by law.
 
-**Contact.** contact@whyknot.dev. For anything that is not a legal notice or a personal-data
-request, the issue tracker at https://github.com/RealWhyKnot/VRCResolver is usually faster.
+### Changes
+
+We may change these terms. The effective date at the top will change, and the current version is
+always at https://vrcresolver.com/terms. Continued use after a change means you accept it. If you
+don't accept a change, stop using the Service.
+
+### Severability
+
+If any provision is held unenforceable, it is modified to the minimum extent needed to make it
+enforceable, or severed if it can't be, and the rest remains in force.
+
+### No waiver
+
+Not enforcing a provision isn't a waiver of it. A waiver is only effective if it's in writing.
+
+### Assignment
+
+You may not assign or transfer these terms or any rights under them. We may assign them freely,
+including as part of a transfer of the project.
+
+### Force majeure
+
+We aren't liable for any failure or delay caused by anything beyond our reasonable control,
+including outages at hosting or network providers, upstream platform changes, denial-of-service
+attacks, and acts of government.
+
+### Entire agreement
+
+These terms and the [Privacy Policy](PRIVACY.md) are the entire agreement between us about the
+Service, and supersede anything said before.
+
+### Contact
+
+contact@whyknot.dev. For anything that isn't a legal notice or a personal-data request, the issue
+tracker at https://github.com/RealWhyKnot/VRCResolver is usually faster.
