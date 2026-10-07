@@ -1,5 +1,5 @@
 ## What you need to do
 
-Fresh install: follow the install steps above. Existing installs can be replaced with this zip, or updated by launching `vrcresolver.exe` and typing `/update`. The updater downloads this release, verifies the zip, atomically swaps the files, and relaunches.
+New installs: follow the install steps above. For an existing install, either extract this zip over it or start `vrcresolver.exe` and type `/update`. The updater downloads this release, verifies the zip, swaps the files in one step and restarts.
 
-If you hit a playback bug after this release: re-paste the URL with the watchdog window visible, copy the watchdog log starting from the failed request, and include both in the bug report.
+If you hit a playback bug after updating, paste the URL again with the watchdog window visible. Put that URL and the watchdog log from the failed request onwards in the bug report.

@@ -1,10 +1,10 @@
 # Release-body templates
 
-`Generate-ReleaseNotes.ps1` reads each `.md` file in this directory and emits its content as a section of the GitHub release body. The order is fixed: title, auto-changelog slice, file integrity, then `links.md`, `install.md`, `uninstall.md`, `what-you-need-to-do.md`, then optional extras from `.github/release-extras/<tag>.md`.
+`Generate-ReleaseNotes.ps1` turns these `.md` files into sections of the GitHub release body. The order is fixed: title, the changelog slice, file integrity, then `links.md`, `install.md`, `uninstall.md` and `what-you-need-to-do.md`, then any extras from `.github/release-extras/<tag>.md`.
 
 ## Tokens
 
-Each template runs through token substitution before the body composes. Any of these strings in a template gets replaced with the corresponding value at compose time:
+These strings in a template are replaced with their values before the body is put together:
 
 | Token | Example value |
 |---|---|
@@ -18,28 +18,28 @@ Each template runs through token substitution before the body composes. Any of t
 | `{prior-tag}` | `v2026.5.5.3` (empty on first release) |
 | `{zip-name}` | `vrcresolver-v2026.5.5.4.zip` |
 
-Tokens that the resolver could not compute render as the literal token string. This is intentional: a missing token is visible to a reader, who can then file an operator fix.
+A token the generator can't work out becomes an empty string. Misspell one and it's not in the table, which leaves it in the release exactly as typed.
 
 ## Adding a new section
 
-1. Create `<name>.md` in this directory.
-2. Add the section to the section-order list in `.github/scripts/Generate-ReleaseNotes.ps1` (search for `Add-TemplateSection`).
-3. Pick a slot in the composition order; ASCII-scrub gates run on the full composed body so any voice violation in the template fails the workflow at publish time.
+1. Create `<name>.md` in this folder.
+2. Add the name to `$templateOrder` in `.github/scripts/Generate-ReleaseNotes.ps1`, in the position you want it.
+3. The ASCII and wording checks run over the full body. A template that fails them fails the release workflow.
 
 ## Adding a new token
 
-1. Open `.github/scripts/Generate-ReleaseNotes.ps1`, find the `$tokens` hash table in `New-ReleaseBody`.
+1. In `.github/scripts/Generate-ReleaseNotes.ps1`, find the `$tokens` hash table.
 2. Add the new key.
-3. Update the table above so other operators know the token exists.
+3. Add it to the table above.
 
 ## Editing existing templates
 
-Templates are read verbatim and pass through the same scrub gates as commit subjects. Avoid marketing language, internal-tooling vocabulary, and any character outside printable ASCII. The list of forbidden patterns lives in `Generate-ReleaseNotes.ps1` near the bottom.
+Templates are read as-is and go through the same checks as commit subjects. Avoid marketing words, internal tooling terms and anything outside printable ASCII. The rejected patterns are in `$forbiddenPatterns` near the bottom of `Generate-ReleaseNotes.ps1`.
 
 ## Skipping a section
 
-Delete or rename the corresponding `.md` file. The composer emits a `::warning::` to the workflow log when a template is missing but does not fail the build; the section just does not render in the body.
+Delete or rename its `.md` file. The generator writes a `::warning::` to the workflow log and leaves that section out of the body. The build still passes.
 
-## Optional release-specific extras
+## Release-specific extras
 
-Templates here are evergreen content, the same on every release. For one-off prose tied to a single release (a release-specific bug-fix narrative, a coordination note, etc.) put a markdown file at `.github/release-extras/<tag>.md`. The composer appends its content verbatim below the templated sections, separated by `---` and an `## Additional notes` heading.
+Templates here are the same on every release. For prose about one release, like the story behind a particular fix, put a Markdown file at `.github/release-extras/<tag>.md`. Its content is appended below the template sections, after `---` and an `## Additional notes` heading.
