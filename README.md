@@ -23,7 +23,7 @@ To update, type `/update` in the console.
 
 To uninstall, run `vrcresolver.Uninstaller.exe`. It restores the original `yt-dlp.exe`, removes the hosts entry and deletes `%LOCALAPPDATA%Low\vrcresolver\`. It doesn't ask for confirmation.
 
-Windows 10/11 x64. It's self-contained and there's no installer.
+Needs 64-bit Windows 10 or 11.
 
 ## Troubleshooting
 
