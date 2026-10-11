@@ -20,6 +20,7 @@ internal enum MeshAttempt
     Accept,
     Refuse,
     Hang,
+    SlowAccept,
 }
 
 internal sealed class ScriptedMeshServer : IAsyncDisposable
@@ -37,6 +38,7 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
     public ConcurrentQueue<string> Paths { get; } = new();
     public ConcurrentQueue<string> UserAgents { get; } = new();
     public ConcurrentQueue<(int Connection, string Id)> Resolves { get; } = new();
+    public TimeSpan SlowAcceptDelay { get; set; } = TimeSpan.FromSeconds(2);
 
     public ScriptedMeshServer(Func<int, MeshAttempt> policy, Func<int, WebSocket, string, Task>? onResolve = null)
     {
@@ -74,6 +76,9 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
                 case MeshAttempt.Hang:
                     _ = HoldUntilDisposedAsync(ctx);
                     continue;
+                case MeshAttempt.SlowAccept:
+                    _ = AcceptAfterDelayAsync(ctx);
+                    continue;
             }
 
             if (!ctx.Request.IsWebSocketRequest)
@@ -96,6 +101,22 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
         try { await Task.Delay(Timeout.Infinite, _cts.Token); }
         catch (OperationCanceledException) { }
         try { ctx.Response.Abort(); } catch { }
+    }
+
+    private async Task AcceptAfterDelayAsync(HttpListenerContext ctx)
+    {
+        try { await Task.Delay(SlowAcceptDelay, _cts.Token); }
+        catch (OperationCanceledException)
+        {
+            try { ctx.Response.Abort(); } catch { }
+            return;
+        }
+
+        WebSocket ws;
+        try { ws = (await ctx.AcceptWebSocketAsync(null)).WebSocket; }
+        catch { return; }
+        int index = Interlocked.Increment(ref _connections);
+        await ServeAsync(index, ws);
     }
 
     private async Task ServeAsync(int index, WebSocket ws)

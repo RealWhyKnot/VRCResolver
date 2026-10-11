@@ -10,6 +10,7 @@ internal sealed partial class MeshClient
     {
         while (!ct.IsCancellationRequested)
         {
+            Volatile.Write(ref _lastAttemptStartTicks, DateTime.UtcNow.Ticks);
             MeshLink? link = null;
             HttpMessageInvoker? invoker = null;
             var probe = _connectProbe = new MeshConnectProbe();
@@ -32,6 +33,7 @@ internal sealed partial class MeshClient
 
                 var wsUri = _meshUriForHost(node);
                 invoker = new HttpMessageInvoker(MeshConnectProbe.CreateHandler(probe), disposeHandler: true);
+                _connectInFlight = true;
                 connectWatch.Start();
                 using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
                 {
@@ -87,6 +89,7 @@ internal sealed partial class MeshClient
             finally
             {
                 MarkLinkDown(link);
+                SettleConnectAttempt();
                 _welcomeTcs?.TrySetResult(null);
                 try { _ws?.Dispose(); } catch { }
                 _ws = null;
@@ -97,14 +100,47 @@ internal sealed partial class MeshClient
 
             _reconnectAttempt++;
             WatchdogStats.RecordReconnect();
-            int capSec = ReconnectCapsSec[Math.Min(_reconnectAttempt - 1, ReconnectCapsSec.Length - 1)];
-            int waitMs = _rng.Next(0, capSec * 1000 + 1);
+            int waitMs = _nextBackoffMs(_reconnectAttempt);
             if (_reconnectAttempt <= 5 || _reconnectAttempt % 10 == 0)
                 ConsoleUx.Write(LogComponent.Mesh, $"reconnect attempt {_reconnectAttempt} in {waitMs / 1000} s");
 
-            try { await Task.Delay(waitMs, ct).ConfigureAwait(false); }
+            try { await WaitBeforeReconnectAsync(waitMs, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
+    }
+
+    private async Task WaitBeforeReconnectAsync(int waitMs, CancellationToken ct)
+    {
+        var wake = Volatile.Read(ref _wake).Task;
+        var backoffEnd = DateTime.UtcNow.AddMilliseconds(waitMs);
+        using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var delay = Task.Delay(waitMs, delayCts.Token);
+        var first = await Task.WhenAny(delay, wake).ConfigureAwait(false);
+        delayCts.Cancel();
+        if (first == delay)
+        {
+            await delay.ConfigureAwait(false);
+        }
+        else
+        {
+            var wakeAt = new DateTime(Volatile.Read(ref _lastAttemptStartTicks), DateTimeKind.Utc) + MinWakeSpacing;
+            if (wakeAt > backoffEnd) wakeAt = backoffEnd;
+            var pause = wakeAt - DateTime.UtcNow;
+            if (pause > TimeSpan.Zero)
+                await Task.Delay(pause, ct).ConfigureAwait(false);
+        }
+        ct.ThrowIfCancellationRequested();
+        Interlocked.Exchange(ref _wake, NewSignal());
+    }
+
+    private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private void WakeReconnectLoop() => Volatile.Read(ref _wake).TrySetResult();
+
+    private void SettleConnectAttempt()
+    {
+        _connectInFlight = false;
+        Interlocked.Exchange(ref _connectSettled, NewSignal()).TrySetResult();
     }
 
     internal static string DescribeConnectFailure(string host, long elapsedMs, MeshConnectProbe probe, Exception ex)
@@ -147,9 +183,11 @@ internal sealed partial class MeshClient
     {
         if (link.Down.Task.IsCompleted || ws is not { State: WebSocketState.Open }) return;
         link.WasReady = true;
+        Interlocked.Exchange(ref _wake, NewSignal());
         Volatile.Write(ref _readyLink, link);
         Interlocked.Exchange(ref _linkReady,
             new TaskCompletionSource<MeshLink>(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult(link);
+        SettleConnectAttempt();
     }
 
     private void MarkLinkDown(MeshLink? link)
@@ -163,26 +201,44 @@ internal sealed partial class MeshClient
 
     private async Task<MeshLink?> WaitForLinkAsync(Task pending, CancellationToken ct)
     {
+        bool woke = false;
         while (true)
         {
             var next = Volatile.Read(ref _linkReady).Task;
             var link = Volatile.Read(ref _readyLink);
             if (link != null && !link.Down.Task.IsCompleted) return link;
 
+            if (!woke)
+            {
+                WakeReconnectLoop();
+                woke = true;
+            }
+
+            var settled = Volatile.Read(ref _connectSettled).Task;
             var remaining = new DateTime(Interlocked.Read(ref _linkDownSinceTicks), DateTimeKind.Utc)
                 + _reconnectGrace - DateTime.UtcNow;
-            if (remaining <= TimeSpan.Zero) return null;
+            bool graceRanOut = remaining <= TimeSpan.Zero;
+            if (graceRanOut && !_connectInFlight) return null;
 
             using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            var delay = Task.Delay(remaining, delayCts.Token);
-            var done = await Task.WhenAny(next, pending, delay).ConfigureAwait(false);
+            var delay = Task.Delay(graceRanOut ? Timeout.InfiniteTimeSpan : remaining, delayCts.Token);
+            var done = graceRanOut
+                ? await Task.WhenAny(next, pending, delay, settled).ConfigureAwait(false)
+                : await Task.WhenAny(next, pending, delay).ConfigureAwait(false);
             delayCts.Cancel();
             if (done == pending) return null;
             if (done == delay)
             {
                 ct.ThrowIfCancellationRequested();
-                return null;
+                if (graceRanOut) return null;
+                continue;
             }
+            if (done == settled)
+            {
+                var ready = Volatile.Read(ref _readyLink);
+                return ready != null && !ready.Down.Task.IsCompleted ? ready : null;
+            }
+            woke = false;
         }
     }
 

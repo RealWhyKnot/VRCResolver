@@ -17,9 +17,11 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private static readonly TimeSpan SendDeadline = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan WelcomeTimeout = TimeSpan.FromSeconds(1);
     private static readonly int[] ReconnectCapsSec = { 1, 2, 4, 8, 16, 30 };
+    private static readonly TimeSpan MinWakeSpacing = TimeSpan.FromSeconds(1);
     private TimeSpan _connectDeadline = TimeSpan.FromSeconds(8);
     private TimeSpan _reconnectGrace = TimeSpan.FromSeconds(5);
     private Func<string, Uri> _meshUriForHost = ServerEndpoints.MeshWebSocketUrlForHost;
+    private Func<int, int> _nextBackoffMs;
 
     private static readonly byte[] PingFrame = "{\"action\":\"ping\"}"u8.ToArray();
     private static readonly byte[] PongFrame = "{\"action\":\"pong\"}"u8.ToArray();
@@ -71,6 +73,11 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private TaskCompletionSource<MeshLink> _linkReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private long _linkDownSinceTicks = DateTime.UtcNow.Ticks;
 
+    private TaskCompletionSource _wake = NewSignal();
+    private TaskCompletionSource _connectSettled = NewSignal();
+    private long _lastAttemptStartTicks;
+    private volatile bool _connectInFlight;
+
     private int _serverProtocolVersion;
     private string? _serverNode;
     private string[]? _serverFeatures;
@@ -116,6 +123,13 @@ internal sealed partial class MeshClient : IAsyncDisposable
     {
         var ver = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0.0";
         _userAgent = "VRCResolver-Watchdog/" + ver;
+        _nextBackoffMs = DrawBackoffMs;
+    }
+
+    private int DrawBackoffMs(int attempt)
+    {
+        int capSec = ReconnectCapsSec[Math.Min(attempt - 1, ReconnectCapsSec.Length - 1)];
+        return _rng.Next(0, capSec * 1000 + 1);
     }
 
     public Task StartAsync()
