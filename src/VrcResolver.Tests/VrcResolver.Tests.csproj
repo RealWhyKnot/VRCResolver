@@ -16,6 +16,7 @@
     <ProjectReference Include="..\VrcResolver.Shared\VrcResolver.Shared.csproj" />
     <ProjectReference Include="..\VrcResolver\VrcResolver.csproj" />
     <ProjectReference Include="..\VrcResolver.Updater\VrcResolver.Updater.csproj" />
+    <ProjectReference Include="..\VrcResolver.YtDlp\VrcResolver.YtDlp.csproj" />
   </ItemGroup>
 
 </Project>

@@ -12,6 +12,9 @@ internal static partial class Program
 {
     private static readonly TimeSpan PipeConnectTimeout = TimeSpan.FromSeconds(1);
 
+    internal static string s_pipeName = WireConstants.PipeName;
+    private static volatile bool s_pipeUnavailable;
+
     private static string s_rid = "????????";
     private static long? s_serverRetryAtElapsedMs;
     private static string? s_serverFallbackReason;
@@ -114,7 +117,7 @@ internal static partial class Program
         }
     }
 
-    private static async Task<(string? Url, string? FallbackReason, string? PublicMessage)> ResolveOverPipeAsync(string url, string player, string? formatArg, TimeSpan? deadlineOverride = null, bool skipNativeHint = false)
+    internal static async Task<(string? Url, string? FallbackReason, string? PublicMessage)> ResolveOverPipeAsync(string url, string player, string? formatArg, TimeSpan? deadlineOverride = null, bool skipNativeHint = false)
     {
         var swPipe = Stopwatch.StartNew();
         long totalDeadlineMs = (long)(deadlineOverride ?? ResolveBudget.Total).TotalMilliseconds;
@@ -128,7 +131,7 @@ internal static partial class Program
             using var ctsConnect = new CancellationTokenSource(PipeConnectTimeout);
             using var pipe = new NamedPipeClientStream(
                 ".",
-                WireConstants.PipeName,
+                s_pipeName,
                 PipeDirection.InOut,
                 PipeOptions.Asynchronous);
             try
@@ -154,6 +157,7 @@ internal static partial class Program
                     await Task.Delay(750).ConfigureAwait(false);
                     continue;
                 }
+                s_pipeUnavailable = true;
                 return (null, WireConstants.OgFallbackReasonPipeConnectFailed, null);
             }
 
@@ -236,14 +240,15 @@ internal static partial class Program
         return framed;
     }
 
-    private static async Task TrySendOgFallbackNotifyAsync(string? url, string reason, long elapsedMs, string? publicMessage = null)
+    internal static async Task TrySendOgFallbackNotifyAsync(string? url, string reason, long elapsedMs, string? publicMessage = null)
     {
+        if (s_pipeUnavailable) return;
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
             using var pipe = new NamedPipeClientStream(
                 ".",
-                WireConstants.PipeName,
+                s_pipeName,
                 PipeDirection.InOut,
                 PipeOptions.Asynchronous);
             try { await pipe.ConnectAsync(cts.Token).ConfigureAwait(false); }
@@ -268,14 +273,15 @@ internal static partial class Program
         catch { }
     }
 
-    private static async Task TrySendOgFailedNotifyAsync(string? url, string reason, int exitCode, string errorPreview, long elapsedMs)
+    internal static async Task TrySendOgFailedNotifyAsync(string? url, string reason, int exitCode, string errorPreview, long elapsedMs)
     {
+        if (s_pipeUnavailable) return;
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
             using var pipe = new NamedPipeClientStream(
                 ".",
-                WireConstants.PipeName,
+                s_pipeName,
                 PipeDirection.InOut,
                 PipeOptions.Asynchronous);
             try { await pipe.ConnectAsync(cts.Token).ConfigureAwait(false); }

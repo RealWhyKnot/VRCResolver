@@ -47,6 +47,8 @@ internal static partial class Program
         Log(sb.ToString());
     }
 
+    internal static string? s_logPathOverride;
+
     private static readonly object s_logLock = new();
     private static StreamWriter? s_logWriter;
     private static bool s_logInitFailed;
@@ -72,9 +74,8 @@ internal static partial class Program
         if (s_logInitFailed) return null;
         try
         {
-            string logDir = AppPaths.LogsDir();
-            Directory.CreateDirectory(logDir);
-            string logPath = Path.Combine(logDir, "yt-dlp-wrapper.log");
+            string logPath = s_logPathOverride ?? Path.Combine(AppPaths.LogsDir(), "yt-dlp-wrapper.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
             try
             {
                 var info = new FileInfo(logPath);
@@ -93,7 +94,7 @@ internal static partial class Program
         }
     }
 
-    private static void CloseLog()
+    internal static void CloseLog()
     {
         lock (s_logLock)
         {
