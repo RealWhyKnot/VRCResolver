@@ -60,7 +60,9 @@ public class PatchManagerTickTests : IDisposable
         return content;
     }
 
-    private PatchManager NewManager() => new(_installDir, _toolsDir, _stateDir);
+    private readonly ConcurrentQueue<string> _fileLog = new();
+
+    private PatchManager NewManager() => new(_installDir, _toolsDir, _stateDir, fileLog: _fileLog.Enqueue);
 
     private static void WaitForQuiet(ConcurrentQueue<string> events)
     {
@@ -279,6 +281,33 @@ public class PatchManagerTickTests : IDisposable
         Assert.Equal(new[] { "yt-dlp.exe" }, ToolsEntries());
         Assert.Equal(vrc, File.ReadAllBytes(_targetPath));
         Assert.True(File.Exists(CleanExitFlagPath));
+        string line = Assert.Single(_fileLog, l => l.StartsWith("[patch] restore (test): ", StringComparison.Ordinal));
+        Assert.StartsWith("[patch] restore (test): Restored ", line);
+        Assert.EndsWith(" flag=written", line);
+    }
+
+    [Fact]
+    public void RestoreNow_logs_a_failed_flag_write_by_exception_type_only()
+    {
+        WriteWrapper();
+        byte[] vrc = VrcBundledBytes();
+        File.WriteAllBytes(_targetPath, vrc);
+        Directory.CreateDirectory(_stateDir);
+        Directory.CreateDirectory(CleanExitFlagPath);
+
+        using var manager = NewManager();
+        manager.TickOnce();
+        manager.TickOnce();
+
+        Assert.True(manager.RestoreNow("console-close"));
+
+        Assert.Equal(new[] { "yt-dlp.exe" }, ToolsEntries());
+        Assert.Equal(vrc, File.ReadAllBytes(_targetPath));
+        Assert.False(File.Exists(CleanExitFlagPath));
+        string line = Assert.Single(_fileLog, l => l.StartsWith("[patch] restore (console-close): ", StringComparison.Ordinal));
+        Assert.Matches(@" flag=failed \([A-Za-z]+Exception\)$", line);
+        Assert.DoesNotContain(_scratchDir, line, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("clean_exit", line);
     }
 
     [Fact]

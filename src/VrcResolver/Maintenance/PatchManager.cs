@@ -15,6 +15,7 @@ internal sealed class PatchManager : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly string? _vrcToolsDir;
     private readonly TimeSpan _tickDelay;
+    private readonly Action<string> _fileLog;
     private readonly object _toolsLock = new();
     private bool _restored;
     private DateTime _lastPatchTime = DateTime.MinValue;
@@ -80,7 +81,7 @@ internal sealed class PatchManager : IDisposable
     {
     }
 
-    internal PatchManager(string installDir, string? vrcToolsDir, string stateDir, TimeSpan? tickDelay = null)
+    internal PatchManager(string installDir, string? vrcToolsDir, string stateDir, TimeSpan? tickDelay = null, Action<string>? fileLog = null)
     {
         _patchedYtDlpPath = Path.Combine(installDir, "tools", "yt-dlp.exe");
         _knownHashesPath = Path.Combine(installDir, "data", "wrapper_hashes.txt");
@@ -91,6 +92,7 @@ internal sealed class PatchManager : IDisposable
 
         _vrcToolsDir = vrcToolsDir;
         _tickDelay = tickDelay ?? TimeSpan.FromSeconds(3);
+        _fileLog = fileLog ?? Logger.WriteFileOnly;
     }
 
     private WrapperKind ClassifyTarget(string path)
@@ -231,10 +233,21 @@ internal sealed class PatchManager : IDisposable
                 return false;
             }
 
-            Logger.WriteFileOnly("[patch] " + line);
-            try { File.WriteAllText(_cleanExitFlagPath, DateTime.UtcNow.ToString("o")); }
-            catch { }
+            _fileLog("[patch] " + line + " flag=" + WriteCleanExitFlag());
             return true;
+        }
+    }
+
+    private string WriteCleanExitFlag()
+    {
+        try
+        {
+            File.WriteAllText(_cleanExitFlagPath, DateTime.UtcNow.ToString("o"));
+            return "written";
+        }
+        catch (Exception ex)
+        {
+            return "failed (" + ex.GetType().Name + ")";
         }
     }
 
