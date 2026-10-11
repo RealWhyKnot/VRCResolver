@@ -204,6 +204,80 @@ public sealed class ResolverHealthGateTests
     }
 
     [Fact]
+    public void AwaitingProbeVerdict_IsFalseUntilTheProbeIsAdmitted()
+    {
+        var now = T0;
+        var gate = MakeGate(() => now);
+        Assert.False(gate.AwaitingProbeVerdict);
+
+        Open(gate);
+        Assert.False(gate.AwaitingProbeVerdict);
+
+        now += Cooldown + TimeSpan.FromSeconds(1);
+        Assert.False(gate.AwaitingProbeVerdict);
+        Assert.True(gate.ShouldShortCircuit(meshConnected: false, out _));
+        Assert.False(gate.AwaitingProbeVerdict);
+
+        Assert.False(gate.ShouldShortCircuit(meshConnected: true, out _));
+        Assert.True(gate.AwaitingProbeVerdict);
+    }
+
+    [Fact]
+    public void AwaitingProbeVerdict_StaysTrueUntilPlaybackIsConfirmed()
+    {
+        var now = T0;
+        var gate = MakeGate(() => now);
+        Open(gate);
+        now += Cooldown + TimeSpan.FromSeconds(1);
+        Assert.False(gate.ShouldShortCircuit(meshConnected: true, out _));
+
+        gate.RecordResolveOutcome(healthy: true, resolved: true);
+        Assert.True(gate.AwaitingProbeVerdict);
+
+        gate.RecordPlaybackConfirmed();
+        Assert.False(gate.AwaitingProbeVerdict);
+    }
+
+    [Fact]
+    public void AwaitingProbeVerdict_EndsWhenTheProbeOutcomeArrives()
+    {
+        var now = T0;
+        var gate = MakeGate(() => now);
+        Open(gate);
+        now += Cooldown + TimeSpan.FromSeconds(1);
+
+        Assert.False(gate.ShouldShortCircuit(meshConnected: true, out _));
+        gate.RecordResolveOutcome(healthy: false, resolved: false);
+        Assert.False(gate.AwaitingProbeVerdict);
+
+        now += Cooldown + TimeSpan.FromSeconds(1);
+        Assert.False(gate.ShouldShortCircuit(meshConnected: true, out _));
+        gate.RecordResolveOutcome(healthy: true, resolved: false);
+        Assert.False(gate.AwaitingProbeVerdict);
+
+        Open(gate);
+        now += Cooldown + TimeSpan.FromSeconds(1);
+        Assert.False(gate.ShouldShortCircuit(meshConnected: true, out _));
+        gate.RecordPlaybackFailure();
+        Assert.False(gate.AwaitingProbeVerdict);
+    }
+
+    [Fact]
+    public void AwaitingProbeVerdict_EndsWhenTheVerdictTimeoutLapses()
+    {
+        var now = T0;
+        var gate = MakeGate(() => now);
+        Open(gate);
+        now += Cooldown + TimeSpan.FromSeconds(1);
+        Assert.False(gate.ShouldShortCircuit(meshConnected: true, out _));
+
+        now += Verdict - TimeSpan.FromSeconds(1);
+        Assert.True(gate.AwaitingProbeVerdict);
+        now += TimeSpan.FromSeconds(1);
+        Assert.False(gate.AwaitingProbeVerdict);
+    }
+
+    [Fact]
     public void ProbeThatNeverReportsAnOutcomeStopsBlockingAfterVerdictTimeout()
     {
         var now = T0;

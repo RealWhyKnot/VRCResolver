@@ -16,6 +16,7 @@ internal sealed partial class LocalIpcServer : IDisposable
     private const int WrapperBudgetCeilingMs = 90_000;
     private const int WrapperBudgetSafetyMarginMs = 500;
     internal const int WrapperBudgetMinimumMs = 1_000;
+    internal const int FullWindowBudgetMs = 20_000;
     private const int MaxRequestBytes = 4 * 1024 * 1024;
 
     internal static int EffectiveBudgetMs(int wrapperDeadlineMs)
@@ -180,9 +181,11 @@ internal sealed partial class LocalIpcServer : IDisposable
                 return;
             }
 
+            int budgetMs = (int)PerRequestTimeout.TotalMilliseconds;
             if (req.WrapperDeadlineMs is int wrapperBudgetMs)
             {
                 int effectiveMs = EffectiveBudgetMs(wrapperBudgetMs);
+                budgetMs = effectiveMs;
                 perReqCts.CancelAfter(TimeSpan.FromMilliseconds(effectiveMs));
                 deadlineUtc = DateTime.UtcNow.AddMilliseconds(effectiveMs);
                 Logger.WriteFileOnly("[ipc] honoring wrapper_deadline_ms id=" + id +
@@ -227,6 +230,7 @@ internal sealed partial class LocalIpcServer : IDisposable
                 return;
             }
 
+            bool isProbe = false;
             if (_health != null && !BypassesHealthGate(req, _ogFallbackHint))
             {
                 bool paused = _health.ShouldShortCircuit(_mesh.IsConnected, out var gateCheck);
@@ -243,11 +247,14 @@ internal sealed partial class LocalIpcServer : IDisposable
                             + " host=" + LogUtil.BareHost(req.Url));
                     return;
                 }
+                isProbe = _health.AwaitingProbeVerdict;
             }
 
             try
             {
-                CachedResolve? cached = _cache?.Lookup(nodeHost, req.Url, req.Player, req.VrchatFormatArg, req.MaxHeight, req.Id ?? "");
+                CachedResolve? cached = isProbe
+                    ? null
+                    : _cache?.Lookup(nodeHost, req.Url, req.Player, req.VrchatFormatArg, req.MaxHeight, req.Id ?? "");
                 if (cached.HasValue)
                 {
                     await WriteFrameAsync(pipe, cached.Value.Frame, perReqCts.Token).ConfigureAwait(false);
@@ -398,7 +405,7 @@ internal sealed partial class LocalIpcServer : IDisposable
 
             if (_health != null && !viaCache)
             {
-                bool healthy = IsHealthyOutcome(failReason, outcome, serverReason);
+                bool healthy = IsHealthyOutcome(failReason, outcome, serverReason, budgetMs);
                 var gateShift = _health.RecordResolveOutcome(healthy, outcome == WireConstants.ActionResolved);
                 if (gateShift == ResolverHealthGate.Transition.Opened)
                     ConsoleUx.Warn(LogComponent.Ipc,
@@ -435,11 +442,18 @@ internal sealed partial class LocalIpcServer : IDisposable
         => req.SkipNativeHint == true
            || (ogFallbackHint != null && ogFallbackHint.IsOgBlocked(req.Url));
 
-    internal static bool IsHealthyOutcome(string? failReason, string outcome, string? serverReason)
-        => (failReason == null || failReason == WireConstants.FallbackClientDeadlineExceeded)
-           && !(outcome == WireConstants.ActionFallbackNative
-               && (serverReason == WireConstants.FallbackServerUnreachable
-                   || serverReason == WireConstants.FallbackInternalError));
+    internal static bool IsHealthyOutcome(string? failReason, string outcome, string? serverReason, int budgetMs)
+    {
+        bool deadlineHit = failReason == WireConstants.FallbackClientDeadlineExceeded
+            || (outcome == WireConstants.ActionFallbackNative
+                && serverReason == WireConstants.FallbackClientDeadlineExceeded);
+        if (deadlineHit)
+            return budgetMs < FullWindowBudgetMs;
+        return failReason == null
+            && !(outcome == WireConstants.ActionFallbackNative
+                && (serverReason == WireConstants.FallbackServerUnreachable
+                    || serverReason == WireConstants.FallbackInternalError));
+    }
 
     public void Dispose()
     {

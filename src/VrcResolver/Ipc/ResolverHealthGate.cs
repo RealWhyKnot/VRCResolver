@@ -28,6 +28,18 @@ internal sealed class ResolverHealthGate
         _now = nowUtc;
     }
 
+    public bool AwaitingProbeVerdict
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return (_state == State.HalfOpenProbe || _state == State.HalfOpenVerdict)
+                    && _now() - _verdictSince < _verdictTimeout;
+            }
+        }
+    }
+
     public bool ShouldShortCircuit(bool meshConnected, out Transition transition)
     {
         lock (_lock)
