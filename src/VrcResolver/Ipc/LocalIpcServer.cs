@@ -302,7 +302,14 @@ internal sealed partial class LocalIpcServer : IDisposable
                         result = await _mesh.ResolveAsync(req, perReqCts.Token, deadlineUtc).ConfigureAwait(false);
                     }
 
-                    await WriteFrameAsync(pipe, result.Frame, perReqCts.Token).ConfigureAwait(false);
+                    try
+                    {
+                        await WriteFrameAsync(pipe, result.Frame, perReqCts.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+                    {
+                        Logger.WriteFileOnly("[ipc] wrapper left before the reply id=" + id);
+                    }
                     outcome = result.Action;
                     serverReason = result.Reason;
 
