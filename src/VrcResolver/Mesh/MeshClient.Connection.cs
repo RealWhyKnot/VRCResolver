@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.WebSockets;
 using VrcResolver.Shared;
 
@@ -10,6 +11,10 @@ internal sealed partial class MeshClient
         while (!ct.IsCancellationRequested)
         {
             MeshLink? link = null;
+            HttpMessageInvoker? invoker = null;
+            var probe = _connectProbe = new MeshConnectProbe();
+            var connectWatch = new Stopwatch();
+            bool socketOpened = false;
             try
             {
                 string node = ServerEndpoints.ProxyHost;
@@ -26,11 +31,17 @@ internal sealed partial class MeshClient
                 };
 
                 var wsUri = _meshUriForHost(node);
+                invoker = new HttpMessageInvoker(MeshConnectProbe.CreateHandler(probe), disposeHandler: true);
+                connectWatch.Start();
                 using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
                 {
                     connectCts.CancelAfter(_connectDeadline);
-                    await _ws.ConnectAsync(wsUri, connectCts.Token).ConfigureAwait(false);
+                    await _ws.ConnectAsync(wsUri, invoker, connectCts.Token).ConfigureAwait(false);
                 }
+                connectWatch.Stop();
+                socketOpened = true;
+                Logger.WriteFileOnly("[mesh] connected in " + connectWatch.ElapsedMilliseconds + " ms"
+                    + FormatTimings(probe));
 
                 _isV3Connection = ShouldSendClientHello(_ws.SubProtocol);
                 Logger.WriteFileOnly("[mesh][v3] negotiated subprotocol="
@@ -64,18 +75,13 @@ internal sealed partial class MeshClient
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception ex)
             {
+                string failure = socketOpened
+                    ? "disconnected (error): " + ex.GetType().Name + ": " + LogUtil.SanitizeForConsole(ex.Message, 160)
+                    : DescribeConnectFailure(_currentNodeHost, connectWatch.ElapsedMilliseconds, probe, ex);
                 if (_wasConnected || _reconnectAttempt == 0)
-                {
-                    ConsoleUx.Warn(LogComponent.Mesh, "disconnected (error): "
-                        + ex.GetType().Name + ": " + LogUtil.SanitizeForConsole(ex.Message, 160));
-                }
+                    ConsoleUx.Warn(LogComponent.Mesh, failure);
                 else
-                {
-                    Exception root = ex.GetBaseException();
-                    Logger.WriteFileOnly("[mesh] reconnect attempt " + _reconnectAttempt + " failed: "
-                        + ex.GetType().Name + " (" + root.GetType().Name + ": "
-                        + LogUtil.SanitizeForConsole(root.Message, 160) + ")");
-                }
+                    Logger.WriteFileOnly("[mesh] reconnect attempt " + _reconnectAttempt + " failed: " + failure);
                 _wasConnected = false;
             }
             finally
@@ -84,6 +90,7 @@ internal sealed partial class MeshClient
                 _welcomeTcs?.TrySetResult(null);
                 try { _ws?.Dispose(); } catch { }
                 _ws = null;
+                invoker?.Dispose();
             }
 
             if (ct.IsCancellationRequested) break;
@@ -98,6 +105,27 @@ internal sealed partial class MeshClient
             try { await Task.Delay(waitMs, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
+    }
+
+    internal static string DescribeConnectFailure(string host, long elapsedMs, MeshConnectProbe probe, Exception ex)
+    {
+        string where = " after " + elapsedMs + " ms during " + probe.Phase + FormatTimings(probe);
+        if (ex is OperationCanceledException)
+            return "connect to " + host + " timed out" + where;
+
+        Exception root = ex.GetBaseException();
+        string cause = ReferenceEquals(root, ex)
+            ? ex.GetType().Name + ": " + LogUtil.SanitizeForConsole(ex.Message, 160)
+            : ex.GetType().Name + " (" + root.GetType().Name + ": " + LogUtil.SanitizeForConsole(root.Message, 160) + ")";
+        return "connect to " + host + " failed" + where + ": " + cause;
+    }
+
+    private static string FormatTimings(MeshConnectProbe probe)
+    {
+        var parts = new List<string>(2);
+        if (probe.DnsMs >= 0) parts.Add("dns " + probe.DnsMs + " ms");
+        if (probe.TcpMs >= 0) parts.Add("tcp " + probe.TcpMs + " ms");
+        return parts.Count == 0 ? "" : " (" + string.Join(", ", parts) + ")";
     }
 
     private void PrepareWelcomeState(string node)

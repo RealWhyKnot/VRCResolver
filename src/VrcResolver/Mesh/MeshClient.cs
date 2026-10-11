@@ -17,7 +17,7 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private static readonly TimeSpan SendDeadline = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan WelcomeTimeout = TimeSpan.FromSeconds(1);
     private static readonly int[] ReconnectCapsSec = { 1, 2, 4, 8, 16, 30 };
-    private TimeSpan _connectDeadline = TimeSpan.FromSeconds(20);
+    private TimeSpan _connectDeadline = TimeSpan.FromSeconds(8);
     private TimeSpan _reconnectGrace = TimeSpan.FromSeconds(5);
     private Func<string, Uri> _meshUriForHost = ServerEndpoints.MeshWebSocketUrlForHost;
 
@@ -45,6 +45,7 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private readonly ConcurrentDictionary<string, string> _inflightCids = new();
 
     private ClientWebSocket? _ws;
+    private MeshConnectProbe _connectProbe = new();
     private CancellationTokenSource? _runCts;
     private Task? _runner;
     private DateTime _lastPongUtc = DateTime.MinValue;
