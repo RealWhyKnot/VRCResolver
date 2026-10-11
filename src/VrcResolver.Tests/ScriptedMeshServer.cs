@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -22,6 +23,7 @@ internal enum MeshAttempt
     Hang,
     SlowAccept,
     WelcomeThenClose,
+    Blackhole,
 }
 
 internal sealed class ScriptedMeshServer : IAsyncDisposable
@@ -39,10 +41,12 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
     public ConcurrentQueue<string> Paths { get; } = new();
     public ConcurrentQueue<string> UserAgents { get; } = new();
     public ConcurrentQueue<(int Connection, string Id)> Resolves { get; } = new();
+    public ConcurrentQueue<int> Pings { get; } = new();
     public TimeSpan SlowAcceptDelay { get; set; } = TimeSpan.FromSeconds(2);
     public Func<int, TimeSpan?> CloseAfter { get; set; } = _ => null;
 
     private static readonly TimeSpan WelcomeThenCloseDelay = TimeSpan.FromMilliseconds(200);
+    private static readonly ConditionalWeakTable<WebSocket, SemaphoreSlim> SendGates = new();
 
     public ScriptedMeshServer(Func<int, MeshAttempt> policy, Func<int, WebSocket, string, Task>? onResolve = null)
     {
@@ -98,7 +102,7 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
             catch { continue; }
             int index = Interlocked.Increment(ref _connections);
             var closeAfter = mode == MeshAttempt.WelcomeThenClose ? WelcomeThenCloseDelay : CloseAfter(attempt);
-            _ = ServeAsync(index, ws, closeAfter);
+            _ = ServeAsync(index, ws, closeAfter, mode == MeshAttempt.Blackhole);
         }
     }
 
@@ -135,7 +139,7 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
         catch { }
     }
 
-    private async Task ServeAsync(int index, WebSocket ws, TimeSpan? closeAfter)
+    private async Task ServeAsync(int index, WebSocket ws, TimeSpan? closeAfter, bool silent = false)
     {
         try
         {
@@ -151,20 +155,26 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
                 string action = doc.RootElement.GetProperty("action").GetString() ?? "";
                 if (action == "ping")
                 {
-                    await SendAsync(ws, "{\"action\":\"pong\"}");
+                    Pings.Enqueue(index);
+                    if (!silent) await SendAsync(ws, "{\"action\":\"pong\"}");
                     continue;
                 }
                 if (action != WireConstants.ActionResolve) continue;
                 string id = doc.RootElement.GetProperty("id").GetString() ?? "";
                 Resolves.Enqueue((index, id));
-                await _onResolve(index, ws, id);
+                if (!silent) await _onResolve(index, ws, id);
             }
         }
         catch { }
     }
 
-    public static Task SendAsync(WebSocket ws, string json)
-        => ws.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, CancellationToken.None);
+    public static async Task SendAsync(WebSocket ws, string json)
+    {
+        var gate = SendGates.GetValue(ws, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync();
+        try { await ws.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, CancellationToken.None); }
+        finally { gate.Release(); }
+    }
 
     public static Task ResolvedAsync(WebSocket ws, string id)
         => SendAsync(ws, "{\"action\":\"resolved\",\"id\":\"" + id + "\",\"url\":\"https://media.example/v.mp4\"}");

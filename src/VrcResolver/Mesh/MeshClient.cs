@@ -12,7 +12,9 @@ internal readonly record struct MeshResolveResult(byte[] Frame, string Action, s
 
 internal sealed partial class MeshClient : IAsyncDisposable
 {
-    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(45);
+    private TimeSpan _heartbeatInterval = TimeSpan.FromSeconds(45);
+    private TimeSpan _stallProbeAfter = TimeSpan.FromSeconds(6);
+    private TimeSpan _stallPongDeadline = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan PongDeadline = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan SendDeadline = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan WelcomeTimeout = TimeSpan.FromSeconds(1);
@@ -53,6 +55,7 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private CancellationTokenSource? _runCts;
     private Task? _runner;
     private DateTime _lastPongUtc = DateTime.MinValue;
+    private DateTime _lastInboundUtc = DateTime.MinValue;
     private int _reconnectAttempt;
     private bool _wasConnected;
 
@@ -67,8 +70,12 @@ internal sealed partial class MeshClient : IAsyncDisposable
 
     private sealed class MeshLink
     {
+        public MeshLink(ClientWebSocket socket) => Socket = socket;
+        public readonly ClientWebSocket Socket;
         public readonly TaskCompletionSource Down = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public volatile bool WasReady;
+        public int Probing;
+        public long LastProbeTicks;
     }
 
     private MeshLink? _readyLink;
@@ -163,9 +170,10 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private static string CidSuffix(string? correlationId) =>
         string.IsNullOrEmpty(correlationId) ? "" : " cid=" + LogUtil.SanitizeForConsole(correlationId, 64);
 
-    private async Task<bool> SendTextFrameAsync(byte[] payload, CancellationToken ct)
+    private Task<bool> SendTextFrameAsync(byte[] payload, CancellationToken ct) => SendTextFrameAsync(_ws, payload, ct);
+
+    private async Task<bool> SendTextFrameAsync(ClientWebSocket? ws, byte[] payload, CancellationToken ct)
     {
-        var ws = _ws;
         if (ws is not { State: WebSocketState.Open }) return false;
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);

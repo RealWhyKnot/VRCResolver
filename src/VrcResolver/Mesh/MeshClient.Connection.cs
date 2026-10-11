@@ -65,7 +65,7 @@ internal sealed partial class MeshClient
                 _lastPongUtc = DateTime.UtcNow;
 
                 ArmWelcomeTimeout(_welcomeTcs!, ct);
-                var readyLink = link = new MeshLink();
+                var readyLink = link = new MeshLink(_ws);
                 var linkWs = _ws;
                 _ = _welcomeTcs!.Task.ContinueWith(_ => MarkLinkReady(readyLink, linkWs), TaskScheduler.Default);
 
@@ -274,6 +274,7 @@ internal sealed partial class MeshClient
                 do
                 {
                     r = await _ws!.ReceiveAsync(buf, pumpCts.Token).ConfigureAwait(false);
+                    _lastInboundUtc = DateTime.UtcNow;
                     if (r.MessageType == WebSocketMessageType.Close) return;
                     ms.Write(buf.Span[..r.Count]);
                     if (ms.Length > 4 * 1024 * 1024) throw new InvalidOperationException("frame too large");
@@ -310,7 +311,7 @@ internal sealed partial class MeshClient
     {
         while (!ct.IsCancellationRequested)
         {
-            try { await Task.Delay(HeartbeatInterval, ct).ConfigureAwait(false); }
+            try { await Task.Delay(_heartbeatInterval, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
 
             var ws = _ws;
@@ -330,6 +331,50 @@ internal sealed partial class MeshClient
                 try { ws.Abort(); } catch { }
                 return;
             }
+        }
+    }
+
+    private void ProbeIfQuiet(MeshLink link, DateTime quietSince)
+    {
+        if (_lastInboundUtc >= quietSince || link.Down.Task.IsCompleted) return;
+        if (Interlocked.CompareExchange(ref link.Probing, 1, 0) != 0) return;
+        if (Interlocked.Read(ref link.LastProbeTicks) >= quietSince.Ticks)
+        {
+            Volatile.Write(ref link.Probing, 0);
+            return;
+        }
+        Interlocked.Exchange(ref link.LastProbeTicks, DateTime.UtcNow.Ticks);
+        _ = ProbeLinkAsync(link);
+    }
+
+    private async Task ProbeLinkAsync(MeshLink link)
+    {
+        var ws = link.Socket;
+        try
+        {
+            DateTime probeAt = DateTime.UtcNow;
+            bool sent;
+            try { sent = await SendTextFrameAsync(ws, PingFrame, CancellationToken.None).ConfigureAwait(false); }
+            catch
+            {
+                try { ws.Abort(); } catch { }
+                return;
+            }
+            if (!sent) return;
+
+            using var deadlineCts = new CancellationTokenSource();
+            var deadline = Task.Delay(_stallPongDeadline, deadlineCts.Token);
+            await Task.WhenAny(deadline, link.Down.Task).ConfigureAwait(false);
+            deadlineCts.Cancel();
+            if (link.Down.Task.IsCompleted || _lastInboundUtc >= probeAt) return;
+
+            ConsoleUx.Warn(LogComponent.Mesh, "no answer to a ping within " + _stallPongDeadline.TotalSeconds
+                + "s while a resolve waited; dropping the connection to reconnect");
+            try { ws.Abort(); } catch { }
+        }
+        finally
+        {
+            Volatile.Write(ref link.Probing, 0);
         }
     }
 }

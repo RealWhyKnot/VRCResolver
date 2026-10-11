@@ -98,8 +98,8 @@ internal sealed partial class MeshClient : IAsyncDisposable
                     Logger.WriteFileOnly("[mesh] resent id=" + id + CidSuffix(req.CorrelationId)
                         + " after reconnect (send " + sends + ")");
 
-                var done = await Task.WhenAny(tcs.Task, link.Down.Task).ConfigureAwait(false);
-                if (done == tcs.Task) return await tcs.Task.ConfigureAwait(false);
+                if (await WaitForReplyAsync(link, tcs.Task, ct).ConfigureAwait(false))
+                    return await tcs.Task.ConfigureAwait(false);
                 Logger.WriteFileOnly("[mesh] connection dropped with id=" + id + CidSuffix(req.CorrelationId)
                     + " pending; resending after reconnect");
             }
@@ -108,6 +108,21 @@ internal sealed partial class MeshClient : IAsyncDisposable
         {
             ForgetPending(id);
             return MakeFallbackResult(id, WireConstants.FallbackClientDeadlineExceeded);
+        }
+    }
+
+    private async Task<bool> WaitForReplyAsync(MeshLink link, Task reply, CancellationToken ct)
+    {
+        while (true)
+        {
+            DateTime windowStart = DateTime.UtcNow;
+            using var windowCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var quiet = Task.Delay(_stallProbeAfter, windowCts.Token);
+            var done = await Task.WhenAny(reply, link.Down.Task, quiet).ConfigureAwait(false);
+            windowCts.Cancel();
+            if (done != quiet) return done == reply;
+            ct.ThrowIfCancellationRequested();
+            ProbeIfQuiet(link, windowStart);
         }
     }
 
