@@ -21,6 +21,7 @@ public static class WireConstants
     public const string ActionClientHello = "client_hello";
     public const string ActionWelcomeCached = "welcome_cached";
     public const string ActionPlaybackFeedback = "playback_feedback";
+    public const string ActionPlaybackQualityUpdate = "playback_quality_update";
     public const string PlaybackFeedbackLoadFailure = "load_failure";
     public const string PlaybackFeedbackSilentStall = "silent_stall";
     public const string PlaybackFeedbackPlaying = "playing";
@@ -62,6 +63,7 @@ public static class WireConstants
     public const string FormatMsgpack = "msgpack";
 
     public const string FeatureWelcomeHosts = "welcome_hosts";
+    public const string FeaturePlaybackFeedback = "playback_feedback";
     public const string FeaturePlaybackFeedbackV2 = "playback_feedback_v2";
     public static readonly string[] AcceptFormatsPreference = { FormatMsgpack, FormatJson };
 

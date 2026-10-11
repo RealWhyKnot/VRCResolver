@@ -145,6 +145,14 @@ public class V3ProtocolTests
     }
 
     [Fact]
+    public void WireConstants_playback_quality_strings_match_server_spec()
+    {
+        Assert.Equal("playback_quality_update", WireConstants.ActionPlaybackQualityUpdate);
+        Assert.Equal("playback_feedback", WireConstants.FeaturePlaybackFeedback);
+        Assert.Equal(WireConstants.ActionPlaybackFeedback, WireConstants.FeaturePlaybackFeedback);
+    }
+
+    [Fact]
     public void WelcomeFrame_welcome_hosts_fields_round_trip()
     {
         string json = "{\"action\":\"welcome\",\"protocol_version\":3,\"node\":\"node1\","

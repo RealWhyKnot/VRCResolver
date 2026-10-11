@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using System.Text;
 using System.Text.Json;
 using VrcResolver.Shared;
 
@@ -207,6 +208,10 @@ internal sealed partial class MeshClient
                 LogResolveLogFrame(doc.RootElement);
                 doc.Dispose();
                 return;
+            case WireConstants.ActionPlaybackQualityUpdate:
+                Logger.WriteFileOnly(FormatPlaybackQualityLine(doc.RootElement));
+                doc.Dispose();
+                return;
             case WireConstants.ActionRateLimited:
                 {
                     string meshAction = "";
@@ -296,6 +301,22 @@ internal sealed partial class MeshClient
         }
     }
 
+
+    internal static string FormatPlaybackQualityLine(JsonElement root)
+    {
+        var sb = new StringBuilder("[mesh] playback quality");
+        if (root.TryGetProperty(WireConstants.FieldCorrelationId, out var cidEl) && cidEl.ValueKind == JsonValueKind.String)
+            sb.Append(" cid=").Append(LogUtil.SanitizeForConsole(cidEl.GetString(), 32));
+        if (root.TryGetProperty(WireConstants.FieldDeliveredHeight, out var deliveredEl)
+            && deliveredEl.ValueKind == JsonValueKind.Number
+            && deliveredEl.TryGetInt32(out int delivered))
+            sb.Append(" delivered=").Append(delivered).Append('p');
+        if (root.TryGetProperty("resolved_height", out var resolvedEl)
+            && resolvedEl.ValueKind == JsonValueKind.Number
+            && resolvedEl.TryGetInt32(out int resolved))
+            sb.Append(" resolved=").Append(resolved).Append('p');
+        return sb.ToString();
+    }
 
     private static void LogResolveLogFrame(JsonElement root)
     {

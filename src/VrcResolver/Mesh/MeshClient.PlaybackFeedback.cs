@@ -17,7 +17,7 @@ internal sealed partial class MeshClient : IAsyncDisposable
         if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(kind)) return;
 
         var features = _serverFeatures;
-        if (!HasFeature(features, WireConstants.ActionPlaybackFeedback))
+        if (!HasFeature(features, WireConstants.FeaturePlaybackFeedback))
             return;
 
         bool isV2Kind = kind == WireConstants.PlaybackFeedbackResolvedRejected
