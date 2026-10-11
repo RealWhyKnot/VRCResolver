@@ -176,4 +176,76 @@ public class WrapperIdentityTests : IDisposable
         string path = MakeFile("empty.bin", Array.Empty<byte>());
         Assert.Equal("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", WrapperIdentity.ComputeSha256(path));
     }
+
+    private const int FixtureLength = 64 * 1024;
+
+    [Theory]
+    [InlineData("signed-complete", true)]
+    [InlineData("signed-cut-short", false)]
+    [InlineData("signed-pe32-complete", true)]
+    [InlineData("signed-with-trailing-bytes", false)]
+    [InlineData("unsigned-with-cookie", true)]
+    [InlineData("unsigned-pe32-with-cookie", true)]
+    [InlineData("unsigned-without-cookie", false)]
+    [InlineData("unsigned-cookie-cut-off", false)]
+    [InlineData("non-pe", false)]
+    [InlineData("empty", false)]
+    [InlineData("header-only", false)]
+    public void LooksComplete_follows_the_certificate_table_or_the_cookie(string shape, bool expected)
+    {
+        byte[] content = shape switch
+        {
+            "signed-complete" => PeFixtures.Signed(FixtureLength),
+            "signed-cut-short" => PeFixtures.Truncated(PeFixtures.Signed(FixtureLength), 100),
+            "signed-pe32-complete" => PeFixtures.Signed(FixtureLength, pe32Plus: false),
+            "signed-with-trailing-bytes" => PeFixtures.Signed(FixtureLength).Concat(new byte[16]).ToArray(),
+            "unsigned-with-cookie" => PeFixtures.Unsigned(FixtureLength, withCookie: true),
+            "unsigned-pe32-with-cookie" => PeFixtures.Unsigned(FixtureLength, withCookie: true, pe32Plus: false),
+            "unsigned-without-cookie" => PeFixtures.Unsigned(FixtureLength, withCookie: false),
+            "unsigned-cookie-cut-off" => PeFixtures.Truncated(PeFixtures.Unsigned(FixtureLength, withCookie: true), PeFixtures.CookieTrailerBytes + 4),
+            "non-pe" => PeFixtures.NonPe(FixtureLength),
+            "empty" => Array.Empty<byte>(),
+            "header-only" => PeFixtures.Signed(FixtureLength)[..0x90],
+            _ => throw new ArgumentException(shape),
+        };
+
+        Assert.Equal(expected, WrapperIdentity.LooksComplete(MakeFile(shape + ".exe", content)));
+    }
+
+    [Fact]
+    public void LooksComplete_false_for_a_missing_file()
+    {
+        Assert.False(WrapperIdentity.LooksComplete(Path.Combine(_scratchDir, "ghost.exe")));
+    }
+
+    [Fact]
+    public void LooksComplete_false_when_the_pe_header_offset_points_past_the_end()
+    {
+        byte[] content = PeFixtures.Signed(FixtureLength);
+        BitConverter.GetBytes(uint.MaxValue).CopyTo(content, 0x3C);
+
+        Assert.False(WrapperIdentity.LooksComplete(MakeFile("wild-offset.exe", content)));
+    }
+
+    [Fact]
+    public void LooksComplete_false_when_the_certificate_range_overflows()
+    {
+        byte[] content = PeFixtures.Signed(FixtureLength);
+        int directories = 0x80 + 24 + 112;
+        BitConverter.GetBytes(uint.MaxValue).CopyTo(content, directories + 32);
+        BitConverter.GetBytes(uint.MaxValue).CopyTo(content, directories + 36);
+
+        Assert.False(WrapperIdentity.LooksComplete(MakeFile("wild-certificate.exe", content)));
+    }
+
+    [Fact]
+    public void LooksComplete_reads_a_file_that_another_process_still_has_open_for_writing()
+    {
+        string path = Path.Combine(_scratchDir, "downloading.exe");
+        using var writer = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        writer.Write(PeFixtures.Signed(FixtureLength));
+        writer.Flush();
+
+        Assert.True(WrapperIdentity.LooksComplete(path));
+    }
 }

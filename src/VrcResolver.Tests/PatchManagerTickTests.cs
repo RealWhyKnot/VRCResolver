@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text;
 using VrcResolver.Shared;
@@ -35,10 +36,19 @@ public class PatchManagerTickTests : IDisposable
         try { Directory.Delete(_scratchDir, recursive: true); } catch { }
     }
 
-    private static byte[] VrcBundledBytes()
+    private const int BundledLength = (int)WrapperIdentity.OursSizeCeiling + 4096;
+
+    private static byte[] VrcBundledBytes() => PeFixtures.Unsigned(BundledLength, withCookie: true);
+
+    private void WriteWrapper() => File.WriteAllBytes(_wrapperPath, WrapperBytes());
+
+    private static byte[] PingPaddedPastTheCeiling()
     {
-        byte[] content = new byte[(int)WrapperIdentity.OursSizeCeiling + 4096];
-        for (int i = 0; i < content.Length; i++) content[i] = (byte)((i * 7) & 0xFF);
+        byte[] ping = File.ReadAllBytes(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "PING.EXE"));
+        byte[] content = new byte[BundledLength];
+        ping.CopyTo(content, 0);
+        int cookieAt = content.Length - WrapperIdentity.PyInstallerCookie.Length - PeFixtures.CookieTrailerBytes;
+        WrapperIdentity.PyInstallerCookie.CopyTo(content.AsSpan(cookieAt));
         return content;
     }
 
@@ -114,5 +124,151 @@ public class PatchManagerTickTests : IDisposable
         Assert.Equal(vrc, File.ReadAllBytes(_backupPath));
         Assert.True(File.Exists(_targetPath));
         Assert.Equal(wrapper, File.ReadAllBytes(_targetPath));
+    }
+
+    [Fact]
+    public void Tick_does_not_back_up_a_truncated_signed_binary()
+    {
+        WriteWrapper();
+        byte[] truncated = PeFixtures.Truncated(PeFixtures.Signed(BundledLength), 100);
+        File.WriteAllBytes(_targetPath, truncated);
+
+        using var manager = NewManager();
+        manager.TickOnce();
+        manager.TickOnce();
+
+        Assert.False(File.Exists(_backupPath));
+        Assert.Equal(truncated, File.ReadAllBytes(_targetPath));
+    }
+
+    [Fact]
+    public void Tick_backs_up_only_after_the_size_settles()
+    {
+        WriteWrapper();
+        byte[] bundled = PeFixtures.Signed(BundledLength);
+        File.WriteAllBytes(_targetPath, bundled);
+
+        using var manager = NewManager();
+        manager.TickOnce();
+
+        Assert.False(File.Exists(_backupPath));
+        Assert.Equal(bundled, File.ReadAllBytes(_targetPath));
+
+        manager.TickOnce();
+
+        Assert.True(File.Exists(_backupPath));
+        Assert.Equal(bundled, File.ReadAllBytes(_backupPath));
+        Assert.Equal(File.ReadAllBytes(_wrapperPath), File.ReadAllBytes(_targetPath));
+    }
+
+    [Fact]
+    public void Tick_waits_while_the_target_is_still_growing()
+    {
+        WriteWrapper();
+        const int mib = 1024 * 1024;
+        byte[] bundled = PeFixtures.Signed(12 * mib);
+        using var manager = NewManager();
+
+        int written = 0;
+        foreach (int upTo in new[] { 4 * mib, 11 * mib, 12 * mib })
+        {
+            using (var download = new FileStream(_targetPath, FileMode.Append, FileAccess.Write, FileShare.Read))
+            {
+                download.Write(bundled, written, upTo - written);
+            }
+            written = upTo;
+            manager.TickOnce();
+            Assert.False(File.Exists(_backupPath));
+        }
+
+        manager.TickOnce();
+
+        Assert.True(File.Exists(_backupPath));
+        Assert.Equal(bundled, File.ReadAllBytes(_backupPath));
+    }
+
+    [Fact]
+    public void Tick_refreshes_the_backup_only_from_a_settled_complete_replacement()
+    {
+        WriteWrapper();
+        byte[] wrapper = File.ReadAllBytes(_wrapperPath);
+        byte[] oldOg = PeFixtures.Signed(BundledLength, certificateLength: 1024);
+        File.WriteAllBytes(_backupPath, oldOg);
+        File.WriteAllBytes(_targetPath, wrapper);
+
+        using var manager = NewManager();
+        manager.TickOnce();
+        manager.TickOnce();
+        Assert.Equal(wrapper, File.ReadAllBytes(_targetPath));
+
+        byte[] replacement = PeFixtures.Signed(BundledLength, certificateLength: 4096);
+        byte[] partial = PeFixtures.Truncated(replacement, 100);
+        File.WriteAllBytes(_targetPath, partial);
+        manager.TickOnce();
+        manager.TickOnce();
+
+        Assert.Equal(partial, File.ReadAllBytes(_targetPath));
+        Assert.Equal(oldOg, File.ReadAllBytes(_backupPath));
+
+        File.WriteAllBytes(_targetPath, replacement);
+        manager.TickOnce();
+
+        Assert.Equal(replacement, File.ReadAllBytes(_targetPath));
+        Assert.Equal(oldOg, File.ReadAllBytes(_backupPath));
+
+        manager.TickOnce();
+
+        Assert.Equal(replacement, File.ReadAllBytes(_backupPath));
+        Assert.Equal(wrapper, File.ReadAllBytes(_targetPath));
+    }
+
+    [Fact]
+    public void Tick_reapply_with_a_running_target_defers_quietly()
+    {
+        WriteWrapper();
+        byte[] og = VrcBundledBytes();
+        File.WriteAllBytes(_backupPath, og);
+        byte[] ping = PingPaddedPastTheCeiling();
+        File.WriteAllBytes(_targetPath, ping);
+
+        using var manager = NewManager();
+        using var process = Process.Start(new ProcessStartInfo(_targetPath, "-n 30 127.0.0.1")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        })!;
+        try
+        {
+            for (int i = 0; i < 3; i++) manager.TickOnce();
+
+            Assert.False(process.HasExited);
+            Assert.Equal(ping, File.ReadAllBytes(_targetPath));
+            Assert.Empty(Directory.GetFiles(_toolsDir, "*.new-*"));
+        }
+        finally
+        {
+            try { process.Kill(); } catch { }
+            process.WaitForExit();
+        }
+
+        for (int i = 0; i < 2 && !WrapperIdentity.ContainsMarker(_targetPath); i++) manager.TickOnce();
+
+        Assert.Equal(File.ReadAllBytes(_wrapperPath), File.ReadAllBytes(_targetPath));
+        Assert.Equal(ping, File.ReadAllBytes(_backupPath));
+    }
+
+    [Fact]
+    public void Recover_after_a_kill_mid_restore()
+    {
+        byte[] og = VrcBundledBytes();
+        File.WriteAllBytes(_backupPath, og);
+        File.WriteAllBytes(_targetPath + ".stale-x", WrapperBytes());
+
+        using var manager = NewManager();
+        manager.RecoverFromUncleanShutdown();
+
+        string[] left = Directory.GetFiles(_toolsDir).Select(Path.GetFileName).OfType<string>().ToArray();
+        Assert.Equal(new[] { "yt-dlp.exe" }, left);
+        Assert.Equal(og, File.ReadAllBytes(_targetPath));
     }
 }

@@ -25,6 +25,11 @@ internal sealed class PatchManager : IDisposable
     private DateTime _classifyCacheMtime;
     private WrapperKind _classifyCacheKind;
 
+    private readonly record struct TargetStamp(long Length, long MtimeTicks);
+
+    private TargetStamp? _previousStamp;
+    private TargetStamp? _incompleteReported;
+
     private TickOutcome _lastTickOutcome = TickOutcome.None;
 
     private enum TickOutcome { None, Match, Locked, Reapplied, ReapplyFailed, BackupCreated, InitialStaged, Waiting, UnknownTarget, BackupLost, WrapperMissing }
@@ -239,6 +244,7 @@ internal sealed class PatchManager : IDisposable
 
         bool targetExists = File.Exists(targetPath);
         bool backupExists = File.Exists(backupPath);
+        bool targetSettled = ObserveTarget(targetPath, targetExists, out TargetStamp? targetStamp);
 
         if (!backupExists)
         {
@@ -258,6 +264,7 @@ internal sealed class PatchManager : IDisposable
                         "[patch] tick: our yt-dlp wrapper is missing from " + _patchedYtDlpPath + " -- leaving VRChat's yt-dlp.exe in place");
                     return;
                 }
+                if (!ReadyToCapture(targetPath, targetSettled, targetStamp)) return;
                 if (IsTargetInUse(targetPath))
                 {
                     EmitTickStateChange(TickOutcome.Locked,
@@ -270,7 +277,11 @@ internal sealed class PatchManager : IDisposable
                     EmitTickStateChange(TickOutcome.BackupCreated,
                         "[patch] tick: preserved VRChat's yt-dlp.exe as yt-dlp-og.exe");
                 }
-                catch (IOException) { return; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    ReportLockFailure("backup", ex);
+                    return;
+                }
                 targetExists = false;
                 backupExists = true;
             }
@@ -288,7 +299,7 @@ internal sealed class PatchManager : IDisposable
                     EmitTickStateChange(TickOutcome.BackupLost,
                         "[patch] tick: yt-dlp-og.exe is missing and target is our wrapper -- removed the wrapper so VRChat redownloads its yt-dlp");
                 }
-                catch (IOException ex) { ReportLockFailure("recovery-delete", ex); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { ReportLockFailure("recovery-delete", ex); }
                 return;
             }
             else
@@ -329,7 +340,7 @@ internal sealed class PatchManager : IDisposable
                 EmitTickStateChange(TickOutcome.InitialStaged,
                     "[patch] tick: wrapper installed at " + targetPath);
             }
-            catch (IOException ex) { ReportLockFailure("initial-stage", ex); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { ReportLockFailure("initial-stage", ex); }
             return;
         }
 
@@ -346,6 +357,7 @@ internal sealed class PatchManager : IDisposable
 
         if (targetKind == WrapperKind.VrcBundledYtDlp)
         {
+            if (!ReadyToCapture(targetPath, targetSettled, targetStamp)) return;
             if (IsTargetInUse(targetPath))
             {
                 EmitTickStateChange(TickOutcome.Locked,
@@ -361,7 +373,7 @@ internal sealed class PatchManager : IDisposable
                 EmitTickStateChange(TickOutcome.Reapplied,
                     "[patch] yt-dlp.exe was updated by VRChat -- refreshed yt-dlp-og.exe, wrapper re-applied.");
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 ReportLockFailure("re-apply", ex);
                 EmitTickStateChange(TickOutcome.ReapplyFailed,
@@ -372,6 +384,38 @@ internal sealed class PatchManager : IDisposable
 
         EmitTickStateChange(TickOutcome.UnknownTarget,
             "[patch] tick: target is neither our wrapper nor VRChat-bundled -- not mutating");
+    }
+
+    private bool ObserveTarget(string targetPath, bool targetExists, out TargetStamp? stamp)
+    {
+        stamp = null;
+        if (targetExists)
+        {
+            try
+            {
+                var info = new FileInfo(targetPath);
+                stamp = new TargetStamp(info.Length, info.LastWriteTimeUtc.Ticks);
+            }
+            catch { }
+        }
+
+        bool settled = stamp != null && stamp == _previousStamp;
+        _previousStamp = stamp;
+        return settled;
+    }
+
+    private bool ReadyToCapture(string targetPath, bool settled, TargetStamp? stamp)
+    {
+        if (!settled) return false;
+        if (WrapperIdentity.LooksComplete(targetPath)) return true;
+
+        if (_incompleteReported != stamp)
+        {
+            _incompleteReported = stamp;
+            ConsoleUx.Write(LogComponent.Patch,
+                Path.GetFileName(targetPath) + " does not look like a complete download yet; leaving it alone until it does");
+        }
+        return false;
     }
 
     internal static bool IsTargetInUse(string path)
@@ -412,7 +456,7 @@ internal sealed class PatchManager : IDisposable
     }
 
     private int _consecutiveLockFailures;
-    private void ReportLockFailure(string stage, IOException ex)
+    private void ReportLockFailure(string stage, Exception ex)
     {
         _consecutiveLockFailures++;
         if (_consecutiveLockFailures == 3)

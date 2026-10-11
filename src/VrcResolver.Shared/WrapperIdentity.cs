@@ -1,6 +1,8 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
+using Microsoft.Win32.SafeHandles;
 
 namespace VrcResolver.Shared;
 
@@ -22,10 +24,68 @@ public static class WrapperIdentity
     public const int MaxScanBytes = 16 * 1024 * 1024;
     public const long OursSizeCeiling = 10L * 1024 * 1024;
 
+    private const int CookieSearchBytes = 4096;
+
     private const string OurCompanyName = "RealWhyKnot";
     private const string OurProductName = "VRCResolver";
 
+    public static ReadOnlySpan<byte> PyInstallerCookie => "MEI\x0C\x0B\x0A\x0B\x0E"u8;
+
     public static string Marker => MarkerString;
+
+    public static bool LooksComplete(string path)
+    {
+        try
+        {
+            using SafeFileHandle handle = File.OpenHandle(
+                path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            long length = RandomAccess.GetLength(handle);
+
+            Span<byte> word = stackalloc byte[4];
+            if (!TryReadAt(handle, length, 0x3C, word)) return false;
+            long peOffset = BinaryPrimitives.ReadUInt32LittleEndian(word);
+
+            if (!TryReadAt(handle, length, peOffset, word) || !word.SequenceEqual("PE\0\0"u8)) return false;
+
+            Span<byte> magic = stackalloc byte[2];
+            if (!TryReadAt(handle, length, peOffset + 24, magic)) return false;
+            long directories = BinaryPrimitives.ReadUInt16LittleEndian(magic) switch
+            {
+                0x10B => peOffset + 24 + 96,
+                0x20B => peOffset + 24 + 112,
+                _ => -1,
+            };
+            if (directories < 0) return false;
+
+            Span<byte> security = stackalloc byte[8];
+            if (!TryReadAt(handle, length, directories + 32, security)) return false;
+            long certificateOffset = BinaryPrimitives.ReadUInt32LittleEndian(security);
+            long certificateSize = BinaryPrimitives.ReadUInt32LittleEndian(security[4..]);
+            if (certificateSize > 0) return certificateOffset + certificateSize == length;
+
+            Span<byte> tail = stackalloc byte[CookieSearchBytes];
+            tail = tail[..(int)Math.Min(length, CookieSearchBytes)];
+            if (!TryReadAt(handle, length, length - tail.Length, tail)) return false;
+            return tail.IndexOf(PyInstallerCookie) >= 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadAt(SafeFileHandle handle, long length, long offset, Span<byte> destination)
+    {
+        if (offset < 0 || offset + destination.Length > length) return false;
+        int filled = 0;
+        while (filled < destination.Length)
+        {
+            int read = RandomAccess.Read(handle, destination[filled..], offset + filled);
+            if (read <= 0) return false;
+            filled += read;
+        }
+        return true;
+    }
 
     public static WrapperKind Classify(string path, string? knownHashesPath = null)
     {
