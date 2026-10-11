@@ -6,7 +6,6 @@ namespace VrcResolver;
 [SupportedOSPlatform("windows")]
 internal sealed class PatchManager : IDisposable
 {
-    private const int TickDelayMs = 3000;
     private const int MinReapplyGapSec = 3;
 
     private readonly string _patchedYtDlpPath;
@@ -15,10 +14,11 @@ internal sealed class PatchManager : IDisposable
     private readonly string _haltFlagPath;
     private readonly CancellationTokenSource _cts = new();
     private readonly string? _vrcToolsDir;
-    private Task? _loop;
+    private readonly TimeSpan _tickDelay;
+    private readonly object _toolsLock = new();
+    private bool _restored;
     private DateTime _lastPatchTime = DateTime.MinValue;
     private int _started;
-    private int _stopping;
 
     private string? _classifyCachePath;
     private long _classifyCacheSize;
@@ -80,7 +80,7 @@ internal sealed class PatchManager : IDisposable
     {
     }
 
-    internal PatchManager(string installDir, string? vrcToolsDir, string stateDir)
+    internal PatchManager(string installDir, string? vrcToolsDir, string stateDir, TimeSpan? tickDelay = null)
     {
         _patchedYtDlpPath = Path.Combine(installDir, "tools", "yt-dlp.exe");
         _knownHashesPath = Path.Combine(installDir, "data", "wrapper_hashes.txt");
@@ -90,6 +90,7 @@ internal sealed class PatchManager : IDisposable
         _haltFlagPath = Path.Combine(stateDir, "halt.flag");
 
         _vrcToolsDir = vrcToolsDir;
+        _tickDelay = tickDelay ?? TimeSpan.FromSeconds(3);
     }
 
     private WrapperKind ClassifyTarget(string path)
@@ -122,6 +123,15 @@ internal sealed class PatchManager : IDisposable
     }
 
     public void RecoverFromUncleanShutdown()
+    {
+        lock (_toolsLock)
+        {
+            if (_restored) return;
+            RecoverCore();
+        }
+    }
+
+    private void RecoverCore()
     {
         ToolsDirSweeper.Sweep(_vrcToolsDir);
 
@@ -188,39 +198,43 @@ internal sealed class PatchManager : IDisposable
         try { if (File.Exists(_haltFlagPath)) File.Delete(_haltFlagPath); }
         catch { }
 
-        _loop = Task.Run(WatchdogLoop);
+        _ = Task.Run(WatchdogLoop);
         return true;
     }
 
-    public async Task StopAsync()
+    public bool RestoreNow(string reason)
     {
-        if (Interlocked.Exchange(ref _stopping, 1) != 0) return;
+        try { _cts.Cancel(); }
+        catch (ObjectDisposedException) { }
 
-        _cts.Cancel();
-        if (_loop != null)
+        lock (_toolsLock)
         {
-            try { await _loop.ConfigureAwait(false); } catch { }
-        }
+            _restored = true;
 
-        bool cleanShutdown;
-        if (Volatile.Read(ref _started) == 0)
-        {
-            cleanShutdown = true;
-        }
-        else if (string.IsNullOrEmpty(_vrcToolsDir))
-        {
-            cleanShutdown = true;
-        }
-        else
-        {
-            cleanShutdown = RestoreYtDlpInTools(_vrcToolsDir);
-            ToolsDirSweeper.Sweep(_vrcToolsDir);
-        }
+            RestoreOutcome outcome;
+            string detail;
+            if (string.IsNullOrEmpty(_vrcToolsDir))
+            {
+                outcome = RestoreOutcome.NothingToDo;
+                detail = "VRChat Tools folder not known";
+            }
+            else
+            {
+                outcome = ToolsRestore.Restore(_vrcToolsDir, out detail);
+                ToolsDirSweeper.Sweep(_vrcToolsDir);
+            }
 
-        if (cleanShutdown)
-        {
+            string line = "restore (" + reason + "): " + outcome + " " + detail;
+            if (outcome == RestoreOutcome.Failed)
+            {
+                ConsoleUx.Warn(LogComponent.Patch, line);
+                return false;
+            }
+
+            Logger.WriteFileOnly("[patch] " + line);
             try { File.WriteAllText(_cleanExitFlagPath, DateTime.UtcNow.ToString("o")); }
             catch { }
+            return true;
         }
     }
 
@@ -230,12 +244,21 @@ internal sealed class PatchManager : IDisposable
         {
             try { TickOnce(); }
             catch (Exception ex) { ConsoleUx.Warn(LogComponent.Patch, "tick error: " + ex.Message); }
-            try { await Task.Delay(TickDelayMs, _cts.Token).ConfigureAwait(false); }
+            try { await Task.Delay(_tickDelay, _cts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
     }
 
     internal void TickOnce()
+    {
+        lock (_toolsLock)
+        {
+            if (_restored) return;
+            TickCore();
+        }
+    }
+
+    private void TickCore()
     {
         if (string.IsNullOrEmpty(_vrcToolsDir)) return;
 

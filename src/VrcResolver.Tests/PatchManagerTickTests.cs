@@ -257,6 +257,98 @@ public class PatchManagerTickTests : IDisposable
         Assert.Equal(ping, File.ReadAllBytes(_backupPath));
     }
 
+    private string[] ToolsEntries() => Directory.GetFiles(_toolsDir).Select(Path.GetFileName).OfType<string>().ToArray();
+
+    private string CleanExitFlagPath => Path.Combine(_stateDir, "clean_exit.flag");
+
+    [Fact]
+    public void RestoreNow_after_patch_leaves_only_vanilla_and_writes_the_flag()
+    {
+        WriteWrapper();
+        byte[] vrc = VrcBundledBytes();
+        File.WriteAllBytes(_targetPath, vrc);
+
+        using var manager = NewManager();
+        manager.TickOnce();
+        manager.TickOnce();
+        Assert.True(WrapperIdentity.ContainsMarker(_targetPath));
+        Assert.True(File.Exists(_backupPath));
+
+        Assert.True(manager.RestoreNow("test"));
+
+        Assert.Equal(new[] { "yt-dlp.exe" }, ToolsEntries());
+        Assert.Equal(vrc, File.ReadAllBytes(_targetPath));
+        Assert.True(File.Exists(CleanExitFlagPath));
+    }
+
+    [Fact]
+    public void RestoreNow_racing_a_running_loop_never_leaves_the_wrapper()
+    {
+        WriteWrapper();
+        byte[] vrc = VrcBundledBytes();
+
+        for (int i = 0; i < 50; i++)
+        {
+            foreach (string path in Directory.GetFiles(_toolsDir)) File.Delete(path);
+            File.WriteAllBytes(_targetPath, vrc);
+
+            using var manager = new PatchManager(_installDir, _toolsDir, _stateDir, TimeSpan.FromMilliseconds(20));
+            Assert.True(manager.Start());
+            Thread.Sleep(i % 10 * 7);
+
+            Assert.True(manager.RestoreNow("race " + i));
+            Thread.Sleep(60);
+
+            Assert.Equal(new[] { "yt-dlp.exe" }, ToolsEntries());
+            Assert.Equal(vrc, File.ReadAllBytes(_targetPath));
+        }
+    }
+
+    [Fact]
+    public void Tick_after_RestoreNow_does_not_reapply()
+    {
+        WriteWrapper();
+        byte[] vrc = VrcBundledBytes();
+        File.WriteAllBytes(_targetPath, vrc);
+
+        using var manager = NewManager();
+        manager.TickOnce();
+        manager.TickOnce();
+        Assert.True(manager.RestoreNow("test"));
+
+        for (int i = 0; i < 4; i++) manager.TickOnce();
+
+        Assert.Equal(new[] { "yt-dlp.exe" }, ToolsEntries());
+        Assert.Equal(vrc, File.ReadAllBytes(_targetPath));
+    }
+
+    [Fact]
+    public void RestoreNow_without_a_tools_folder_still_writes_the_flag()
+    {
+        WriteWrapper();
+        using var manager = new PatchManager(_installDir, null, _stateDir);
+
+        Assert.True(manager.RestoreNow("patch-refused"));
+
+        Assert.True(File.Exists(CleanExitFlagPath));
+    }
+
+    [Fact]
+    public void Recover_after_RestoreNow_keeps_the_clean_exit_flag()
+    {
+        WriteWrapper();
+        byte[] vrc = VrcBundledBytes();
+        File.WriteAllBytes(_targetPath, vrc);
+
+        using var manager = NewManager();
+        Assert.True(manager.RestoreNow("ctrl-c"));
+        manager.RecoverFromUncleanShutdown();
+
+        Assert.True(File.Exists(CleanExitFlagPath));
+        Assert.Equal(new[] { "yt-dlp.exe" }, ToolsEntries());
+        Assert.Equal(vrc, File.ReadAllBytes(_targetPath));
+    }
+
     [Fact]
     public void Recover_after_a_kill_mid_restore()
     {

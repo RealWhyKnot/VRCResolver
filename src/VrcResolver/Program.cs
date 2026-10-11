@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -24,8 +23,10 @@ internal static class Program
     private static RelayPortManager? s_relayPort;
     private static LocalRelayServer? s_relay;
     private static InteractiveTerminal? s_terminal;
+    private static ShutdownCoordinator? s_shutdown;
     private static readonly ManualResetEventSlim s_quitSignal = new(false);
     private static volatile bool s_fastShutdown;
+    private static int s_shutdownStarted;
 
     [DllImport("Kernel32")]
     private static extern bool SetConsoleCtrlHandler(ConsoleCtrlDelegate? handler, bool add);
@@ -123,22 +124,25 @@ internal static class Program
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
+            BeginShutdown("ctrl-c", fast: false);
             s_quitSignal.Set();
         };
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
-            s_fastShutdown = true;
+            Task shutdown = BeginShutdown("process-exit", fast: true);
             s_quitSignal.Set();
-            try { RunShutdown().Wait(TimeSpan.FromMilliseconds(2000)); }
+            try { shutdown.Wait(TimeSpan.FromMilliseconds(2000)); }
             catch { }
         };
         AppDomain.CurrentDomain.UnhandledException += (_, _) =>
         {
-            s_fastShutdown = true;
-            try { RunShutdown().Wait(TimeSpan.FromSeconds(3)); }
+            try { BeginShutdown("unhandled-exception", fast: true).Wait(TimeSpan.FromSeconds(3)); }
             catch { }
         };
-        SetConsoleCtrlHandler(s_ctrlHandler, true);
+        if (!SetConsoleCtrlHandler(s_ctrlHandler, true))
+            ConsoleUx.Warn(LogComponent.Shutdown, "could not hook console close events; if this window is closed, VRChat's tools are put back on the next start.");
+
+        Logger.WriteFileOnly("[startup] parent=" + (ParentProcess.Describe() ?? "unknown"));
 
         CrashHandler.SetStateSnapshot(SnapshotState);
 
@@ -167,8 +171,13 @@ internal static class Program
 
         PatchManager.LogVrcProcessState();
 
-        s_patcher = new PatchManager(installDir);
-        s_patcher.RecoverFromUncleanShutdown();
+        PatchManager patcher = new(installDir);
+        s_patcher = patcher;
+        s_shutdown = new ShutdownCoordinator(
+            trigger => RestoreToolsFirst(patcher, trigger),
+            ShutdownSteps,
+            Logger.WriteFileOnly);
+        patcher.RecoverFromUncleanShutdown();
 
         s_mesh = new MeshClient();
         s_resolveCache = new ResolveCache();
@@ -211,9 +220,9 @@ internal static class Program
             relayBypass == null ? null : relayBypass.Release);
         s_logmon.Start();
 
-        if (!s_patcher.Start())
+        if (!patcher.Start())
         {
-            RunShutdown().GetAwaiter().GetResult();
+            BeginShutdown("patch-refused", fast: false).GetAwaiter().GetResult();
             return 2;
         }
 
@@ -264,29 +273,84 @@ internal static class Program
         s_quitSignal.Wait();
         ConsoleUx.Write(LogComponent.Shutdown, "shutting down; restoring VRChat tools and closing local services.");
 
-        RunShutdown().GetAwaiter().GetResult();
+        BeginShutdown("quit", fast: false).GetAwaiter().GetResult();
         return 0;
     }
 
     private static bool OnConsoleCtrl(uint ctrlType)
     {
-        switch (ctrlType)
+        string? trigger = ctrlType switch
         {
-            case CTRL_C_EVENT:
-            case CTRL_BREAK_EVENT:
-                s_quitSignal.Set();
-                return false;
+            CTRL_C_EVENT or CTRL_BREAK_EVENT => "ctrl-c",
+            CTRL_CLOSE_EVENT => "console-close",
+            CTRL_LOGOFF_EVENT => "logoff",
+            CTRL_SHUTDOWN_EVENT => "system-shutdown",
+            _ => null,
+        };
+        if (trigger == null) return false;
 
-            case CTRL_CLOSE_EVENT:
-            case CTRL_LOGOFF_EVENT:
-            case CTRL_SHUTDOWN_EVENT:
-                s_fastShutdown = true;
-                s_quitSignal.Set();
-                try { RunShutdown().Wait(TimeSpan.FromMilliseconds(4500)); }
-                catch { }
-                return true;
+        if (ctrlType is CTRL_C_EVENT or CTRL_BREAK_EVENT)
+        {
+            BeginShutdown(trigger, fast: false);
+            s_quitSignal.Set();
+            return true;
         }
-        return false;
+
+        try { BeginShutdown(trigger, fast: true).Wait(TimeSpan.FromMilliseconds(4500)); }
+        catch { }
+        s_quitSignal.Set();
+        return true;
+    }
+
+    private static Task BeginShutdown(string trigger, bool fast)
+    {
+        ShutdownCoordinator? shutdown = s_shutdown;
+        if (shutdown == null) return Task.CompletedTask;
+        if (Interlocked.Exchange(ref s_shutdownStarted, 1) == 0) s_fastShutdown = fast;
+        return shutdown.RunAsync(trigger, fast);
+    }
+
+    private static bool RestoreToolsFirst(PatchManager patcher, string trigger)
+    {
+        bool restored = patcher.RestoreNow(trigger);
+        s_relayPort?.DeletePortFile();
+        return restored;
+    }
+
+    private static IReadOnlyList<ShutdownStep> ShutdownSteps()
+    {
+        var steps = new List<ShutdownStep>();
+        if (s_terminal is { } terminal)
+            steps.Add(new ShutdownStep("terminal", terminal.StopAsync, TimeSpan.FromMilliseconds(500)));
+        if (s_heartbeat is { } heartbeat)
+            steps.Add(new ShutdownStep("heartbeat", heartbeat.StopAsync, TimeSpan.FromMilliseconds(500)));
+        if (s_hostsTicker is { } hostsTicker)
+            steps.Add(new ShutdownStep("hosts-ticker", hostsTicker.StopAsync, TimeSpan.FromMilliseconds(500)));
+        if (s_logmon is { } logmon)
+            steps.Add(new ShutdownStep("logmon", logmon.StopAsync, TimeSpan.FromMilliseconds(1000)));
+        if (s_ipc is { } ipc)
+            steps.Add(new ShutdownStep("ipc", ipc.StopAsync, TimeSpan.FromMilliseconds(3000)));
+        if (s_relay is { } relay)
+        {
+            steps.Add(new ShutdownStep("relay", relay.StopAsync, TimeSpan.FromMilliseconds(2000)));
+            steps.Add(new ShutdownStep("relay-dispose", () =>
+            {
+                relay.Dispose();
+                s_relay = null;
+                return Task.CompletedTask;
+            }, TimeSpan.FromMilliseconds(500)));
+        }
+        if (s_mesh is { } mesh)
+            steps.Add(new ShutdownStep("mesh", mesh.StopAsync, TimeSpan.FromMilliseconds(3000)));
+        if (s_resolveCache is { } resolveCache)
+        {
+            steps.Add(new ShutdownStep("resolve-cache", () =>
+            {
+                resolveCache.FlushNow();
+                return Task.CompletedTask;
+            }, TimeSpan.FromMilliseconds(1000)));
+        }
+        return steps;
     }
 
     private static bool TryStartLocalRelay(RelayPortManager relayPort, bool relayHttpsAllowed)
@@ -362,118 +426,6 @@ internal static class Program
         {
             relay.Dispose();
             throw;
-        }
-    }
-
-    private static int s_shutdownStarted;
-    private static async Task RunShutdown()
-    {
-        if (Interlocked.Exchange(ref s_shutdownStarted, 1) != 0) return;
-
-        var sw = Stopwatch.StartNew();
-        bool fast = s_fastShutdown;
-        var totalBudget = fast ? TimeSpan.FromSeconds(4) : TimeSpan.FromSeconds(12);
-
-        async Task WithTimeout(Task t, int ms, string step)
-        {
-            using var cts = new CancellationTokenSource(ms);
-            var done = await Task.WhenAny(t, Task.Delay(Timeout.Infinite, cts.Token)).ConfigureAwait(false);
-            if (done != t) ConsoleUx.Warn(LogComponent.Shutdown, step + " exceeded budget; moving on.");
-        }
-
-        if (!fast)
-        {
-            if (s_terminal != null)
-            {
-                try
-                {
-                    int remain = (int)Math.Max(0, (totalBudget - sw.Elapsed).TotalMilliseconds);
-                    await WithTimeout(s_terminal.StopAsync(), Math.Min(remain, 500), "terminal").ConfigureAwait(false);
-                }
-                catch (Exception ex) { ConsoleUx.Warn(LogComponent.Shutdown, "terminal: " + ex.Message); }
-            }
-
-            if (s_heartbeat != null)
-            {
-                try
-                {
-                    int remain = (int)Math.Max(0, (totalBudget - sw.Elapsed).TotalMilliseconds);
-                    await WithTimeout(s_heartbeat.StopAsync(), Math.Min(remain, 500), "heartbeat").ConfigureAwait(false);
-                }
-                catch (Exception ex) { ConsoleUx.Warn(LogComponent.Shutdown, "heartbeat: " + ex.Message); }
-            }
-
-            if (s_hostsTicker != null)
-            {
-                try
-                {
-                    int remain = (int)Math.Max(0, (totalBudget - sw.Elapsed).TotalMilliseconds);
-                    await WithTimeout(s_hostsTicker.StopAsync(), Math.Min(remain, 500), "hosts-ticker").ConfigureAwait(false);
-                }
-                catch (Exception ex) { ConsoleUx.Warn(LogComponent.Shutdown, "hosts-ticker: " + ex.Message); }
-            }
-
-            if (s_logmon != null)
-            {
-                try
-                {
-                    int remain = (int)Math.Max(0, (totalBudget - sw.Elapsed).TotalMilliseconds);
-                    await WithTimeout(s_logmon.StopAsync(), Math.Min(remain, 1000), "logmon").ConfigureAwait(false);
-                }
-                catch (Exception ex) { ConsoleUx.Warn(LogComponent.Shutdown, "log monitor: " + ex.Message); }
-            }
-
-            if (s_ipc != null)
-            {
-                try
-                {
-                    int remain = (int)Math.Max(0, (totalBudget - sw.Elapsed).TotalMilliseconds);
-                    await WithTimeout(s_ipc.StopAsync(), Math.Min(remain, 3000), "ipc").ConfigureAwait(false);
-                }
-                catch (Exception ex) { ConsoleUx.Warn(LogComponent.Shutdown, "IPC: " + ex.Message); }
-            }
-
-            if (s_relay != null)
-            {
-                try
-                {
-                    int remain = (int)Math.Max(0, (totalBudget - sw.Elapsed).TotalMilliseconds);
-                    await WithTimeout(s_relay.StopAsync(), Math.Min(remain, 2000), "relay").ConfigureAwait(false);
-                    s_relay.Dispose();
-                    s_relay = null;
-                }
-                catch (Exception ex) { ConsoleUx.Warn(LogComponent.Shutdown, "local video relay: " + ex.Message); }
-            }
-            try { s_relayPort?.DeletePortFile(); } catch { }
-
-            if (s_mesh != null)
-            {
-                try
-                {
-                    int remain = (int)Math.Max(0, (totalBudget - sw.Elapsed).TotalMilliseconds);
-                    await WithTimeout(s_mesh.StopAsync(), Math.Min(remain, 3000), "mesh").ConfigureAwait(false);
-                }
-                catch (Exception ex) { ConsoleUx.Warn(LogComponent.Shutdown, "server connection: " + ex.Message); }
-            }
-
-            if (s_resolveCache != null)
-            {
-                try { s_resolveCache.FlushNow(); }
-                catch (Exception ex) { ConsoleUx.Warn(LogComponent.Shutdown, "resolve cache: " + ex.Message); }
-            }
-        }
-
-        try { s_relayPort?.DeletePortFile(); } catch { }
-
-        if (s_patcher != null)
-        {
-            try
-            {
-                int remain = (int)Math.Max(0, (totalBudget - sw.Elapsed).TotalMilliseconds);
-                int patcherBudget = fast ? Math.Max(remain, 3000) : Math.Min(remain, 5000);
-                await WithTimeout(s_patcher.StopAsync(), patcherBudget, "patcher").ConfigureAwait(false);
-            }
-            catch (Exception ex) { ConsoleUx.Warn(LogComponent.Shutdown, "VRChat hook: " + ex.Message); }
         }
     }
 
