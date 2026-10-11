@@ -10,7 +10,15 @@ namespace VrcResolver;
 
 internal sealed partial class MeshClient : IAsyncDisposable
 {
-    public async Task<MeshResolveResult> ResolveAsync(ResolveRequest req, CancellationToken ct)
+    internal const int WireDeadlineMarginMs = 500;
+
+    internal static int WireDeadlineFor(DateTime deadlineUtc, DateTime nowUtc)
+    {
+        long remainingMs = (deadlineUtc - nowUtc).Ticks / TimeSpan.TicksPerMillisecond;
+        return (int)Math.Clamp(remainingMs - WireDeadlineMarginMs, 0, int.MaxValue);
+    }
+
+    public async Task<MeshResolveResult> ResolveAsync(ResolveRequest req, CancellationToken ct, DateTime? deadlineUtc = null)
     {
         if (req == null)
             return MakeFallbackResult("", WireConstants.FallbackInternalError);
@@ -49,6 +57,9 @@ internal sealed partial class MeshClient : IAsyncDisposable
 
                 if (_serverProtocolVersion >= 2 && !req.ProtocolVersion.HasValue && CallerOptedIntoV2(req))
                     req.ProtocolVersion = WireConstants.ClientProtocolVersion;
+
+                if (deadlineUtc is DateTime wireDeadlineUtc)
+                    req.WrapperDeadlineMs = WireDeadlineFor(wireDeadlineUtc, DateTime.UtcNow);
 
                 byte[] payload;
                 try

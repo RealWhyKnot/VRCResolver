@@ -41,6 +41,7 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
     public ConcurrentQueue<string> Paths { get; } = new();
     public ConcurrentQueue<string> UserAgents { get; } = new();
     public ConcurrentQueue<(int Connection, string Id)> Resolves { get; } = new();
+    public ConcurrentQueue<string> RequestJson { get; } = new();
     public ConcurrentQueue<int> Pings { get; } = new();
     public TimeSpan SlowAcceptDelay { get; set; } = TimeSpan.FromSeconds(2);
     public Func<int, TimeSpan?> CloseAfter { get; set; } = _ => null;
@@ -162,6 +163,7 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
                 if (action != WireConstants.ActionResolve) continue;
                 string id = doc.RootElement.GetProperty("id").GetString() ?? "";
                 Resolves.Enqueue((index, id));
+                RequestJson.Enqueue(text);
                 if (!silent) await _onResolve(index, ws, id);
             }
         }

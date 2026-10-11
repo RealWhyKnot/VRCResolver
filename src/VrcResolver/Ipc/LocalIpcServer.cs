@@ -13,10 +13,13 @@ namespace VrcResolver;
 internal sealed partial class LocalIpcServer : IDisposable
 {
     private static readonly TimeSpan PerRequestTimeout = TimeSpan.FromSeconds(15);
-    private const int WrapperBudgetFloorMs = 5_000;
     private const int WrapperBudgetCeilingMs = 90_000;
     private const int WrapperBudgetSafetyMarginMs = 500;
+    internal const int WrapperBudgetMinimumMs = 1_000;
     private const int MaxRequestBytes = 4 * 1024 * 1024;
+
+    internal static int EffectiveBudgetMs(int wrapperDeadlineMs)
+        => Math.Clamp(wrapperDeadlineMs - WrapperBudgetSafetyMarginMs, WrapperBudgetMinimumMs, WrapperBudgetCeilingMs);
 
     private readonly MeshClient _mesh;
     private readonly ResolveCache? _cache;
@@ -177,12 +180,9 @@ internal sealed partial class LocalIpcServer : IDisposable
                 return;
             }
 
-            if (req.WrapperDeadlineMs is int wrapperBudgetMs && wrapperBudgetMs > 0)
+            if (req.WrapperDeadlineMs is int wrapperBudgetMs)
             {
-                int effectiveMs = Math.Clamp(
-                    wrapperBudgetMs - WrapperBudgetSafetyMarginMs,
-                    WrapperBudgetFloorMs,
-                    WrapperBudgetCeilingMs);
+                int effectiveMs = EffectiveBudgetMs(wrapperBudgetMs);
                 perReqCts.CancelAfter(TimeSpan.FromMilliseconds(effectiveMs));
                 deadlineUtc = DateTime.UtcNow.AddMilliseconds(effectiveMs);
                 Logger.WriteFileOnly("[ipc] honoring wrapper_deadline_ms id=" + id +
@@ -270,7 +270,7 @@ internal sealed partial class LocalIpcServer : IDisposable
                         cid = req.CorrelationId;
                     }
 
-                    MeshResolveResult result = await _mesh.ResolveAsync(req, perReqCts.Token).ConfigureAwait(false);
+                    MeshResolveResult result = await _mesh.ResolveAsync(req, perReqCts.Token, deadlineUtc).ConfigureAwait(false);
 
                     int retriesSent = 0;
                     while (result.Action == WireConstants.ActionFallbackNative
@@ -299,7 +299,7 @@ internal sealed partial class LocalIpcServer : IDisposable
 
                         req.Id = Guid.NewGuid().ToString("N");
                         retriesSent++;
-                        result = await _mesh.ResolveAsync(req, perReqCts.Token).ConfigureAwait(false);
+                        result = await _mesh.ResolveAsync(req, perReqCts.Token, deadlineUtc).ConfigureAwait(false);
                     }
 
                     await WriteFrameAsync(pipe, result.Frame, perReqCts.Token).ConfigureAwait(false);
