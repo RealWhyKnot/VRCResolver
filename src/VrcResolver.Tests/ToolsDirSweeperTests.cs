@@ -1,8 +1,10 @@
+using System.Runtime.Versioning;
 using VrcResolver.Shared;
 using Xunit;
 
 namespace VrcResolver.Tests;
 
+[SupportedOSPlatform("windows")]
 public class ToolsDirSweeperTests : IDisposable
 {
     private readonly string _tempDir;
@@ -124,5 +126,68 @@ public class ToolsDirSweeperTests : IDisposable
         }.Order().ToArray();
         Assert.Equal(expected, survivors);
         Assert.Equal(new[] { "yt-dlp.exe" }, Directory.GetFiles(_tempDir).Select(Path.GetFileName).ToArray());
+    }
+
+    [Fact]
+    public void Sweep_restores_a_bundled_stale_when_target_and_og_are_missing()
+    {
+        byte[] bundled = ToolsRestoreTests.BundledBytes(1);
+        File.WriteAllBytes(Path.Combine(_tempDir, "yt-dlp.exe.stale-20261011120000"), bundled);
+
+        ToolsDirSweeper.Sweep(_tempDir);
+
+        Assert.Equal(new[] { "yt-dlp.exe" }, Directory.GetFiles(_tempDir).Select(Path.GetFileName).ToArray());
+        Assert.Equal(bundled, File.ReadAllBytes(Path.Combine(_tempDir, "yt-dlp.exe")));
+    }
+
+    [Fact]
+    public void Sweep_restores_only_the_newest_bundled_stale_and_deletes_the_rest()
+    {
+        byte[] older = ToolsRestoreTests.BundledBytes(1);
+        byte[] newer = ToolsRestoreTests.BundledBytes(2);
+        File.WriteAllBytes(Path.Combine(_tempDir, "yt-dlp.exe.stale-20261010090000"), older);
+        File.WriteAllBytes(Path.Combine(_tempDir, "yt-dlp.exe.stale-20261011120000"), newer);
+        File.WriteAllBytes(Path.Combine(_tempDir, "yt-dlp.exe.new-ab12cd34"), ToolsRestoreTests.WrapperBytes());
+
+        ToolsDirSweeper.Sweep(_tempDir);
+
+        Assert.Equal(new[] { "yt-dlp.exe" }, Directory.GetFiles(_tempDir).Select(Path.GetFileName).ToArray());
+        Assert.Equal(newer, File.ReadAllBytes(Path.Combine(_tempDir, "yt-dlp.exe")));
+    }
+
+    [Fact]
+    public void Sweep_still_deletes_a_wrapper_stale()
+    {
+        File.WriteAllBytes(Path.Combine(_tempDir, "yt-dlp.exe.stale-20261011120000"), ToolsRestoreTests.WrapperBytes());
+
+        ToolsDirSweeper.Sweep(_tempDir);
+
+        Assert.Empty(Directory.GetFiles(_tempDir));
+    }
+
+    [Fact]
+    public void Sweep_does_not_restore_a_bundled_stale_over_an_existing_target()
+    {
+        byte[] target = ToolsRestoreTests.BundledBytes(1);
+        File.WriteAllBytes(Path.Combine(_tempDir, "yt-dlp.exe"), target);
+        File.WriteAllBytes(Path.Combine(_tempDir, "yt-dlp.exe.stale-20261011120000"), ToolsRestoreTests.BundledBytes(2));
+
+        ToolsDirSweeper.Sweep(_tempDir);
+
+        Assert.Equal(new[] { "yt-dlp.exe" }, Directory.GetFiles(_tempDir).Select(Path.GetFileName).ToArray());
+        Assert.Equal(target, File.ReadAllBytes(Path.Combine(_tempDir, "yt-dlp.exe")));
+    }
+
+    [Fact]
+    public void Sweep_does_not_restore_a_bundled_stale_while_the_og_exists()
+    {
+        byte[] og = ToolsRestoreTests.BundledBytes(1);
+        File.WriteAllBytes(Path.Combine(_tempDir, "yt-dlp-og.exe"), og);
+        File.WriteAllBytes(Path.Combine(_tempDir, "yt-dlp.exe.stale-20261011120000"), ToolsRestoreTests.BundledBytes(2));
+
+        ToolsDirSweeper.Sweep(_tempDir);
+
+        Assert.Equal(new[] { "yt-dlp-og.exe" }, Directory.GetFiles(_tempDir).Select(Path.GetFileName).ToArray());
+        Assert.Equal(og, File.ReadAllBytes(Path.Combine(_tempDir, "yt-dlp-og.exe")));
     }
 }

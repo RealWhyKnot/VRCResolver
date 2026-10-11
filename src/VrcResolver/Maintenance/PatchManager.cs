@@ -444,36 +444,12 @@ internal sealed class PatchManager : IDisposable
 
     public static bool RestoreYtDlpInTools(string toolsDir)
     {
-        if (string.IsNullOrEmpty(toolsDir) || !Directory.Exists(toolsDir)) return false;
-        string targetPath = Path.Combine(toolsDir, "yt-dlp.exe");
-        string backupPath = Path.Combine(toolsDir, "yt-dlp-og.exe");
-        if (!File.Exists(backupPath)) return false;
-
-        try
-        {
-            try
-            {
-                File.Move(backupPath, targetPath, overwrite: true);
-                return true;
-            }
-            catch (IOException)
-            {
-            }
-
-            if (File.Exists(targetPath))
-            {
-                string stale = targetPath + ".stale-" + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
-                File.Move(targetPath, stale);
-                ConsoleUx.Write(LogComponent.Patch, "yt-dlp.exe was locked; moved aside to " + Path.GetFileName(stale) + ".");
-            }
-            File.Move(backupPath, targetPath);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            ConsoleUx.Warn(LogComponent.Patch, "restore error: " + ex.Message);
-            return false;
-        }
+        RestoreOutcome outcome = ToolsRestore.Restore(toolsDir, out string detail);
+        if (outcome == RestoreOutcome.Failed)
+            ConsoleUx.Warn(LogComponent.Patch, "restore error: " + detail);
+        else
+            Logger.WriteFileOnly("[patch] restore: " + outcome + " -- " + detail);
+        return outcome != RestoreOutcome.Failed;
     }
 
     public void Dispose()

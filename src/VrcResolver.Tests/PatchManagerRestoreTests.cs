@@ -59,13 +59,13 @@ public class PatchManagerRestoreTests : IDisposable
     }
 
     [Fact]
-    public void Restore_returns_false_when_backup_missing()
+    public void Restore_is_not_a_failure_when_backup_missing_and_target_is_not_ours()
     {
         File.WriteAllText(TargetPath, "PATCHED");
 
         bool ok = PatchManager.RestoreYtDlpInTools(_toolsDir);
-        Assert.False(ok);
-        Assert.True(File.Exists(TargetPath));
+        Assert.True(ok);
+        Assert.Equal("PATCHED", File.ReadAllText(TargetPath));
     }
 
     [Fact]

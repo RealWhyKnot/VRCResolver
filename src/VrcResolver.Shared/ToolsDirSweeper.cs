@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 
 namespace VrcResolver.Shared;
@@ -20,6 +21,9 @@ public static partial class ToolsDirSweeper
     {
         if (string.IsNullOrEmpty(toolsDir)) return;
         if (!Directory.Exists(toolsDir)) return;
+
+        if (OperatingSystem.IsWindows()) RestoreBundledStale(toolsDir);
+
         try
         {
             foreach (string path in Directory.EnumerateFiles(toolsDir))
@@ -55,6 +59,32 @@ public static partial class ToolsDirSweeper
                 try { Directory.Delete(path, recursive: true); }
                 catch { }
             }
+        }
+        catch { }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void RestoreBundledStale(string toolsDir)
+    {
+        try
+        {
+            string target = Path.Combine(toolsDir, "yt-dlp.exe");
+            if (File.Exists(target) || File.Exists(Path.Combine(toolsDir, "yt-dlp-og.exe"))) return;
+
+            string? newest = null;
+            foreach (string path in Directory.EnumerateFiles(toolsDir, "yt-dlp.exe.stale-*"))
+            {
+                if (newest == null
+                    || string.CompareOrdinal(Path.GetFileName(path), Path.GetFileName(newest)) > 0)
+                {
+                    newest = path;
+                }
+            }
+            if (newest == null) return;
+            if (WrapperIdentity.Classify(newest) != WrapperKind.VrcBundledYtDlp) return;
+
+            File.Move(newest, target, overwrite: false);
+            Logger.WriteFileOnly("[patch] sweep: put VRChat's yt-dlp.exe back from " + Path.GetFileName(newest));
         }
         catch { }
     }
