@@ -21,6 +21,7 @@ internal enum MeshAttempt
     Refuse,
     Hang,
     SlowAccept,
+    WelcomeThenClose,
 }
 
 internal sealed class ScriptedMeshServer : IAsyncDisposable
@@ -39,6 +40,9 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
     public ConcurrentQueue<string> UserAgents { get; } = new();
     public ConcurrentQueue<(int Connection, string Id)> Resolves { get; } = new();
     public TimeSpan SlowAcceptDelay { get; set; } = TimeSpan.FromSeconds(2);
+    public Func<int, TimeSpan?> CloseAfter { get; set; } = _ => null;
+
+    private static readonly TimeSpan WelcomeThenCloseDelay = TimeSpan.FromMilliseconds(200);
 
     public ScriptedMeshServer(Func<int, MeshAttempt> policy, Func<int, WebSocket, string, Task>? onResolve = null)
     {
@@ -67,7 +71,8 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
             Paths.Enqueue(ctx.Request.Url?.AbsolutePath ?? "");
             UserAgents.Enqueue(ctx.Request.UserAgent ?? "");
 
-            switch (_policy(attempt))
+            var mode = _policy(attempt);
+            switch (mode)
             {
                 case MeshAttempt.Refuse:
                     ctx.Response.StatusCode = 503;
@@ -92,7 +97,8 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
             try { ws = (await ctx.AcceptWebSocketAsync(null)).WebSocket; }
             catch { continue; }
             int index = Interlocked.Increment(ref _connections);
-            _ = ServeAsync(index, ws);
+            var closeAfter = mode == MeshAttempt.WelcomeThenClose ? WelcomeThenCloseDelay : CloseAfter(attempt);
+            _ = ServeAsync(index, ws, closeAfter);
         }
     }
 
@@ -116,14 +122,25 @@ internal sealed class ScriptedMeshServer : IAsyncDisposable
         try { ws = (await ctx.AcceptWebSocketAsync(null)).WebSocket; }
         catch { return; }
         int index = Interlocked.Increment(ref _connections);
-        await ServeAsync(index, ws);
+        await ServeAsync(index, ws, null);
     }
 
-    private async Task ServeAsync(int index, WebSocket ws)
+    private async Task CloseAfterDelayAsync(WebSocket ws, TimeSpan delay)
+    {
+        try
+        {
+            await Task.Delay(delay, _cts.Token);
+            await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "scripted close", CancellationToken.None);
+        }
+        catch { }
+    }
+
+    private async Task ServeAsync(int index, WebSocket ws, TimeSpan? closeAfter)
     {
         try
         {
             await SendAsync(ws, "{\"action\":\"welcome\",\"protocol_version\":1,\"node\":\"fake\"}");
+            if (closeAfter is { } delay) _ = CloseAfterDelayAsync(ws, delay);
             var buf = new byte[64 * 1024];
             while (ws.State == WebSocketState.Open && !_cts.IsCancellationRequested)
             {

@@ -20,6 +20,8 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private static readonly TimeSpan MinWakeSpacing = TimeSpan.FromSeconds(1);
     private TimeSpan _connectDeadline = TimeSpan.FromSeconds(8);
     private TimeSpan _reconnectGrace = TimeSpan.FromSeconds(5);
+    private TimeSpan _stableLinkAfter = TimeSpan.FromSeconds(30);
+    private DateTime _linkReadyUtc;
     private Func<string, Uri> _meshUriForHost = ServerEndpoints.MeshWebSocketUrlForHost;
     private Func<int, int> _nextBackoffMs;
 

@@ -98,6 +98,8 @@ internal sealed partial class MeshClient
 
             if (ct.IsCancellationRequested) break;
 
+            if (link is { WasReady: true } && DateTime.UtcNow - _linkReadyUtc >= _stableLinkAfter)
+                _reconnectAttempt = 0;
             _reconnectAttempt++;
             WatchdogStats.RecordReconnect();
             int waitMs = _nextBackoffMs(_reconnectAttempt);
@@ -182,6 +184,7 @@ internal sealed partial class MeshClient
     private void MarkLinkReady(MeshLink link, ClientWebSocket? ws)
     {
         if (link.Down.Task.IsCompleted || ws is not { State: WebSocketState.Open }) return;
+        _linkReadyUtc = DateTime.UtcNow;
         link.WasReady = true;
         Interlocked.Exchange(ref _wake, NewSignal());
         Volatile.Write(ref _readyLink, link);

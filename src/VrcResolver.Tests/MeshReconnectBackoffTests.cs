@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
@@ -58,23 +60,23 @@ public class MeshReconnectBackoffTests : IDisposable
     }
 
     [Fact]
-    public async Task Cached_welcome_resets_the_reconnect_backoff()
+    public async Task Cached_welcome_alone_keeps_the_reconnect_backoff()
     {
         var client = ReconnectedClient(cacheHasNode: true);
 
         await DispatchJsonAsync(client, "{\"action\":\"welcome_cached\",\"protocol_version\":3,\"node\":\"node1\"}");
 
-        Assert.Equal(0, ReconnectAttempt(client));
+        Assert.Equal(4, ReconnectAttempt(client));
     }
 
     [Fact]
-    public async Task Full_welcome_resets_the_reconnect_backoff()
+    public async Task Full_welcome_alone_keeps_the_reconnect_backoff()
     {
         var client = ReconnectedClient(cacheHasNode: false);
 
         await DispatchJsonAsync(client, "{\"action\":\"welcome\",\"protocol_version\":3,\"node\":\"node1\"}");
 
-        Assert.Equal(0, ReconnectAttempt(client));
+        Assert.Equal(4, ReconnectAttempt(client));
     }
 
     [Fact]
@@ -85,5 +87,43 @@ public class MeshReconnectBackoffTests : IDisposable
         await DispatchJsonAsync(client, "{\"action\":\"welcome_cached\",\"protocol_version\":3,\"node\":\"node1\"}");
 
         Assert.Equal(4, ReconnectAttempt(client));
+    }
+
+    [Fact]
+    public async Task Backoff_grows_when_links_die_right_after_welcome()
+    {
+        var attempts = new ConcurrentQueue<int>();
+        await using var server = new ScriptedMeshServer(_ => MeshAttempt.WelcomeThenClose);
+        await using var client = MeshTestClient.For(server);
+        MeshTestClient.Set(client, "_nextBackoffMs", (Func<int, int>)(attempt =>
+        {
+            attempts.Enqueue(attempt);
+            return 50;
+        }));
+
+        await client.StartAsync();
+        await MeshTestClient.WaitUntilAsync(() => attempts.Count >= 4, 15_000, "four backoffs after dropped links");
+
+        Assert.Equal(new[] { 1, 2, 3, 4 }, attempts.Take(4).ToArray());
+    }
+
+    [Fact]
+    public async Task Link_that_stayed_up_resets_the_backoff()
+    {
+        var attempts = new ConcurrentQueue<int>();
+        await using var server = new ScriptedMeshServer(attempt => attempt <= 2 ? MeshAttempt.Refuse : MeshAttempt.Accept);
+        server.CloseAfter = attempt => attempt == 3 ? TimeSpan.FromMilliseconds(500) : null;
+        await using var client = MeshTestClient.For(server);
+        MeshTestClient.Set(client, "_stableLinkAfter", TimeSpan.FromMilliseconds(200));
+        MeshTestClient.Set(client, "_nextBackoffMs", (Func<int, int>)(attempt =>
+        {
+            attempts.Enqueue(attempt);
+            return 50;
+        }));
+
+        await client.StartAsync();
+        await MeshTestClient.WaitUntilAsync(() => attempts.Count >= 3, 15_000, "a backoff after the link that stayed up dropped");
+
+        Assert.Equal(new[] { 1, 2, 1 }, attempts.Take(3).ToArray());
     }
 }
