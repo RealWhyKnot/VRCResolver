@@ -12,7 +12,7 @@ internal sealed partial class MeshClient
             MeshLink? link = null;
             try
             {
-                string node = await ResolveNodeHostAsync(ct).ConfigureAwait(false);
+                string node = ServerEndpoints.ProxyHost;
                 PrepareWelcomeState(node);
 
                 _ws = new ClientWebSocket();
@@ -28,7 +28,7 @@ internal sealed partial class MeshClient
                 var wsUri = _meshUriForHost(node);
                 using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
                 {
-                    connectCts.CancelAfter(ConnectDeadline);
+                    connectCts.CancelAfter(_connectDeadline);
                     await _ws.ConnectAsync(wsUri, connectCts.Token).ConfigureAwait(false);
                 }
 
@@ -48,10 +48,7 @@ internal sealed partial class MeshClient
                     }
                 }
 
-                _cachedNodeHost = node;
-                _useApexDiscoveryFallback = false;
                 _wasConnected = true;
-                _firstReconnectFailureUtc = DateTime.MinValue;
                 _lastPongUtc = DateTime.UtcNow;
 
                 ArmWelcomeTimeout(_welcomeTcs!, ct);
@@ -80,18 +77,6 @@ internal sealed partial class MeshClient
                         + LogUtil.SanitizeForConsole(root.Message, 160) + ")");
                 }
                 _wasConnected = false;
-                if (string.Equals(_currentNodeHost, ServerEndpoints.ProxyHost, StringComparison.OrdinalIgnoreCase)
-                    && string.IsNullOrEmpty(_cachedNodeHost))
-                {
-                    _useApexDiscoveryFallback = true;
-                }
-                if (_firstReconnectFailureUtc == DateTime.MinValue)
-                    _firstReconnectFailureUtc = DateTime.UtcNow;
-                if (DateTime.UtcNow - _firstReconnectFailureUtc > ApexReResolveAfter)
-                {
-                    _cachedNodeHost = null;
-                    _useApexDiscoveryFallback = false;
-                }
             }
             finally
             {
@@ -184,38 +169,6 @@ internal sealed partial class MeshClient
                 Logger.WriteFileOnly("[mesh] no welcome within 1s -- assuming v1 server");
             }
         }, TaskScheduler.Default);
-    }
-
-    private async Task<string> ResolveNodeHostAsync(CancellationToken ct)
-    {
-        if (!string.IsNullOrEmpty(_cachedNodeHost)) return _cachedNodeHost!;
-        if (!_useApexDiscoveryFallback) return ServerEndpoints.ProxyHost;
-
-        Exception? lastEx = null;
-        for (int attempt = 1; attempt <= 3; attempt++)
-        {
-            try
-            {
-                using var req = new HttpRequestMessage(HttpMethod.Get, ServerEndpoints.ApexDiscoveryUrl);
-                req.Headers.UserAgent.ParseAdd(_userAgent);
-                using var resp = await _httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-                if ((int)resp.StatusCode >= 300 && (int)resp.StatusCode < 400 && resp.Headers.Location != null)
-                {
-                    if (ServerEndpoints.TryExtractDiscoveryRedirectHost(resp.Headers.Location, out string host))
-                    {
-                        return host;
-                    }
-                }
-                lastEx = new InvalidOperationException("apex returned " + (int)resp.StatusCode + " with no usable Location");
-            }
-            catch (Exception ex) { lastEx = ex; }
-            try { await Task.Delay(1000 * attempt, ct).ConfigureAwait(false); }
-            catch (OperationCanceledException) { throw; }
-        }
-
-        FailAllPending(WireConstants.FallbackServerUnreachable);
-        ConsoleUx.Warn(LogComponent.Mesh, "apex discovery failed -- falling back to native yt-dlp until reconnect succeeds.");
-        throw lastEx ?? new InvalidOperationException("apex discovery failed");
     }
 
     private async Task PumpAsync(CancellationToken ct)

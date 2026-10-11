@@ -12,14 +12,12 @@ internal readonly record struct MeshResolveResult(byte[] Frame, string Action, s
 
 internal sealed partial class MeshClient : IAsyncDisposable
 {
-    private static readonly TimeSpan ApexAttemptTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan PongDeadline = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan SendDeadline = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan ConnectDeadline = TimeSpan.FromSeconds(20);
-    private static readonly TimeSpan ApexReResolveAfter = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan WelcomeTimeout = TimeSpan.FromSeconds(1);
     private static readonly int[] ReconnectCapsSec = { 1, 2, 4, 8, 16, 30 };
+    private TimeSpan _connectDeadline = TimeSpan.FromSeconds(20);
     private TimeSpan _reconnectGrace = TimeSpan.FromSeconds(5);
     private Func<string, Uri> _meshUriForHost = ServerEndpoints.MeshWebSocketUrlForHost;
 
@@ -33,7 +31,6 @@ internal sealed partial class MeshClient : IAsyncDisposable
                 BuiltinResolver.Instance));
 
     private readonly string _userAgent;
-    private readonly HttpClient _httpClient;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<MeshResolveResult>> _pending = new();
     private readonly Random _rng = new();
     private readonly SemaphoreSlim _sendGate = new(1, 1);
@@ -48,14 +45,11 @@ internal sealed partial class MeshClient : IAsyncDisposable
     private readonly ConcurrentDictionary<string, string> _inflightCids = new();
 
     private ClientWebSocket? _ws;
-    private string? _cachedNodeHost;
     private CancellationTokenSource? _runCts;
     private Task? _runner;
-    private DateTime _firstReconnectFailureUtc = DateTime.MinValue;
     private DateTime _lastPongUtc = DateTime.MinValue;
     private int _reconnectAttempt;
     private bool _wasConnected;
-    private bool _useApexDiscoveryFallback;
 
     private bool _isV3Connection;
     private string _currentNodeHost = "";
@@ -121,8 +115,6 @@ internal sealed partial class MeshClient : IAsyncDisposable
     {
         var ver = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0.0";
         _userAgent = "VRCResolver-Watchdog/" + ver;
-        var handler = new HttpClientHandler { AllowAutoRedirect = false };
-        _httpClient = new HttpClient(handler) { Timeout = ApexAttemptTimeout };
     }
 
     public Task StartAsync()
@@ -190,7 +182,6 @@ internal sealed partial class MeshClient : IAsyncDisposable
         await StopAsync().ConfigureAwait(false);
         try { _ws?.Dispose(); } catch { }
         _ws = null;
-        _httpClient.Dispose();
         _runCts?.Dispose();
     }
 }
