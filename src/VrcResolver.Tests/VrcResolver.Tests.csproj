@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\VrcResolver.Shared\VrcResolver.Shared.csproj" />
     <ProjectReference Include="..\VrcResolver\VrcResolver.csproj" />
     <ProjectReference Include="..\VrcResolver.Uninstaller\VrcResolver.Uninstaller.csproj" />

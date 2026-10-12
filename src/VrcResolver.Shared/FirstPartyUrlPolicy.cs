@@ -10,6 +10,8 @@ public static class FirstPartyUrlPolicy
         "vtt", "srt",
     };
 
+    internal static IReadOnlyCollection<string> AllowedPathExtensions => s_allowedPathExts;
+
     private static string[] s_serverHostFamilies = Array.Empty<string>();
     private static string[] s_serverProxyPaths = Array.Empty<string>();
 
