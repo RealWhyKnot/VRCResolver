@@ -42,6 +42,7 @@ internal sealed partial class MeshClient : IAsyncDisposable
         try
         {
             int sends = 0;
+            int drops = 0;
             while (true)
             {
                 var link = await WaitForLinkAsync(tcs.Task, ct).ConfigureAwait(false);
@@ -101,6 +102,8 @@ internal sealed partial class MeshClient : IAsyncDisposable
                         ForgetPending(id);
                         return MakeFallbackResult(id, WireConstants.FallbackServerUnreachable);
                     }
+                    if (!tcs.Task.IsCompleted && woke == link.Down.Task && sends > 0 && ++drops > 1)
+                        return GiveUpAfterResend(id, req.CorrelationId);
                     continue;
                 }
 
@@ -109,8 +112,10 @@ internal sealed partial class MeshClient : IAsyncDisposable
                     Logger.WriteFileOnly("[mesh] resent id=" + id + CidSuffix(req.CorrelationId)
                         + " after reconnect (send " + sends + ")");
 
-                if (await WaitForReplyAsync(link, tcs.Task, ct).ConfigureAwait(false))
+                if (await WaitForReplyAsync(link, tcs.Task, ct).ConfigureAwait(false) || tcs.Task.IsCompleted)
                     return await tcs.Task.ConfigureAwait(false);
+                if (++drops > 1)
+                    return GiveUpAfterResend(id, req.CorrelationId);
                 Logger.WriteFileOnly("[mesh] connection dropped with id=" + id + CidSuffix(req.CorrelationId)
                     + " pending; resending after reconnect");
             }
@@ -135,6 +140,14 @@ internal sealed partial class MeshClient : IAsyncDisposable
             ct.ThrowIfCancellationRequested();
             ProbeIfQuiet(link, windowStart);
         }
+    }
+
+    private MeshResolveResult GiveUpAfterResend(string id, string? correlationId)
+    {
+        ForgetPending(id);
+        Logger.WriteFileOnly("[mesh] connection dropped again with id=" + id + CidSuffix(correlationId)
+            + " pending; not resending a second time");
+        return MakeFallbackResult(id, WireConstants.FallbackServerUnreachable);
     }
 
     private void ForgetPending(string id)

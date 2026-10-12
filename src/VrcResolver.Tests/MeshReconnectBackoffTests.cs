@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -105,6 +106,28 @@ public class MeshReconnectBackoffTests : IDisposable
         await MeshTestClient.WaitUntilAsync(() => attempts.Count >= 4, 15_000, "four backoffs after dropped links");
 
         Assert.Equal(new[] { 1, 2, 3, 4 }, attempts.Take(4).ToArray());
+    }
+
+    [Fact]
+    public async Task Resolve_on_links_that_die_right_after_welcome_gives_up_after_one_resend()
+    {
+        int[] capsMs = { 1_000, 2_000, 4_000, 8_000, 16_000, 30_000 };
+        await using var server = new ScriptedMeshServer(_ => MeshAttempt.WelcomeThenClose, (_, _, _) => Task.CompletedTask);
+        await using var client = MeshTestClient.For(server);
+        MeshTestClient.Set(client, "_nextBackoffMs", (Func<int, int>)(attempt => capsMs[Math.Min(attempt, capsMs.Length) - 1]));
+        await client.StartAsync();
+        var req = new ResolveRequest { Url = "https://www.youtube.com/watch?v=abc", Player = "avpro" };
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var sw = Stopwatch.StartNew();
+        var result = await client.ResolveAsync(req, cts.Token);
+        sw.Stop();
+
+        Assert.Equal(WireConstants.ActionFallbackNative, result.Action);
+        Assert.Equal(WireConstants.FallbackServerUnreachable, result.Reason);
+        Assert.True(sw.ElapsedMilliseconds < 6_000, "took " + sw.ElapsedMilliseconds + " ms");
+        int sends = server.Resolves.Count(r => r.Id == req.Id);
+        Assert.InRange(sends, 1, 2);
     }
 
     [Fact]
