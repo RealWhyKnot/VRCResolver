@@ -66,7 +66,7 @@ public class LocalIpcServerLogicTests
             using var doc = JsonDocument.Parse(line);
             Assert.Equal(WireConstants.ActionFallbackNative, doc.RootElement.GetProperty("action").GetString());
             Assert.Single(server.Resolves);
-            Assert.False(gate.AwaitingProbeVerdict);
+            await MeshTestClient.WaitUntilAsync(() => !gate.AwaitingProbeVerdict, 5_000, "probe verdict");
             Assert.False(gate.ShouldShortCircuit(true, out _));
         });
     }
@@ -114,31 +114,34 @@ public class LocalIpcServerLogicTests
     }
 
     [Theory]
-    [InlineData(1_500, false)]
-    [InlineData(20_500, true)]
-    public async Task Hung_resolves_open_the_gate_only_when_the_budget_was_a_full_window(
-        int wrapperDeadlineMs, bool expectOpen)
+    [InlineData(1_500, false, false)]
+    [InlineData(26_500, true, true)]
+    [InlineData(1_500, true, false)]
+    public async Task Deadline_outcomes_open_the_gate_only_when_the_budget_was_a_full_window(
+        int wrapperDeadlineMs, bool serverAnswers, bool expectOpen)
     {
         var gate = new ResolverHealthGate();
-        await using var server = new ScriptedMeshServer(_ => MeshAttempt.Accept, (connection, ws, id) => Task.CompletedTask);
+        await using var server = new ScriptedMeshServer(_ => MeshAttempt.Accept, (connection, ws, id) => serverAnswers
+            ? ScriptedMeshServer.SendAsync(ws, "{\"action\":\"fallback_native\",\"id\":\"" + id
+                + "\",\"reason\":\"" + WireConstants.FallbackClientDeadlineExceeded + "\",\"public_message\":\"scripted\"}")
+            : Task.CompletedTask);
         await using var client = await ConnectedClientAsync(server);
         var ipc = new LocalIpcServer(client, null, null, gate);
         string pipeName = NewPipeName();
         ipc.StartForTests(pipeName);
         try
         {
-            string request = "{\"action\":\"resolve\",\"id\":\"hung\",\"url\":\"" + Url
-                + "\",\"player\":\"unity\",\"maxHeight\":720,\"wrapper_deadline_ms\":" + wrapperDeadlineMs + "}";
             var replies = await Task.WhenAll(Enumerable.Range(0, ResolverHealthGate.OpenThreshold)
-                .Select(_ => AskAsync(pipeName, request)));
+                .Select(i => AskAsync(pipeName, "{\"action\":\"resolve\",\"id\":\"deadline" + i + "\",\"url\":\"" + Url
+                    + "\",\"player\":\"unity\",\"maxHeight\":720,\"wrapper_deadline_ms\":" + wrapperDeadlineMs + "}")));
 
             foreach (string reply in replies)
             {
                 using var doc = JsonDocument.Parse(reply);
                 Assert.Equal(WireConstants.FallbackClientDeadlineExceeded, doc.RootElement.GetProperty("reason").GetString());
+                Assert.Equal(serverAnswers, doc.RootElement.TryGetProperty("public_message", out _));
             }
 
-            await Task.Delay(500);
             Assert.Equal(expectOpen, gate.ShouldShortCircuit(true, out _));
         }
         finally
@@ -156,7 +159,19 @@ public class LocalIpcServerLogicTests
         using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
         string? line = await reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(40));
         Assert.False(string.IsNullOrEmpty(line));
+        await WaitForHangUpAsync(reader);
         return line!;
+    }
+
+    private static async Task WaitForHangUpAsync(StreamReader reader)
+    {
+        try
+        {
+            Assert.Null(await reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        catch (IOException)
+        {
+        }
     }
 
     private static ResolverHealthGate OpenGate(Func<DateTime> now)

@@ -93,10 +93,12 @@ public class MeshConnectTimingTests
         await client.StartAsync();
         await MeshTestClient.WaitUntilAsync(() => server.Attempts >= 1, 10_000, "first connect attempt");
         var first = ProbeOf(client);
+        await MeshTestClient.WaitUntilAsync(() => server.Attempts >= 2, 10_000, "second connect attempt");
+        var second = ProbeOf(client);
         await MeshTestClient.WaitUntilAsync(() => client.IsConnected, 10_000, "mesh connection after a hung first connect");
 
-        var second = ProbeOf(client);
         Assert.NotSame(first, second);
+        Assert.Same(second, ProbeOf(client));
         Assert.True(second.DnsMs >= 0);
         Assert.True(second.TcpMs >= 0);
     }

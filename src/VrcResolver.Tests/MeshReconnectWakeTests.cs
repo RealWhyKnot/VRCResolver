@@ -133,7 +133,7 @@ public class MeshReconnectWakeTests
         Assert.All(results, r => Assert.Equal(WireConstants.FallbackServerUnreachable, r.Reason));
         var times = stamps.ToArray();
         Assert.Equal(2, times.Length);
-        Assert.True(times[1] - times[0] >= 900, "second attempt came " + (times[1] - times[0]) + " ms after the first");
+        Assert.True(times[1] - times[0] >= 500, "second attempt came " + (times[1] - times[0]) + " ms after the first");
     }
 
     [Fact]

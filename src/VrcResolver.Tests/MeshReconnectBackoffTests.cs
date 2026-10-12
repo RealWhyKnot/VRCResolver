@@ -135,7 +135,7 @@ public class MeshReconnectBackoffTests : IDisposable
     {
         var attempts = new ConcurrentQueue<int>();
         await using var server = new ScriptedMeshServer(attempt => attempt <= 2 ? MeshAttempt.Refuse : MeshAttempt.Accept);
-        server.CloseAfter = attempt => attempt == 3 ? TimeSpan.FromMilliseconds(500) : null;
+        server.CloseAfter = attempt => attempt == 3 ? TimeSpan.FromMilliseconds(1_000) : null;
         await using var client = MeshTestClient.For(server);
         MeshTestClient.Set(client, "_stableLinkAfter", TimeSpan.FromMilliseconds(200));
         MeshTestClient.Set(client, "_nextBackoffMs", (Func<int, int>)(attempt =>

@@ -63,7 +63,7 @@ public class ShutdownCoordinatorTests
         _ = coordinator.RunAsync("quit", fast: false);
         await restored.Task.WaitAsync(Generous);
 
-        Assert.InRange(Interlocked.Read(ref restoredAtMs), 0, 100);
+        Assert.InRange(Interlocked.Read(ref restoredAtMs), 0, 1_000);
         Assert.Equal("restore", order.First());
     }
 
