@@ -158,15 +158,8 @@ internal sealed class PatchManager : IDisposable
 
         if (File.Exists(targetPath) && ClassifyTarget(targetPath) == WrapperKind.Ours)
         {
-            try
-            {
-                File.Delete(targetPath);
-                ConsoleUx.Warn(LogComponent.Patch, "Recovery: orphan VRCResolver wrapper deleted from Tools (no backup to restore from). VRChat will re-download its yt-dlp on next session.");
-            }
-            catch (Exception ex)
-            {
-                ConsoleUx.Warn(LogComponent.Patch, "Recovery: orphan deletion failed: " + ex.Message);
-            }
+            ConsoleUx.Warn(LogComponent.Patch, "Recovery: previous run exited uncleanly and left our wrapper in Tools with no backup -- removing it. VRChat will re-download its yt-dlp on next session.");
+            RestoreYtDlpInTools(_vrcToolsDir, _knownHashesPath);
         }
     }
 
@@ -522,9 +515,9 @@ internal sealed class PatchManager : IDisposable
         }
     }
 
-    public static bool RestoreYtDlpInTools(string toolsDir)
+    public static bool RestoreYtDlpInTools(string toolsDir, string? knownHashesPath = null)
     {
-        RestoreOutcome outcome = ToolsRestore.Restore(toolsDir, out string detail);
+        RestoreOutcome outcome = ToolsRestore.Restore(toolsDir, out string detail, knownHashesPath);
         if (outcome == RestoreOutcome.Failed)
             ConsoleUx.Warn(LogComponent.Patch, "restore error: " + detail);
         else

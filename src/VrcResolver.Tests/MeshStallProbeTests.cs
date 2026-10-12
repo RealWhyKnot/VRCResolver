@@ -49,6 +49,32 @@ public class MeshStallProbeTests
     }
 
     [Fact]
+    public async Task Dropping_a_silent_connection_prints_one_console_warning()
+    {
+        var original = Console.Out;
+        var captured = new StringWriter();
+        Console.SetOut(captured);
+        try
+        {
+            await using var server = new ScriptedMeshServer(attempt => attempt == 1 ? MeshAttempt.Blackhole : MeshAttempt.Accept);
+            await using var client = ProbingClient(server, TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(300));
+            await client.StartAsync();
+
+            var result = await client.ResolveAsync(Request(), new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token);
+
+            Assert.Equal(WireConstants.ActionResolved, result.Action);
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        string output = captured.ToString();
+        Assert.Contains("disconnected (error)", output);
+        Assert.DoesNotContain("no answer to a ping", output);
+    }
+
+    [Fact]
     public async Task Slow_but_alive_server_keeps_its_connection()
     {
         await using var server = new ScriptedMeshServer(_ => MeshAttempt.Accept, (connection, ws, id) =>

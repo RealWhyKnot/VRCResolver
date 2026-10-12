@@ -14,6 +14,7 @@ public class ToolsRestoreTests : IDisposable
     public ToolsRestoreTests()
     {
         ToolsRestore.MoveFile = File.Move;
+        ToolsRestore.ComputeHash = WrapperIdentity.ComputeSha256;
         _toolsDir = Path.Combine(Path.GetTempPath(), "vrcresolver-tests-toolsrestore-" + Guid.NewGuid().ToString("N").Substring(0, 8));
         Directory.CreateDirectory(_toolsDir);
     }
@@ -21,6 +22,7 @@ public class ToolsRestoreTests : IDisposable
     public void Dispose()
     {
         ToolsRestore.MoveFile = File.Move;
+        ToolsRestore.ComputeHash = WrapperIdentity.ComputeSha256;
         try { Directory.Delete(_toolsDir, recursive: true); } catch { }
     }
 
@@ -33,6 +35,9 @@ public class ToolsRestoreTests : IDisposable
         for (int i = 0; i < content.Length; i++) content[i] = (byte)((i * 7 + seed) & 0xFF);
         return content;
     }
+
+    internal static byte[] CompleteBundledBytes(int seed)
+        => PeFixtures.Signed((int)WrapperIdentity.OursSizeCeiling + 4096, certificateLength: 1024 * seed);
 
     internal static byte[] WrapperBytes()
     {
@@ -78,15 +83,46 @@ public class ToolsRestoreTests : IDisposable
     [Fact]
     public void Restore_keeps_a_newer_vrchat_binary()
     {
-        byte[] newer = BundledBytes(1);
+        byte[] newer = CompleteBundledBytes(1);
         File.WriteAllBytes(TargetPath, newer);
-        File.WriteAllBytes(OgPath, BundledBytes(2));
+        File.WriteAllBytes(OgPath, CompleteBundledBytes(2));
 
         RestoreOutcome outcome = ToolsRestore.Restore(_toolsDir, out string detail);
 
         Assert.Equal(RestoreOutcome.KeptNewerVrchatBinary, outcome);
         Assert.NotEqual("", detail);
         Assert.Equal(newer, File.ReadAllBytes(TargetPath));
+        Assert.Equal(new[] { "yt-dlp.exe" }, FileNames());
+    }
+
+    [Fact]
+    public void Restore_moves_the_og_over_a_vrchat_binary_that_is_not_complete()
+    {
+        File.WriteAllBytes(TargetPath, PeFixtures.Truncated(CompleteBundledBytes(1), 100));
+        byte[] og = CompleteBundledBytes(2);
+        File.WriteAllBytes(OgPath, og);
+
+        RestoreOutcome outcome = ToolsRestore.Restore(_toolsDir, out _);
+
+        Assert.Equal(RestoreOutcome.Restored, outcome);
+        Assert.Equal(og, File.ReadAllBytes(TargetPath));
+        Assert.Equal(new[] { "yt-dlp.exe" }, FileNames());
+    }
+
+    [Theory]
+    [InlineData("yt-dlp.exe")]
+    [InlineData("yt-dlp-og.exe")]
+    public void Restore_moves_the_og_over_a_vrchat_binary_when_a_hash_fails(string unhashable)
+    {
+        File.WriteAllBytes(TargetPath, CompleteBundledBytes(1));
+        byte[] og = CompleteBundledBytes(2);
+        File.WriteAllBytes(OgPath, og);
+        ToolsRestore.ComputeHash = path => Path.GetFileName(path) == unhashable ? null : WrapperIdentity.ComputeSha256(path);
+
+        RestoreOutcome outcome = ToolsRestore.Restore(_toolsDir, out _);
+
+        Assert.Equal(RestoreOutcome.Restored, outcome);
+        Assert.Equal(og, File.ReadAllBytes(TargetPath));
         Assert.Equal(new[] { "yt-dlp.exe" }, FileNames());
     }
 

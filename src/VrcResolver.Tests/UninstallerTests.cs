@@ -178,9 +178,9 @@ public class UninstallerTests : IDisposable
     [Fact]
     public void Uninstall_restore_keeps_a_newer_vrchat_binary()
     {
-        byte[] newer = ToolsRestoreTests.BundledBytes(1);
+        byte[] newer = ToolsRestoreTests.CompleteBundledBytes(1);
         File.WriteAllBytes(TargetPath, newer);
-        File.WriteAllBytes(OgPath, ToolsRestoreTests.BundledBytes(2));
+        File.WriteAllBytes(OgPath, ToolsRestoreTests.CompleteBundledBytes(2));
 
         UninstallerProgram.RestoreYtDlp(_toolsDir);
 

@@ -379,6 +379,44 @@ public class PatchManagerTickTests : IDisposable
     }
 
     [Fact]
+    public void Recover_moves_aside_an_orphan_wrapper_it_cannot_delete()
+    {
+        File.WriteAllBytes(_targetPath, WrapperBytes());
+        File.SetAttributes(_targetPath, FileAttributes.ReadOnly);
+        var original = Console.Out;
+        var captured = new StringWriter();
+        Console.SetOut(captured);
+        try
+        {
+            using var manager = NewManager();
+            manager.RecoverFromUncleanShutdown();
+        }
+        finally
+        {
+            Console.SetOut(original);
+            foreach (string file in Directory.GetFiles(_toolsDir))
+                File.SetAttributes(file, FileAttributes.Normal);
+        }
+
+        Assert.False(File.Exists(_targetPath));
+        Assert.Single(Directory.GetFiles(_toolsDir, "yt-dlp.exe.stale-*"));
+        Assert.DoesNotContain(_scratchDir, captured.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Recover_removes_an_orphan_wrapper_known_only_by_its_hash()
+    {
+        File.WriteAllBytes(_targetPath, PeFixtures.NonPe(8192));
+        Directory.CreateDirectory(Path.Combine(_installDir, "data"));
+        File.WriteAllLines(Path.Combine(_installDir, "data", "wrapper_hashes.txt"), new[] { WrapperIdentity.ComputeSha256(_targetPath) + " v1" });
+
+        using var manager = NewManager();
+        manager.RecoverFromUncleanShutdown();
+
+        Assert.Empty(Directory.GetFiles(_toolsDir));
+    }
+
+    [Fact]
     public void Recover_after_a_kill_mid_restore()
     {
         byte[] og = VrcBundledBytes();

@@ -368,7 +368,7 @@ internal sealed partial class MeshClient
             deadlineCts.Cancel();
             if (link.Down.Task.IsCompleted || _lastInboundUtc >= probeAt) return;
 
-            ConsoleUx.Warn(LogComponent.Mesh, "no answer to a ping within " + _stallPongDeadline.TotalSeconds
+            Logger.WriteFileOnly("[mesh] no answer to a ping within " + _stallPongDeadline.TotalSeconds
                 + "s while a resolve waited; dropping the connection to reconnect");
             try { ws.Abort(); } catch { }
         }

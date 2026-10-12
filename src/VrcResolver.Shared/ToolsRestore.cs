@@ -19,8 +19,9 @@ public static class ToolsRestore
     private const string OgName = "yt-dlp-og.exe";
 
     internal static Action<string, string, bool> MoveFile = File.Move;
+    internal static Func<string, string?> ComputeHash = WrapperIdentity.ComputeSha256;
 
-    public static RestoreOutcome Restore(string toolsDir, out string detail)
+    public static RestoreOutcome Restore(string toolsDir, out string detail, string? knownHashesPath = null)
     {
         if (string.IsNullOrEmpty(toolsDir) || !Directory.Exists(toolsDir))
         {
@@ -30,7 +31,7 @@ public static class ToolsRestore
 
         try
         {
-            return RestoreCore(Path.Combine(toolsDir, TargetName), Path.Combine(toolsDir, OgName), out detail);
+            return RestoreCore(Path.Combine(toolsDir, TargetName), Path.Combine(toolsDir, OgName), knownHashesPath, out detail);
         }
         catch (Exception ex)
         {
@@ -39,7 +40,7 @@ public static class ToolsRestore
         }
     }
 
-    private static RestoreOutcome RestoreCore(string target, string og, out string detail)
+    private static RestoreOutcome RestoreCore(string target, string og, string? knownHashesPath, out string detail)
     {
         bool targetExists = File.Exists(target);
 
@@ -50,7 +51,7 @@ public static class ToolsRestore
                 detail = "no yt-dlp.exe or yt-dlp-og.exe in Tools";
                 return RestoreOutcome.NothingToDo;
             }
-            if (WrapperIdentity.Classify(target) != WrapperKind.Ours)
+            if (WrapperIdentity.Classify(target, knownHashesPath) != WrapperKind.Ours)
             {
                 detail = "yt-dlp-og.exe is gone and yt-dlp.exe is not our wrapper";
                 return RestoreOutcome.NothingToDo;
@@ -65,8 +66,9 @@ public static class ToolsRestore
         }
 
         if (targetExists
-            && WrapperIdentity.Classify(target) == WrapperKind.VrcBundledYtDlp
-            && !SameContent(target, og))
+            && WrapperIdentity.Classify(target, knownHashesPath) == WrapperKind.VrcBundledYtDlp
+            && WrapperIdentity.LooksComplete(target)
+            && KnownToDiffer(target, og))
         {
             detail = Discard(og)
                 ? "yt-dlp.exe is a newer VRChat binary; dropped yt-dlp-og.exe"
@@ -157,18 +159,12 @@ public static class ToolsRestore
         }
     }
 
-    private static bool SameContent(string a, string b)
+    private static bool KnownToDiffer(string a, string b)
     {
-        try
-        {
-            if (new FileInfo(a).Length != new FileInfo(b).Length) return false;
-        }
-        catch
-        {
-            return false;
-        }
-        string? hashA = WrapperIdentity.ComputeSha256(a);
-        return hashA != null && string.Equals(hashA, WrapperIdentity.ComputeSha256(b), StringComparison.Ordinal);
+        string? hashA = ComputeHash(a);
+        if (hashA == null) return false;
+        string? hashB = ComputeHash(b);
+        return hashB != null && !string.Equals(hashA, hashB, StringComparison.Ordinal);
     }
 
     private static string Stamp() => DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
