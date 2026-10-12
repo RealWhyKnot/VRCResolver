@@ -79,7 +79,7 @@ internal static class Program
     {
         var procs = Process.GetProcessesByName("vrcresolver")
             .Concat(Process.GetProcessesByName("WKVRCProxy"));
-        int closed = CloseWatchdogs(procs, installDir, StopWatchdog);
+        int closed = CloseWatchdogs(procs, installDir, ReadMainModulePath, StopWatchdog);
         if (closed > 0) Thread.Sleep(500);
     }
 
@@ -89,16 +89,30 @@ internal static class Program
         p.WaitForExit(5000);
     }
 
-    internal static int CloseWatchdogs(IEnumerable<Process> procs, string installDir, Action<Process> stop)
+    internal static string? ReadMainModulePath(Process p) => p.MainModule?.FileName;
+
+    private static bool HasExited(Process p)
     {
-        int closed = 0, skipped = 0, uninspectable = 0;
+        try { return p.HasExited; }
+        catch { return false; }
+    }
+
+    internal static int CloseWatchdogs(
+        IEnumerable<Process> procs, string installDir, Func<Process, string?> readModulePath, Action<Process> stop)
+    {
+        int closed = 0, skipped = 0, uninspectable = 0, exited = 0;
         foreach (var p in procs)
         {
             using (p)
             {
                 string? procExe = null;
-                try { procExe = p.MainModule?.FileName; }
+                try { procExe = readModulePath(p); }
                 catch { }
+                if (string.IsNullOrEmpty(procExe) && HasExited(p))
+                {
+                    exited++;
+                    continue;
+                }
                 switch (MatchWatchdog(procExe, installDir))
                 {
                     case WatchdogMatch.Uninspectable:
@@ -117,7 +131,7 @@ internal static class Program
             }
         }
         Console.WriteLine("[uninstall] close-watchdog matched=" + closed + " skipped_other_installs=" + skipped
-            + " uninspectable=" + uninspectable);
+            + " already_exited=" + exited + " uninspectable=" + uninspectable);
         if (uninspectable > 0)
         {
             throw new InvalidOperationException(

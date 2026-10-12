@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using VrcResolver.Shared;
@@ -12,6 +13,8 @@ public class UninstallerTests : IDisposable
 {
     private const string UninspectableMessage =
         "a VRCResolver watchdog is running that the uninstaller can't inspect -- close it and run the uninstaller again";
+
+    private const string InstallDir = @"C:\Apps\VRCResolver";
 
     private readonly TextWriter _originalOut = Console.Out;
     private readonly TextWriter _originalErr = Console.Error;
@@ -67,13 +70,13 @@ public class UninstallerTests : IDisposable
     }
 
     [Fact]
-    public void CloseWatchdogs_fails_when_a_watchdog_cannot_be_inspected()
+    public void CloseWatchdogs_fails_when_a_running_watchdog_denies_access()
     {
-        using Process gone = StartAndFinishProcess();
         var stopped = new List<Process>();
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
-            UninstallerProgram.CloseWatchdogs(new[] { gone }, @"C:\Apps\VRCResolver", stopped.Add));
+            UninstallerProgram.CloseWatchdogs(
+                new[] { Process.GetCurrentProcess() }, InstallDir, _ => throw new Win32Exception(5), stopped.Add));
 
         Assert.Equal(UninspectableMessage, ex.Message);
         Assert.Empty(stopped);
@@ -81,16 +84,81 @@ public class UninstallerTests : IDisposable
     }
 
     [Fact]
+    public void CloseWatchdogs_fails_when_a_running_watchdog_has_no_main_module()
+    {
+        var stopped = new List<Process>();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            UninstallerProgram.CloseWatchdogs(new[] { Process.GetCurrentProcess() }, InstallDir, _ => null, stopped.Add));
+
+        Assert.Equal(UninspectableMessage, ex.Message);
+        Assert.Empty(stopped);
+    }
+
+    [Fact]
+    public void CloseWatchdogs_skips_a_process_that_has_already_exited()
+    {
+        using Process gone = StartAndFinishProcess();
+        var stopped = new List<Process>();
+
+        int closed = UninstallerProgram.CloseWatchdogs(
+            new[] { gone }, InstallDir, UninstallerProgram.ReadMainModulePath, stopped.Add);
+
+        Assert.Equal(0, closed);
+        Assert.Empty(stopped);
+        string log = _out.ToString();
+        Assert.Contains("already_exited=1", log);
+        Assert.Contains("uninspectable=0", log);
+        Assert.Contains("skipped_other_installs=0", log);
+    }
+
+    [Fact]
+    public void CloseWatchdogs_still_fails_for_a_denied_process_beside_an_exited_one()
+    {
+        using Process gone = StartAndFinishProcess();
+        var stopped = new List<Process>();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            UninstallerProgram.CloseWatchdogs(
+                new[] { gone, Process.GetCurrentProcess() }, InstallDir, _ => throw new Win32Exception(5), stopped.Add));
+
+        Assert.Equal(UninspectableMessage, ex.Message);
+        Assert.Empty(stopped);
+        string log = _out.ToString();
+        Assert.Contains("already_exited=1", log);
+        Assert.Contains("uninspectable=1", log);
+    }
+
+    [Fact]
     public void CloseWatchdogs_leaves_a_process_from_another_install_alone()
     {
         var stopped = new List<Process>();
 
-        int closed = UninstallerProgram.CloseWatchdogs(new[] { Process.GetCurrentProcess() }, @"C:\Apps\VRCResolver", stopped.Add);
+        int closed = UninstallerProgram.CloseWatchdogs(
+            new[] { Process.GetCurrentProcess() }, InstallDir, UninstallerProgram.ReadMainModulePath, stopped.Add);
 
         Assert.Equal(0, closed);
         Assert.Empty(stopped);
-        Assert.Contains("skipped_other_installs=1", _out.ToString());
-        Assert.Contains("uninspectable=0", _out.ToString());
+        string log = _out.ToString();
+        Assert.Contains("skipped_other_installs=1", log);
+        Assert.Contains("uninspectable=0", log);
+    }
+
+    [Fact]
+    public void CloseWatchdogs_stops_a_process_from_this_install()
+    {
+        var stopped = new List<int>();
+        int ownId = Environment.ProcessId;
+
+        int closed = UninstallerProgram.CloseWatchdogs(
+            new[] { Process.GetCurrentProcess() },
+            InstallDir,
+            _ => Path.Combine(InstallDir, "vrcresolver.exe"),
+            p => stopped.Add(p.Id));
+
+        Assert.Equal(1, closed);
+        Assert.Equal(new[] { ownId }, stopped);
+        Assert.Contains("matched=1", _out.ToString());
     }
 
     [Fact]
