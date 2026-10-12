@@ -4,8 +4,73 @@ using Xunit;
 namespace VrcResolver.Tests;
 
 [SupportedOSPlatform("windows")]
-public class HostsManagerTests
+public class HostsManagerTests : IDisposable
 {
+    public HostsManagerTests()
+    {
+        HostsManager.ResetPromptDeclinedForTests();
+    }
+
+    public void Dispose()
+    {
+        HostsManager.ResetPromptDeclinedForTests();
+    }
+
+    [Fact]
+    public void A_declined_elevation_is_recorded_for_the_session()
+    {
+        var args = new List<string>();
+
+        QuietEnsure(() => false, arg => { args.Add(arg); return false; });
+
+        Assert.Equal(new[] { HostsManager.AddArg }, args);
+        Assert.True(HostsManager.PromptDeclinedThisSession);
+        Assert.False(HostsManager.IsPromptInFlight);
+    }
+
+    [Fact]
+    public void A_prompt_that_leaves_no_entry_is_recorded_as_declined()
+    {
+        QuietEnsure(() => false, _ => true);
+
+        Assert.True(HostsManager.PromptDeclinedThisSession);
+    }
+
+    [Fact]
+    public void A_prompt_that_adds_the_entry_is_not_a_decline()
+    {
+        bool present = false;
+
+        QuietEnsure(() => present, _ => { present = true; return true; });
+
+        Assert.False(HostsManager.PromptDeclinedThisSession);
+    }
+
+    [Fact]
+    public void An_existing_entry_never_prompts()
+    {
+        int prompts = 0;
+
+        QuietEnsure(() => true, _ => { prompts++; return true; });
+
+        Assert.Equal(0, prompts);
+        Assert.False(HostsManager.PromptDeclinedThisSession);
+    }
+
+    private static void QuietEnsure(Func<bool> isActive, Func<string, bool> reexecElevated)
+    {
+        var original = Console.Out;
+        Console.SetOut(new StringWriter());
+        try
+        {
+            HostsManager.EnsureBypassEntry(isActive, reexecElevated);
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+    }
+
     [Theory]
     [InlineData("127.0.0.1 localhost.youtube.com", true)]
     [InlineData("127.0.0.1\tlocalhost.youtube.com", true)]

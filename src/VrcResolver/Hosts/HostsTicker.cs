@@ -7,11 +7,13 @@ namespace VrcResolver;
 internal sealed class HostsTicker : IDisposable
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(1);
+    private const string DeclinedReason = "UAC declined or write blocked";
 
     private readonly Func<(bool Ok, bool Present, string? Error)> _readState;
     private readonly Action _ensureEntry;
     private readonly Func<bool> _isActive;
     private readonly Func<bool> _promptInFlight;
+    private readonly Func<bool> _promptDeclined;
     private readonly Func<DateTime> _nowUtc;
 
     private readonly CancellationTokenSource _cts = new();
@@ -26,6 +28,7 @@ internal sealed class HostsTicker : IDisposable
             HostsManager.EnsureBypassEntryOrPrompt,
             HostsManager.IsBypassActive,
             () => HostsManager.IsPromptInFlight,
+            () => HostsManager.PromptDeclinedThisSession,
             () => DateTime.UtcNow)
     {
     }
@@ -35,12 +38,14 @@ internal sealed class HostsTicker : IDisposable
         Action ensureEntry,
         Func<bool> isActive,
         Func<bool> promptInFlight,
+        Func<bool> promptDeclined,
         Func<DateTime> nowUtc)
     {
         _readState = readState;
         _ensureEntry = ensureEntry;
         _isActive = isActive;
         _promptInFlight = promptInFlight;
+        _promptDeclined = promptDeclined;
         _nowUtc = nowUtc;
     }
 
@@ -112,6 +117,13 @@ internal sealed class HostsTicker : IDisposable
             return;
         }
 
+        if (_promptDeclined())
+        {
+            _lastPresent = false;
+            GiveUp(DeclinedReason);
+            return;
+        }
+
         if (_lastPresent != false)
         {
             ConsoleUx.Write(LogComponent.Hosts, "tick: " + HostsManager.MarkerHost + " missing -- re-adding");
@@ -133,7 +145,7 @@ internal sealed class HostsTicker : IDisposable
             {
                 return;
             }
-            GiveUp("UAC declined or write blocked");
+            GiveUp(DeclinedReason);
         }
         catch (Exception ex)
         {

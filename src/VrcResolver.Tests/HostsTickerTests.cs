@@ -56,6 +56,33 @@ public sealed class HostsTickerTests
     }
 
     [Fact]
+    public void A_declined_startup_prompt_is_not_followed_by_another_one()
+    {
+        var h = new Harness { PromptInFlight = true };
+        var ticker = h.Create();
+
+        string whileOpen = Capture(ticker.Tick);
+
+        Assert.DoesNotContain(GiveUpMarker, whileOpen);
+
+        h.PromptInFlight = false;
+        h.PromptDeclined = true;
+        string afterDecline = Capture(() =>
+        {
+            ticker.Tick();
+            h.Now += TimeSpan.FromHours(1);
+            ticker.Tick();
+            ticker.Tick();
+        });
+
+        Assert.Equal(0, h.EnsureCalls);
+        string line = Assert.Single(Lines(afterDecline), l => l.Contains(GiveUpMarker));
+        string message = line[line.IndexOf("tick:", StringComparison.Ordinal)..];
+        Assert.All(message, c => Assert.True(c < 128));
+        Assert.DoesNotContain("re-adding", afterDecline);
+    }
+
+    [Fact]
     public void A_prompt_taken_over_by_another_caller_is_not_a_failed_attempt()
     {
         var h = new Harness();
@@ -136,6 +163,7 @@ public sealed class HostsTickerTests
         public bool Present;
         public bool Active;
         public bool PromptInFlight;
+        public bool PromptDeclined;
         public DateTime Now = new(2026, 10, 11, 12, 0, 0, DateTimeKind.Utc);
         public int EnsureCalls;
         public Action? OnEnsure;
@@ -149,6 +177,7 @@ public sealed class HostsTickerTests
             },
             () => Active,
             () => PromptInFlight,
+            () => PromptDeclined,
             () => Now);
     }
 }

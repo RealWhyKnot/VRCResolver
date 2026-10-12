@@ -67,21 +67,33 @@ internal static class HostsManager
     }
 
     private static int s_promptInFlight;
+    private static int s_promptDeclined;
 
     public static bool IsPromptInFlight => Volatile.Read(ref s_promptInFlight) != 0;
 
-    public static void EnsureBypassEntryOrPrompt()
+    public static bool PromptDeclinedThisSession => Volatile.Read(ref s_promptDeclined) != 0;
+
+    internal static void ResetPromptDeclinedForTests() => Volatile.Write(ref s_promptDeclined, 0);
+
+    public static void EnsureBypassEntryOrPrompt() => EnsureBypassEntry(IsBypassActive, ReexecElevated);
+
+    internal static void EnsureBypassEntry(Func<bool> isActive, Func<string, bool> reexecElevated)
     {
-        if (IsBypassActive()) return;
+        if (isActive()) return;
         if (Interlocked.CompareExchange(ref s_promptInFlight, 1, 0) != 0) return;
         try
         {
-            if (IsBypassActive()) return;
+            if (isActive()) return;
             ConsoleUx.Write(LogComponent.Hosts, "adding entry for public-instance support -- UAC prompt incoming.");
-            if (!ReexecElevated(AddArg)) return;
-            if (IsBypassActive())
-                ConsoleUx.Write(LogComponent.Hosts, "added " + MarkerIp + " " + MarkerHost);
-            else
+            bool launched = reexecElevated(AddArg);
+            if (isActive())
+            {
+                if (launched)
+                    ConsoleUx.Write(LogComponent.Hosts, "added " + MarkerIp + " " + MarkerHost);
+                return;
+            }
+            Volatile.Write(ref s_promptDeclined, 1);
+            if (launched)
                 ConsoleUx.Warn(LogComponent.Hosts, "entry not present after elevation -- public-instance support may not work.");
         }
         finally
