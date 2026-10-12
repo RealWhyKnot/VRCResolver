@@ -8,27 +8,37 @@ internal static class ClientIdentity
 
     internal const long MaxClientIdFileBytes = 256;
 
+    private const int ReadRetries = 3;
+    private const int ReadRetryDelayMs = 50;
+
     public static string LoadOrCreate() => LoadOrCreate(DefaultPath());
 
     internal static string LoadOrCreate(string path)
     {
-        try
+        for (int attempt = 0; attempt <= ReadRetries; attempt++)
         {
-            if (File.Exists(path))
+            try
             {
-                var info = new FileInfo(path);
-                if (info.Length > MaxClientIdFileBytes)
-                {
-                }
-                else
-                {
-                    string content = File.ReadAllText(path).Trim();
-                    if (Guid.TryParseExact(content, "N", out var g))
-                        return g.ToString("N");
-                }
+                if (!File.Exists(path)) break;
+                if (new FileInfo(path).Length > MaxClientIdFileBytes) break;
+                string content = File.ReadAllText(path).Trim();
+                if (Guid.TryParseExact(content, "N", out var g))
+                    return g.ToString("N");
+                break;
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                break;
+            }
+            catch (IOException) when (attempt < ReadRetries)
+            {
+                Thread.Sleep(ReadRetryDelayMs);
+            }
+            catch
+            {
+                return Guid.NewGuid().ToString("N");
             }
         }
-        catch { }
 
         string fresh = Guid.NewGuid().ToString("N");
         string tmp = path + ".new";

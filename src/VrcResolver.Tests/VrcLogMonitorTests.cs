@@ -51,6 +51,117 @@ public sealed class VrcLogMonitorTests
     }
 
     [Fact]
+    public void ProcessNewContent_waits_for_the_rest_of_a_partial_line()
+    {
+        using var monitor = new VrcLogMonitor(new MeshClient(), silentStallWindow: TimeSpan.FromMinutes(5));
+        const string first = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=first";
+        const string second = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=second";
+
+        monitor.ProcessNewContent(
+            OpeningLine(first) + "\n"
+            + "2026.10.11 10:00:05 Debug      -  [AVProVideo] Opening https://us1.vrcresolver.com/api/proxy/mani");
+
+        Assert.Equal(first, monitor.LastOpenedUrlForTests);
+
+        monitor.ProcessNewContent("fest.m3u8?q=second (offset 0) with API MediaFoundation\r\n");
+
+        Assert.Equal(second, monitor.LastOpenedUrlForTests);
+    }
+
+    [Fact]
+    public void PollOnce_waits_for_a_line_the_game_is_still_writing()
+    {
+        using var logs = new LogDir();
+        using var monitor = new VrcLogMonitor(new MeshClient(), silentStallWindow: TimeSpan.FromMinutes(5),
+            vrcDirOverride: logs.Path);
+        long ticks = 0;
+        const string url = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=a";
+
+        string log = logs.Write("output_log_a.txt", "2026.10.11 10:00:00 Debug      -  boot\n");
+        monitor.PollOnce(ticks += 10_000);
+
+        logs.Append(log, "2026.10.11 10:00:05 Debug      -  [AVProVideo] Opening https://us1.vrcresolver.com/api/proxy/mani");
+        monitor.PollOnce(ticks += 10_000);
+        Assert.Null(monitor.LastOpenedUrlForTests);
+
+        logs.Append(log, "fest.m3u8?q=a (offset 0) with API MediaFoundation\n");
+        monitor.PollOnce(ticks += 10_000);
+        Assert.Equal(url, monitor.LastOpenedUrlForTests);
+    }
+
+    [Fact]
+    public void Alternating_logs_do_not_replay_old_lines()
+    {
+        using var logs = new LogDir();
+        int sessions = 0;
+        using var monitor = new VrcLogMonitor(new MeshClient(), onNewVrchatSession: () => sessions++,
+            silentStallWindow: TimeSpan.FromMinutes(5), vrcDirOverride: logs.Path);
+        long ticks = 0;
+        const string a1 = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=a1";
+        const string a2 = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=a2";
+        const string b1 = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=b1";
+
+        string a = logs.Write("output_log_a.txt", "2026.10.11 10:00:00 Debug      -  boot\n");
+        monitor.PollOnce(ticks += 10_000);
+        Assert.Equal(0, sessions);
+
+        logs.Append(a, OpeningLine(a1) + "\n");
+        monitor.PollOnce(ticks += 10_000);
+        Assert.Equal(a1, monitor.LastOpenedUrlForTests);
+        Assert.Equal(0, sessions);
+
+        string b = logs.Write("output_log_b.txt", OpeningLine(b1) + "\n");
+        monitor.PollOnce(ticks += 10_000);
+        Assert.Equal(b1, monitor.LastOpenedUrlForTests);
+        Assert.Equal(1, sessions);
+
+        logs.Touch(a);
+        monitor.PollOnce(ticks += 10_000);
+        Assert.Equal(b1, monitor.LastOpenedUrlForTests);
+        Assert.Equal(1, sessions);
+
+        logs.Touch(b);
+        monitor.PollOnce(ticks += 10_000);
+        Assert.Equal(b1, monitor.LastOpenedUrlForTests);
+        Assert.Equal(1, sessions);
+
+        logs.Append(a, OpeningLine(a2) + "\n");
+        monitor.PollOnce(ticks += 10_000);
+        Assert.Equal(a2, monitor.LastOpenedUrlForTests);
+        Assert.Equal(1, sessions);
+
+        logs.Touch(b);
+        monitor.PollOnce(ticks += 10_000);
+        Assert.Equal(a2, monitor.LastOpenedUrlForTests);
+        Assert.Equal(1, sessions);
+    }
+
+    [Fact]
+    public void A_half_written_line_stays_with_its_own_log_when_the_newest_file_changes()
+    {
+        using var logs = new LogDir();
+        using var monitor = new VrcLogMonitor(new MeshClient(), silentStallWindow: TimeSpan.FromMinutes(5),
+            vrcDirOverride: logs.Path);
+        long ticks = 0;
+        const string a1 = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=a1";
+        const string b1 = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=b1";
+
+        string a = logs.Write("output_log_a.txt", "2026.10.11 10:00:00 Debug      -  boot\n");
+        monitor.PollOnce(ticks += 10_000);
+
+        logs.Append(a, "2026.10.11 10:00:05 Debug      -  [AVProVideo] Opening https://us1.vrcresolver.com/api/proxy/mani");
+        monitor.PollOnce(ticks += 10_000);
+
+        logs.Write("output_log_b.txt", OpeningLine(b1) + "\n");
+        monitor.PollOnce(ticks += 10_000);
+        Assert.Equal(b1, monitor.LastOpenedUrlForTests);
+
+        logs.Append(a, "fest.m3u8?q=a1 (offset 0) with API MediaFoundation\n");
+        monitor.PollOnce(ticks += 10_000);
+        Assert.Equal(a1, monitor.LastOpenedUrlForTests);
+    }
+
+    [Fact]
     public void ProcessNewContent_load_failure_arms_og_hint_before_evicting_cache()
     {
         using var temp = new TempDir();
@@ -269,6 +380,9 @@ public sealed class VrcLogMonitorTests
         Assert.Equal(expected, AudioOutputProbe.Classify(openResult).ToString());
     }
 
+    private static string OpeningLine(string url) =>
+        "2026.10.11 10:00:00 Debug      -  [AVProVideo] Opening " + url + " (offset 0) with API MediaFoundation";
+
     private static ResolveResponse MakeResolved(string playbackUrl)
     {
         return new ResolveResponse
@@ -284,6 +398,45 @@ public sealed class VrcLogMonitorTests
             AudioChannels = 2,
             ExpiresAt = DateTime.UtcNow.AddHours(1).ToString("o"),
         };
+    }
+
+    private sealed class LogDir : IDisposable
+    {
+        private DateTime _clock = new(2026, 10, 11, 12, 0, 0, DateTimeKind.Utc);
+
+        public LogDir()
+        {
+            Path = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(), "vrcresolver-tests-vrcdir-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public string Write(string name, string content)
+        {
+            string file = System.IO.Path.Combine(Path, name);
+            File.WriteAllText(file, content);
+            Touch(file);
+            return file;
+        }
+
+        public void Append(string file, string content)
+        {
+            File.AppendAllText(file, content);
+            Touch(file);
+        }
+
+        public void Touch(string file)
+        {
+            _clock = _clock.AddSeconds(10);
+            File.SetLastWriteTimeUtc(file, _clock);
+        }
+
+        public void Dispose()
+        {
+            try { Directory.Delete(Path, recursive: true); } catch { }
+        }
     }
 
     private sealed class TempDir : IDisposable

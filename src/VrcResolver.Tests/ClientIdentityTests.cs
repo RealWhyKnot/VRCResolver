@@ -102,6 +102,55 @@ public class ClientIdentityTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadOrCreate_keeps_the_stored_id_when_the_file_is_briefly_locked()
+    {
+        string stored = ClientIdentity.LoadOrCreate(_path);
+
+        var lockFs = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.None);
+        var release = Task.Run(async () =>
+        {
+            await Task.Delay(100);
+            lockFs.Dispose();
+        });
+
+        string id;
+        try
+        {
+            id = ClientIdentity.LoadOrCreate(_path);
+        }
+        finally
+        {
+            await release;
+        }
+
+        Assert.Equal(stored, id);
+        Assert.Equal(stored, File.ReadAllText(_path).Trim());
+    }
+
+    [Fact]
+    public async Task LoadOrCreate_does_not_overwrite_a_locked_file()
+    {
+        string stored = ClientIdentity.LoadOrCreate(_path);
+        var created = new List<string>();
+        using var watcher = new FileSystemWatcher(_tempDir) { NotifyFilter = NotifyFilters.FileName };
+        watcher.Created += (_, e) => { lock (created) created.Add(e.Name ?? ""); };
+        watcher.Renamed += (_, e) => { lock (created) created.Add(e.Name ?? ""); };
+        watcher.EnableRaisingEvents = true;
+
+        string id;
+        using (new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            id = ClientIdentity.LoadOrCreate(_path);
+        }
+        await Task.Delay(300);
+
+        Assert.Matches("^[0-9a-fA-F]{32}$", id);
+        Assert.NotEqual(stored, id);
+        Assert.Equal(stored, File.ReadAllText(_path).Trim());
+        lock (created) Assert.Empty(created);
+    }
+
+    [Fact]
     public void LoadOrCreate_SaveFailure_CleansTmpResidue()
     {
         string seeded = ClientIdentity.LoadOrCreate(_path);

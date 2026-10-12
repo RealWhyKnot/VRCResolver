@@ -68,6 +68,8 @@ internal static class HostsManager
 
     private static int s_promptInFlight;
 
+    public static bool IsPromptInFlight => Volatile.Read(ref s_promptInFlight) != 0;
+
     public static void EnsureBypassEntryOrPrompt()
     {
         if (IsBypassActive()) return;

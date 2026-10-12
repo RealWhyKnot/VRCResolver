@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.Versioning;
 using VrcResolver.Shared;
 
@@ -8,13 +7,48 @@ namespace VrcResolver;
 internal sealed class HostsTicker : IDisposable
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(1);
-    private static readonly TimeSpan ReAddBackoff = TimeSpan.FromMinutes(10);
+
+    private readonly Func<(bool Ok, bool Present, string? Error)> _readState;
+    private readonly Action _ensureEntry;
+    private readonly Func<bool> _isActive;
+    private readonly Func<bool> _promptInFlight;
+    private readonly Func<DateTime> _nowUtc;
 
     private readonly CancellationTokenSource _cts = new();
     private Task? _runner;
 
     private bool? _lastPresent;
-    private DateTime _nextReAddAttemptUtc = DateTime.MinValue;
+    private bool _gaveUp;
+
+    public HostsTicker()
+        : this(
+            ReadHostsState,
+            HostsManager.EnsureBypassEntryOrPrompt,
+            HostsManager.IsBypassActive,
+            () => HostsManager.IsPromptInFlight,
+            () => DateTime.UtcNow)
+    {
+    }
+
+    internal HostsTicker(
+        Func<(bool Ok, bool Present, string? Error)> readState,
+        Action ensureEntry,
+        Func<bool> isActive,
+        Func<bool> promptInFlight,
+        Func<DateTime> nowUtc)
+    {
+        _readState = readState;
+        _ensureEntry = ensureEntry;
+        _isActive = isActive;
+        _promptInFlight = promptInFlight;
+        _nowUtc = nowUtc;
+    }
+
+    private static (bool Ok, bool Present, string? Error) ReadHostsState()
+    {
+        bool ok = HostsManager.TryReadBypassState(out bool present, out string? error);
+        return (ok, present, error);
+    }
 
     public void Start()
     {
@@ -44,9 +78,10 @@ internal sealed class HostsTicker : IDisposable
         }
     }
 
-    private void Tick()
+    internal void Tick()
     {
-        if (!HostsManager.TryReadBypassState(out bool present, out string? error))
+        var (ok, present, error) = _readState();
+        if (!ok)
         {
             if (_lastPresent != null)
             {
@@ -66,37 +101,51 @@ internal sealed class HostsTicker : IDisposable
             return;
         }
 
+        if (_gaveUp)
+        {
+            _lastPresent = false;
+            return;
+        }
+
+        if (_promptInFlight())
+        {
+            return;
+        }
+
         if (_lastPresent != false)
         {
             ConsoleUx.Write(LogComponent.Hosts, "tick: " + HostsManager.MarkerHost + " missing -- re-adding");
             _lastPresent = false;
         }
 
-        if (DateTime.UtcNow < _nextReAddAttemptUtc)
-        {
-            return;
-        }
-        _nextReAddAttemptUtc = DateTime.UtcNow + ReAddBackoff;
-
-        var sw = Stopwatch.StartNew();
+        DateTime startedUtc = _nowUtc();
         try
         {
-            HostsManager.EnsureBypassEntryOrPrompt();
-            sw.Stop();
-            if (HostsManager.IsBypassActive())
+            _ensureEntry();
+            if (_isActive())
             {
-                ConsoleUx.Write(LogComponent.Hosts, "tick: re-add succeeded in " + sw.ElapsedMilliseconds + " ms");
+                ConsoleUx.Write(LogComponent.Hosts, "tick: re-add succeeded in " + (long)(_nowUtc() - startedUtc).TotalMilliseconds + " ms");
                 _lastPresent = true;
+                return;
             }
-            else
+
+            if (_promptInFlight())
             {
-                ConsoleUx.Warn(LogComponent.Hosts, "tick: re-add failed (UAC declined or write blocked) -- next attempt in " + (int)ReAddBackoff.TotalMinutes + " min");
+                return;
             }
+            GiveUp("UAC declined or write blocked");
         }
         catch (Exception ex)
         {
-            ConsoleUx.Warn(LogComponent.Hosts, "tick re-add threw: " + ex.GetType().Name + ": " + ex.Message);
+            Logger.WriteFileOnly("[hosts] re-add threw: " + ex.GetType().Name + ": " + ex.Message);
+            GiveUp(ex.GetType().Name);
         }
+    }
+
+    private void GiveUp(string reason)
+    {
+        _gaveUp = true;
+        ConsoleUx.Warn(LogComponent.Hosts, "tick: re-add failed (" + reason + ") -- won't ask again until the next start");
     }
 
     public void Dispose()

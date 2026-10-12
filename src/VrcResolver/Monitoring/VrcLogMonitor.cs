@@ -30,7 +30,13 @@ internal sealed partial class VrcLogMonitor : IDisposable
     private readonly Func<AudioOutputCheck> _checkAudioOutput;
     private readonly TimeSpan _silentStallWindow;
     private readonly CancellationTokenSource _cts = new();
+    private readonly string _vrcDir;
     private Task? _loop;
+    private string _currentFile = "";
+    private FileTail? _currentTail;
+    private readonly Dictionary<string, FileTail> _tails = new(StringComparer.OrdinalIgnoreCase);
+    private string _partialLine = "";
+    private long _lastScanTicks;
 
     private string? _lastOpeningUrl;
     private DateTime _lastOpeningAt;
@@ -55,9 +61,13 @@ internal sealed partial class VrcLogMonitor : IDisposable
         Func<int, bool>? onRelayWedged = null,
         Action? onNewVrchatSession = null,
         TimeSpan? silentStallWindow = null,
-        Func<AudioOutputCheck>? checkAudioOutput = null)
+        Func<AudioOutputCheck>? checkAudioOutput = null,
+        string? vrcDirOverride = null)
     {
         _mesh = mesh;
+        _vrcDir = vrcDirOverride ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "Low",
+            "VRChat", "VRChat");
         _checkAudioOutput = checkAudioOutput ?? AudioOutputProbe.CheckDefault;
         _ogFallbackHint = ogFallbackHint;
         _cache = cache;
@@ -99,70 +109,17 @@ internal sealed partial class VrcLogMonitor : IDisposable
 
     private async Task MonitorLoopAsync(CancellationToken ct)
     {
-        string vrcDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "Low",
-            "VRChat", "VRChat");
-        string currentFile = "";
-        long lastSize = 0;
-        long lastScanTicks = 0;
-
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                if (!Directory.Exists(vrcDir))
+                if (!Directory.Exists(_vrcDir))
                 {
                     try { await Task.Delay(5000, ct).ConfigureAwait(false); } catch { return; }
                     continue;
                 }
 
-                FileInfo? latest = null;
-                long nowTicks = Environment.TickCount64;
-                if (ShouldRescanDirectory(currentFile.Length > 0, nowTicks - lastScanTicks))
-                {
-                    lastScanTicks = nowTicks;
-                    latest = FindLatestLogFile(vrcDir);
-                }
-                else
-                {
-                    var current = new FileInfo(currentFile);
-                    if (current.Exists)
-                        latest = current;
-                    else
-                    {
-                        lastScanTicks = nowTicks;
-                        latest = FindLatestLogFile(vrcDir);
-                    }
-                }
-
-                if (latest != null)
-                {
-                    if (latest.FullName != currentFile)
-                    {
-                        bool firstFile = currentFile.Length == 0;
-                        currentFile = latest.FullName;
-                        lastSize = InitialReadOffsetForNewFile(latest.Length, firstFile);
-                        _audioDevicesMissing = false;
-                        if (!firstFile) _onNewVrchatSession?.Invoke();
-                    }
-                    if (latest.Length > lastSize)
-                    {
-                        try
-                        {
-                            using var fs = new FileStream(currentFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                            fs.Seek(lastSize, SeekOrigin.Begin);
-                            using var reader = new StreamReader(fs);
-                            string newContent = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
-                            lastSize = fs.Position;
-                            ProcessNewContent(newContent);
-                        }
-                        catch (IOException) { }
-                    }
-                    else if (latest.Length < lastSize)
-                    {
-                        lastSize = 0;
-                    }
-                }
+                PollOnce();
 
                 try { await Task.Delay(1000, ct).ConfigureAwait(false); } catch { return; }
             }
@@ -173,6 +130,79 @@ internal sealed partial class VrcLogMonitor : IDisposable
                 try { await Task.Delay(5000, ct).ConfigureAwait(false); } catch { return; }
             }
         }
+    }
+
+    internal void PollOnce() => PollOnce(Environment.TickCount64);
+
+    internal void PollOnce(long nowTicks)
+    {
+        FileInfo? latest = null;
+        if (ShouldRescanDirectory(_currentFile.Length > 0, nowTicks - _lastScanTicks))
+        {
+            _lastScanTicks = nowTicks;
+            latest = FindLatestLogFile(_vrcDir);
+        }
+        else
+        {
+            var current = new FileInfo(_currentFile);
+            if (current.Exists)
+                latest = current;
+            else
+            {
+                _lastScanTicks = nowTicks;
+                latest = FindLatestLogFile(_vrcDir);
+            }
+        }
+
+        if (latest == null) return;
+
+        if (_currentTail == null || !string.Equals(latest.FullName, _currentFile, StringComparison.OrdinalIgnoreCase))
+            SwitchToFile(latest);
+
+        var tail = _currentTail!;
+        if (latest.Length > tail.Offset)
+        {
+            try
+            {
+                using var fs = new FileStream(_currentFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                fs.Seek(tail.Offset, SeekOrigin.Begin);
+                using var reader = new StreamReader(fs);
+                string newContent = reader.ReadToEnd();
+                tail.Offset = fs.Position;
+                ProcessNewContent(newContent);
+            }
+            catch (IOException) { }
+        }
+        else if (latest.Length < tail.Offset)
+        {
+            tail.Offset = 0;
+            _partialLine = "";
+        }
+    }
+
+    private void SwitchToFile(FileInfo latest)
+    {
+        bool firstFile = _currentTail == null;
+        if (_currentTail != null) _currentTail.Partial = _partialLine;
+
+        _currentFile = latest.FullName;
+        bool seenBefore = _tails.TryGetValue(_currentFile, out var tail);
+        if (!seenBefore)
+        {
+            tail = new FileTail(InitialReadOffsetForNewFile(latest.Length, firstFile));
+            _tails[_currentFile] = tail;
+        }
+
+        _currentTail = tail;
+        _partialLine = tail!.Partial;
+        _audioDevicesMissing = false;
+        if (!seenBefore && !firstFile) _onNewVrchatSession?.Invoke();
+    }
+
+    private sealed class FileTail(long offset)
+    {
+        public long Offset = offset;
+        public string Partial = "";
     }
 
     internal const long DirectoryRescanIntervalMs = 5000;
@@ -204,7 +234,16 @@ internal sealed partial class VrcLogMonitor : IDisposable
 
     internal void ProcessNewContent(string content)
     {
-        foreach (string rawLine in content.Split('\n'))
+        string pending = _partialLine + content;
+        int lastNewline = pending.LastIndexOf('\n');
+        if (lastNewline < 0)
+        {
+            _partialLine = pending;
+            return;
+        }
+        _partialLine = pending[(lastNewline + 1)..];
+
+        foreach (string rawLine in pending[..lastNewline].Split('\n'))
         {
             string line = rawLine.Trim();
             if (string.IsNullOrEmpty(line)) continue;
@@ -436,6 +475,8 @@ internal sealed partial class VrcLogMonitor : IDisposable
     }
 
     internal bool AudioDevicesMissingForTests => _audioDevicesMissing;
+
+    internal string? LastOpenedUrlForTests => _lastOpeningUrl;
 
     internal int? GetObservedDeliveredHeightForTests(string url)
     {
