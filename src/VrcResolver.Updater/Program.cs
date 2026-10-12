@@ -89,34 +89,44 @@ internal static partial class Program
 
             StopRunningWatchdog();
 
-            try
-            {
-                AtomicCopyOver(payloadRoot, installDir);
-            }
-            catch
-            {
-                throw;
-            }
+            int exitCode = FinishInstall(payloadRoot, installDir, Process.Start);
 
             try { File.Delete(tempZip); } catch { }
             try { Directory.Delete(tempExtract, true); } catch { }
-
-            Console.WriteLine("Update installed. Relaunching watchdog…");
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = watchdogPath,
-                WorkingDirectory = installDir,
-                UseShellExecute = true,
-            });
-            return 0;
+            return exitCode;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("Updater failed: " + ex.GetType().FullName + ": " + ex.Message);
-            if (ex.StackTrace != null)
-                Console.Error.WriteLine(ex.StackTrace);
-            return 1;
+            return ReportFailure(ex);
         }
+    }
+
+    internal static int FinishInstall(string payloadRoot, string installDir, Func<ProcessStartInfo, Process?> start)
+    {
+        AtomicCopyOver(payloadRoot, installDir);
+
+        TryConsole(() => Console.WriteLine("Update installed. Relaunching watchdog…"));
+        start(new ProcessStartInfo
+        {
+            FileName = Path.Combine(installDir, WatchdogExeName),
+            WorkingDirectory = installDir,
+            UseShellExecute = true,
+        })?.Dispose();
+        return 0;
+    }
+
+    internal static int ReportFailure(Exception ex)
+    {
+        TryConsole(() => Console.Error.WriteLine("Updater failed: " + ex.GetType().FullName + ": " + ex.Message));
+        if (ex.StackTrace != null)
+            TryConsole(() => Console.Error.WriteLine(ex.StackTrace));
+        return 1;
+    }
+
+    private static void TryConsole(Action write)
+    {
+        try { write(); }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
     }
 
     private static Version ReadCurrentVersion(string watchdogPath)

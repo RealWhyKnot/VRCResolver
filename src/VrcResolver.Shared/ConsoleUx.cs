@@ -265,7 +265,8 @@ public static class ConsoleUx
             {
                 if (ShouldUseColor())
                     try { Console.ForegroundColor = color; } catch { }
-                Console.WriteLine(text);
+                try { Console.WriteLine(text); }
+                catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
             }
             finally
             {

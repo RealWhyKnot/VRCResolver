@@ -45,6 +45,21 @@ public static class Logger
         Console.SetError(new TeeWriter(Console.Error));
     }
 
+    internal static void InstallForTests(string logPath, TextWriter primary)
+    {
+        lock (_lock)
+        {
+            try { _writer?.Dispose(); } catch { }
+            var fs = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            _writer = new StreamWriter(fs) { AutoFlush = false };
+            _logDir = null;
+            _component = "test";
+        }
+
+        Console.SetOut(new TeeWriter(primary));
+        Console.SetError(new TeeWriter(primary));
+    }
+
     public static void Close()
     {
         lock (_lock)
@@ -139,10 +154,39 @@ public static class Logger
         private readonly TextWriter _primary;
         public TeeWriter(TextWriter primary) { _primary = primary; }
         public override Encoding Encoding => _primary.Encoding;
-        public override void WriteLine() { _primary.WriteLine(); Tee(""); }
-        public override void WriteLine(string? value) { _primary.WriteLine(value); Tee(value); }
-        public override void Write(string? value) { _primary.Write(value); }
-        public override void Write(char value) { _primary.Write(value); }
-        public override void Flush() { _primary.Flush(); }
+
+        public override void WriteLine()
+        {
+            Tee("");
+            try { _primary.WriteLine(); }
+            catch (Exception ex) when (IsConsoleGone(ex)) { }
+        }
+
+        public override void WriteLine(string? value)
+        {
+            Tee(value);
+            try { _primary.WriteLine(value); }
+            catch (Exception ex) when (IsConsoleGone(ex)) { }
+        }
+
+        public override void Write(string? value)
+        {
+            try { _primary.Write(value); }
+            catch (Exception ex) when (IsConsoleGone(ex)) { }
+        }
+
+        public override void Write(char value)
+        {
+            try { _primary.Write(value); }
+            catch (Exception ex) when (IsConsoleGone(ex)) { }
+        }
+
+        public override void Flush()
+        {
+            try { _primary.Flush(); }
+            catch (Exception ex) when (IsConsoleGone(ex)) { }
+        }
+
+        private static bool IsConsoleGone(Exception ex) => ex is IOException or ObjectDisposedException;
     }
 }
