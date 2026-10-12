@@ -105,7 +105,7 @@ internal static partial class Program
     {
         AtomicCopyOver(payloadRoot, installDir);
 
-        TryConsole(() => Console.WriteLine("Update installed. Relaunching watchdog…"));
+        TryConsole(() => Console.WriteLine("Update installed. Relaunching watchdog..."));
         start(new ProcessStartInfo
         {
             FileName = Path.Combine(installDir, WatchdogExeName),

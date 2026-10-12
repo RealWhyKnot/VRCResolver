@@ -176,7 +176,7 @@ internal static class Program
         s_shutdown = new ShutdownCoordinator(
             trigger => RestoreToolsFirst(patcher, trigger),
             ShutdownSteps,
-            Logger.WriteFileOnly);
+            line => Logger.WriteFileOnly("[shutdown] " + line));
         patcher.RecoverFromUncleanShutdown();
 
         s_mesh = new MeshClient();

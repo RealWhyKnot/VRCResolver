@@ -150,6 +150,51 @@ public sealed class MeshContractTests : IDisposable
     }
 
     [Fact]
+    public void Playback_feedback_kinds_match_the_server()
+    {
+        string[] kinds =
+        {
+            WireConstants.PlaybackFeedbackLoadFailure,
+            WireConstants.PlaybackFeedbackSilentStall,
+            WireConstants.PlaybackFeedbackPlaying,
+            WireConstants.PlaybackFeedbackResolvedRejected,
+            WireConstants.PlaybackFeedbackOgFailed,
+            WireConstants.PlaybackFeedbackCachePlay,
+        };
+
+        Assert.Equal(Sorted(Strings("playback_feedback_kinds")), Sorted(kinds));
+    }
+
+    [Fact]
+    public void Resolved_rejected_details_match_the_server()
+    {
+        string[] details =
+        {
+            WireConstants.OgFallbackReasonAvProIncompatible,
+            WireConstants.OgFallbackReasonResolvedUrlRejected,
+        };
+
+        Assert.Equal(Sorted(Strings("resolved_rejected_details")), Sorted(details));
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Og_failed_details_match_the_server()
+    {
+        Assert.Equal(Sorted(Strings("og_failed_details")), Sorted(LocalIpcServer.OgFailedDetails));
+        Assert.All(LocalIpcServer.OgFailedDetails, detail => Assert.Equal(detail, LocalIpcServer.OgFailedDetailFor(detail)));
+        Assert.Equal(LocalIpcServer.OgFailedDetailUnknown, LocalIpcServer.OgFailedDetailFor("something_else"));
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Delivered_height_bounds_match_the_server()
+    {
+        Assert.Equal(VrcLogMonitor.MinDeliveredHeight, Number("delivered_height", "min"));
+        Assert.Equal(VrcLogMonitor.MaxDeliveredHeight, Number("delivered_height", "max"));
+    }
+
+    [Fact]
     public void Proxy_extensions_match_the_server()
     {
         Assert.Equal(Sorted(Strings("proxy_path_extensions")), Sorted(FirstPartyUrlPolicy.AllowedPathExtensions));

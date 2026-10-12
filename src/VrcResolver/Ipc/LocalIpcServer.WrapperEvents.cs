@@ -110,10 +110,16 @@ internal sealed partial class LocalIpcServer : IDisposable
     internal static bool IsSiteWideOgBlock(string? wrapperReason)
         => wrapperReason is "sign_in_required" or "cf_403" or "rate_limited";
 
-    internal static string OgFailedDetailFor(string? wrapperReason) => wrapperReason switch
+    internal const string OgFailedDetailUnknown = "unknown";
+
+    internal static readonly string[] OgFailedDetails =
     {
-        "cf_403" or "rate_limited" or "sign_in_required" or "content_not_found" => wrapperReason,
-        _ => "unknown",
+        "cf_403", "rate_limited", "sign_in_required", "content_not_found", OgFailedDetailUnknown,
     };
+
+    internal static string OgFailedDetailFor(string? wrapperReason)
+        => wrapperReason != null && Array.IndexOf(OgFailedDetails, wrapperReason) >= 0
+            ? wrapperReason
+            : OgFailedDetailUnknown;
 
 }

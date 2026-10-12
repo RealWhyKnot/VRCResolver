@@ -11,6 +11,8 @@ internal sealed partial class VrcLogMonitor : IDisposable
     private static readonly TimeSpan DeliveredHeightTtl = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan PlayingFeedbackInterval = TimeSpan.FromSeconds(15);
     private const int MaxDeliveredHeightEntries = 64;
+    internal const int MinDeliveredHeight = 16;
+    internal const int MaxDeliveredHeight = 4320;
 
     [GeneratedRegex(@"\[AVProVideo\] Opening\s+(\S+)", RegexOptions.IgnoreCase)]
     private static partial Regex AvProOpeningRegex();
@@ -490,7 +492,7 @@ internal sealed partial class VrcLogMonitor : IDisposable
         height = 0;
         if (!int.TryParse(widthText, out width) || !int.TryParse(heightText, out height))
             return false;
-        return width is >= 16 and <= 16384 && height is >= 16 and <= 4320;
+        return width is >= 16 and <= 16384 && height is >= MinDeliveredHeight and <= MaxDeliveredHeight;
     }
 
     private void RememberDeliveredHeight(string url, int height)

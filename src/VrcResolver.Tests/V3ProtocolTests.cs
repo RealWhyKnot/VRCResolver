@@ -149,7 +149,6 @@ public class V3ProtocolTests
     {
         Assert.Equal("playback_quality_update", WireConstants.ActionPlaybackQualityUpdate);
         Assert.Equal("playback_feedback", WireConstants.FeaturePlaybackFeedback);
-        Assert.Equal(WireConstants.ActionPlaybackFeedback, WireConstants.FeaturePlaybackFeedback);
     }
 
     [Fact]
