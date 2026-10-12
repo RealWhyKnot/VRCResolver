@@ -17,4 +17,8 @@
     <ProjectReference Include="..\VrcResolver.Shared\VrcResolver.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="VrcResolver.Tests" />
+  </ItemGroup>
+
 </Project>

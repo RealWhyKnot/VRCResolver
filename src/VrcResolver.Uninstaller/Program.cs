@@ -4,9 +4,18 @@ using VrcResolver.Shared;
 
 namespace VrcResolver.Uninstaller;
 
+internal enum WatchdogMatch
+{
+    Ours,
+    OtherInstall,
+    Uninspectable,
+}
+
 [SupportedOSPlatform("windows")]
 internal static class Program
 {
+    private static readonly string[] WatchdogExeNames = { "vrcresolver.exe", "WKVRCProxy.exe" };
+
     private static int Main(string[] args)
     {
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
@@ -19,8 +28,13 @@ internal static class Program
 
         Console.WriteLine("[uninstall] start installDir=" + installDir);
 
-        errors += RunStep("close-watchdog", () => CloseRunningWatchdog(installDir));
-        errors += RunStep("restore-yt-dlp", RestoreYtDlp);
+        int closeErrors = RunStep("close-watchdog", () => CloseRunningWatchdog(installDir));
+        if (closeErrors > 0)
+        {
+            Console.WriteLine("Uninstall stopped at close-watchdog -- see the message above.");
+            return 2;
+        }
+        errors += RunStep("restore-yt-dlp", () => RestoreYtDlp(TryFindVrcTools()));
         errors += RunStep("remove-hosts", () => RemoveHostsEntry(watchdogExe));
         errors += RunStep("remove-relay-tls", () => RemoveRelayTls(watchdogExe));
         errors += RunStep("restore-wininet-limit", () => WinInetConnectionLimit.Restore(Console.WriteLine));
@@ -49,46 +63,71 @@ internal static class Program
         }
     }
 
+    internal static WatchdogMatch MatchWatchdog(string? mainModulePath, string installDir)
+    {
+        if (string.IsNullOrEmpty(mainModulePath)) return WatchdogMatch.Uninspectable;
+        string actual = Path.GetFullPath(mainModulePath);
+        foreach (string name in WatchdogExeNames)
+        {
+            string own = Path.GetFullPath(Path.Combine(installDir, name));
+            if (string.Equals(actual, own, StringComparison.OrdinalIgnoreCase)) return WatchdogMatch.Ours;
+        }
+        return WatchdogMatch.OtherInstall;
+    }
+
     private static void CloseRunningWatchdog(string installDir)
     {
-        string[] ownExes =
-        {
-            Path.GetFullPath(Path.Combine(installDir, "vrcresolver.exe")),
-            Path.GetFullPath(Path.Combine(installDir, "WKVRCProxy.exe")),
-        };
-        int closed = 0, skipped = 0;
         var procs = Process.GetProcessesByName("vrcresolver")
             .Concat(Process.GetProcessesByName("WKVRCProxy"));
+        int closed = CloseWatchdogs(procs, installDir, StopWatchdog);
+        if (closed > 0) Thread.Sleep(500);
+    }
+
+    private static void StopWatchdog(Process p)
+    {
+        if (!p.CloseMainWindow()) p.Kill();
+        p.WaitForExit(5000);
+    }
+
+    internal static int CloseWatchdogs(IEnumerable<Process> procs, string installDir, Action<Process> stop)
+    {
+        int closed = 0, skipped = 0, uninspectable = 0;
         foreach (var p in procs)
         {
             using (p)
             {
                 string? procExe = null;
                 try { procExe = p.MainModule?.FileName; }
-                catch { skipped++; continue; }
-                if (procExe == null
-                    || !ownExes.Any(own => string.Equals(Path.GetFullPath(procExe), own,
-                        StringComparison.OrdinalIgnoreCase)))
+                catch { }
+                switch (MatchWatchdog(procExe, installDir))
                 {
-                    skipped++;
-                    continue;
+                    case WatchdogMatch.Uninspectable:
+                        uninspectable++;
+                        continue;
+                    case WatchdogMatch.OtherInstall:
+                        skipped++;
+                        continue;
                 }
                 try
                 {
-                    if (!p.CloseMainWindow()) p.Kill();
-                    p.WaitForExit(5000);
+                    stop(p);
                     closed++;
                 }
                 catch { }
             }
         }
-        Console.WriteLine("[uninstall] close-watchdog matched=" + closed + " skipped_other_installs=" + skipped);
-        if (closed > 0) Thread.Sleep(500);
+        Console.WriteLine("[uninstall] close-watchdog matched=" + closed + " skipped_other_installs=" + skipped
+            + " uninspectable=" + uninspectable);
+        if (uninspectable > 0)
+        {
+            throw new InvalidOperationException(
+                "a VRCResolver watchdog is running that the uninstaller can't inspect -- close it and run the uninstaller again");
+        }
+        return closed;
     }
 
-    private static void RestoreYtDlp()
+    internal static void RestoreYtDlp(string? toolsDir)
     {
-        string? toolsDir = TryFindVrcTools();
         if (string.IsNullOrEmpty(toolsDir))
         {
             Console.WriteLine("[uninstall] restore-yt-dlp skipped: VRChat Tools dir not found");
@@ -97,54 +136,23 @@ internal static class Program
 
         try { ToolsDirSweeper.Sweep(toolsDir); } catch { }
 
-        string target = Path.Combine(toolsDir, "yt-dlp.exe");
-        string backup = Path.Combine(toolsDir, "yt-dlp-og.exe");
-
         try
         {
-            if (File.Exists(backup))
+            RestoreOutcome outcome = ToolsRestore.Restore(toolsDir, out string detail);
+            switch (outcome)
             {
-                try
-                {
-                    File.Move(backup, target, overwrite: true);
-                    return;
-                }
-                catch (IOException)
-                {
-                }
-
-                try
-                {
-                    if (File.Exists(target))
-                    {
-                        string stale = target + ".stale-" + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
-                        File.Move(target, stale);
-                    }
-                    File.Move(backup, target);
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine("yt-dlp.exe restore failed: " + ex.Message);
-                    throw;
-                }
-                return;
-            }
-            if (File.Exists(target))
-            {
-                try
-                {
-                    File.Delete(target);
-                    Console.WriteLine(
-                        "[uninstall] yt-dlp-og.exe was missing; deleted Tools/yt-dlp.exe so VRChat redownloads its yt-dlp on next session.");
-                }
-                catch (Exception ex)
-                {
+                case RestoreOutcome.Failed:
                     Console.Error.WriteLine(
-                        "[uninstall] WARNING: could not delete Tools/yt-dlp.exe: " + ex.Message + " -- "
-                        + "delete it manually so VRChat re-downloads on next launch.");
-                    throw new InvalidOperationException(
-                        "Tools/yt-dlp.exe could not be removed -- backup missing and delete failed");
-                }
+                        "[uninstall] WARNING: yt-dlp.exe was not restored (" + detail + ") -- "
+                        + "check Tools/yt-dlp.exe by hand; deleting it makes VRChat re-download its own on next launch.");
+                    throw new InvalidOperationException("Tools/yt-dlp.exe could not be restored -- " + detail);
+                case RestoreOutcome.RemovedOrphanWrapper:
+                    Console.WriteLine(
+                        "[uninstall] yt-dlp-og.exe was missing; removed our Tools/yt-dlp.exe so VRChat redownloads its yt-dlp on next session.");
+                    break;
+                default:
+                    Console.WriteLine("[uninstall] restore-yt-dlp " + outcome + ": " + detail);
+                    break;
             }
         }
         finally
