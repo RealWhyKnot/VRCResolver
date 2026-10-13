@@ -8,15 +8,15 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use vrcr_shared::console::{Component, Ux};
-pub use vrcr_shared::hosts::{MARKER_IP, contains_bypass_entry, hosts_path, line_is_bypass_entry};
+pub use vrcr_shared::hosts::{
+    ADD_ARG, MARKER_IP, REMOVE_ARG, contains_bypass_entry, hosts_path, line_is_bypass_entry,
+};
 use vrcr_shared::log::Log;
 use vrcr_shared::trust_gateway::GATEWAY_HOST;
 use vrcr_shared::win::Elevated;
 
 use crate::clock::Now;
 
-pub const ADD_ARG: &str = "--add-hosts-entry";
-pub const REMOVE_ARG: &str = "--remove-hosts-entry";
 pub const TICK_INTERVAL: Duration = Duration::from_secs(60);
 pub const ELEVATION_TIMEOUT: Duration = Duration::from_secs(60);
 const READ_ATTEMPTS: u32 = 3;

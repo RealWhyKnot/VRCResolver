@@ -2027,6 +2027,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vrcr-uninstaller"
+version = "0.0.0"
+dependencies = [
+ "tempfile",
+ "vrcr-build",
+ "vrcr-shared",
+]
+
+[[package]]
 name = "vrcr-updater"
 version = "0.0.0"
 dependencies = [

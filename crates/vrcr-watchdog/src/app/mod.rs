@@ -83,6 +83,7 @@ pub enum ChildMode {
     RemoveHosts,
     TlsBootstrap,
     TlsRemove,
+    TlsCheck,
 }
 
 pub fn child_mode(args: &[String]) -> Option<ChildMode> {
@@ -91,6 +92,7 @@ pub fn child_mode(args: &[String]) -> Option<ChildMode> {
         hosts::REMOVE_ARG => Some(ChildMode::RemoveHosts),
         tls::BOOTSTRAP_ARG => Some(ChildMode::TlsBootstrap),
         tls::REMOVE_ARG => Some(ChildMode::TlsRemove),
+        tls::CHECK_ARG => Some(ChildMode::TlsCheck),
         _ => None,
     }
 }

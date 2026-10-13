@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use crate::trust_gateway::GATEWAY_HOST;
 
 pub const MARKER_IP: &str = "127.0.0.1";
+pub const ADD_ARG: &str = "--add-hosts-entry";
+pub const REMOVE_ARG: &str = "--remove-hosts-entry";
 
 pub fn hosts_path() -> PathBuf {
     let root = std::env::var_os("SystemRoot")

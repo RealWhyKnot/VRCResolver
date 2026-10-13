@@ -713,3 +713,41 @@ fn windows_dpapi_round_trips_for_the_current_user() {
     );
     assert!(vrcr_shared::win::dpapi_unprotect(b"not sealed").is_err());
 }
+
+#[test]
+fn removal_check_only_asks_for_elevation_when_something_is_left() {
+    let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
+    let mut host = FakeHost::new(Behaviour::RunChild, &dir);
+    let foreign = custom_cert(
+        "Some Vendor Root",
+        &["vendor.example"],
+        true,
+        ExtendedKeyUsagePurpose::ServerAuth,
+    );
+    host.seed(MachineStore::Root, foreign);
+    fs::create_dir_all(&host.paths.state_dir).unwrap_or_else(|e| panic!("{e}"));
+    fs::write(host.paths.state_dir.join("relay_last_port.txt"), "51234").unwrap_or_else(|e| panic!("{e}"));
+    assert!(!tls::needs_removal(&host, &host.paths));
+    assert_eq!(tls::run_check(&host, &host.paths), tls::CHECK_CLEAN);
+
+    host.seed(
+        MachineStore::My,
+        tls::generate(now()).unwrap_or_else(|e| panic!("{e}")).cert_der,
+    );
+    assert_eq!(tls::run_check(&host, &host.paths), tls::CHECK_NEEDS_REMOVAL);
+    host.stores.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    assert!(!tls::needs_removal(&host, &host.paths));
+
+    fs::create_dir_all(&host.paths.program_data_root).unwrap_or_else(|e| panic!("{e}"));
+    fs::write(host.paths.program_data_root.join(LEGACY_PFX_FILE), "x").unwrap_or_else(|e| panic!("{e}"));
+    assert!(tls::needs_removal(&host, &host.paths));
+    fs::remove_file(host.paths.program_data_root.join(LEGACY_PFX_FILE)).unwrap_or_else(|e| panic!("{e}"));
+    fs::create_dir_all(&host.paths.legacy_program_data_root).unwrap_or_else(|e| panic!("{e}"));
+    assert!(tls::needs_removal(&host, &host.paths));
+    fs::remove_dir(&host.paths.legacy_program_data_root).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!tls::needs_removal(&host, &host.paths));
+
+    host.store_read_fails = true;
+    assert!(tls::needs_removal(&host, &host.paths));
+    assert!(host.elevations().is_empty());
+}

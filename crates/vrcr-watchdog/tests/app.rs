@@ -69,6 +69,10 @@ fn elevated_child_flags_dispatch_before_anything_else() {
         app::child_mode(&args(&["--local-relay-tls-remove"])),
         Some(ChildMode::TlsRemove)
     );
+    assert_eq!(
+        app::child_mode(&args(&["--local-relay-tls-check"])),
+        Some(ChildMode::TlsCheck)
+    );
     assert_eq!(app::child_mode(&args(&[])), None);
     assert_eq!(app::child_mode(&args(&["--verbose", "--add-hosts-entry"])), None);
     assert_eq!(app::child_mode(&args(&["--ADD-HOSTS-ENTRY"])), None);

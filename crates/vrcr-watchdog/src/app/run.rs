@@ -136,7 +136,7 @@ fn run_child(mode: ChildMode, args: &[String], paths: &AppPaths, ux: &Ux) -> i32
     match mode {
         ChildMode::AddHosts => hosts::run_add(&hosts::hosts_path(), ux),
         ChildMode::RemoveHosts => hosts::run_remove(&hosts::hosts_path(), ux),
-        ChildMode::TlsBootstrap | ChildMode::TlsRemove => {
+        ChildMode::TlsBootstrap | ChildMode::TlsRemove | ChildMode::TlsCheck => {
             let host = match WindowsTlsHost::current() {
                 Ok(host) => host,
                 Err(e) => {
@@ -150,11 +150,13 @@ fn run_child(mode: ChildMode, args: &[String], paths: &AppPaths, ux: &Ux) -> i32
                 legacy_program_data_root: legacy_program_data_root(&program_data_root),
                 program_data_root,
             };
-            if mode == ChildMode::TlsBootstrap {
-                let rest = args.get(1..).unwrap_or(&[]);
-                tls::run_bootstrap(rest, &host, &child, ux, SystemTime::now())
-            } else {
-                tls::run_remove(&host, &child, ux)
+            match mode {
+                ChildMode::TlsBootstrap => {
+                    let rest = args.get(1..).unwrap_or(&[]);
+                    tls::run_bootstrap(rest, &host, &child, ux, SystemTime::now())
+                }
+                ChildMode::TlsCheck => tls::run_check(&host, &child),
+                _ => tls::run_remove(&host, &child, ux),
             }
         }
     }

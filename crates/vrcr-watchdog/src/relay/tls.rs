@@ -20,8 +20,8 @@ use x509_parser::extensions::GeneralName;
 
 use crate::clock::Now;
 
-pub const BOOTSTRAP_ARG: &str = "--local-relay-tls-bootstrap";
-pub const REMOVE_ARG: &str = "--local-relay-tls-remove";
+pub use vrcr_shared::relay_tls::{BOOTSTRAP_ARG, CHECK_ARG, CHECK_CLEAN, CHECK_NEEDS_REMOVAL, REMOVE_ARG};
+
 pub const CERT_FILE: &str = "relay_tls_cert.der";
 pub const KEY_FILE: &str = "relay_tls_key.bin";
 pub const LEGACY_PORTS_FILE: &str = "localhost-youtube-relay-ports.txt";
@@ -430,6 +430,28 @@ pub fn run_bootstrap(
     }
     let _ = remove_file_if_present(&paths.program_data_root.join(LEGACY_PFX_FILE));
     0
+}
+
+pub fn needs_removal(host: &dyn TlsHost, paths: &ChildPaths) -> bool {
+    let legacy_files = [
+        paths.program_data_root.join(LEGACY_PFX_FILE),
+        paths.program_data_root.join(LEGACY_PORTS_FILE),
+    ];
+    if legacy_files.iter().any(|p| p.exists()) || paths.legacy_program_data_root.is_dir() {
+        return true;
+    }
+    [MachineStore::My, MachineStore::Root].into_iter().any(|store| {
+        host.store_certs(store)
+            .map_or(true, |certs| certs.iter().any(|c| is_ours(c)))
+    })
+}
+
+pub fn run_check(host: &dyn TlsHost, paths: &ChildPaths) -> i32 {
+    if needs_removal(host, paths) {
+        CHECK_NEEDS_REMOVAL
+    } else {
+        CHECK_CLEAN
+    }
 }
 
 pub fn run_remove(host: &dyn TlsHost, paths: &ChildPaths, ux: &Ux) -> i32 {
