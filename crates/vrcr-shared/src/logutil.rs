@@ -1,0 +1,85 @@
+use url::Url;
+
+pub fn sanitize_for_console(value: &str, max_len: usize) -> String {
+    let max_len = max_len.max(1);
+    let mut out = String::with_capacity(value.len().min(max_len) + 3);
+    let mut chars = value.chars();
+    for c in chars.by_ref().take(max_len) {
+        let control = (c as u32) < 0x20 || matches!(c, '\u{7F}' | '\u{2028}' | '\u{2029}');
+        out.push(if control { '?' } else { c });
+    }
+    if chars.next().is_some() {
+        out.push_str("...");
+    }
+    out
+}
+
+pub fn sanitize(value: &str) -> String {
+    sanitize_for_console(value, 120)
+}
+
+pub fn redact_url(url: &str) -> String {
+    if url.is_empty() {
+        return String::new();
+    }
+    match Url::parse(url) {
+        Ok(u) => {
+            let path = u.path();
+            let path = match path.char_indices().nth(60) {
+                Some((cut, _)) => format!("{}...", &path[..cut]),
+                None => path.to_owned(),
+            };
+            format!("{}://{}{}", u.scheme(), u.host_str().unwrap_or_default(), path)
+        }
+        Err(_) => sanitize(url),
+    }
+}
+
+pub fn bare_host(url: &str) -> String {
+    match Url::parse(url) {
+        Ok(u) => {
+            let host = u.host_str().unwrap_or_default();
+            match host.get(..4) {
+                Some(p) if p.eq_ignore_ascii_case("www.") => host[4..].to_owned(),
+                _ => host.to_owned(),
+            }
+        }
+        Err(_) => "?".to_owned(),
+    }
+}
+
+pub fn payload_preview(payload: &[u8], max_bytes: usize) -> String {
+    if payload.is_empty() {
+        return String::new();
+    }
+    let head = &payload[..payload.len().min(max_bytes)];
+    sanitize_for_console(&String::from_utf8_lossy(head), max_bytes)
+}
+
+pub fn iso8601_utc(at: std::time::SystemTime) -> String {
+    let since = at.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let secs = since.as_secs();
+    let ticks = since.subsec_nanos() / 100;
+    let days = i64::try_from(secs / 86_400).unwrap_or(0);
+    let rem = secs % 86_400;
+    let (y, m, d) = civil_from_days(days);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{ticks:07}Z",
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60
+    )
+}
+
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = u32::try_from(doy - (153 * mp + 2) / 5 + 1).unwrap_or(1);
+    let m = u32::try_from(if mp < 10 { mp + 3 } else { mp - 9 }).unwrap_or(1);
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    (y, m, d)
+}

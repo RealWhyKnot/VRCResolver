@@ -31,3 +31,5 @@ src/VrcResolver/Generated/
 *.webm
 *.mp4
 *.mkv
+
+target/
