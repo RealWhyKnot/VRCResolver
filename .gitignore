@@ -9,11 +9,6 @@ node_modules/
 .docs/
 GEMINI.md
 
-[Bb]in/
-[Oo]bj/
-*.user
-*.userosscache
-*.sln.docstates
 
 .vs/
 .vscode/
@@ -25,7 +20,6 @@ wwwroot/
 
 .local_build_state.json
 version.txt
-src/VrcResolver/Generated/
 *.log
 
 *.webm

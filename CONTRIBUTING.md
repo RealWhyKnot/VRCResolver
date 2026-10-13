@@ -6,11 +6,11 @@ Thanks for your interest.
 
 - The project is alpha, and behaviour changes faster than the docs do. If they disagree, go by the code.
 - I maintain it alone. For anything bigger than a small fix, open an issue first so we can agree on the direction before you spend time on it.
-- The codebase avoids heavy abstraction on purpose. A new feature is usually a method on an existing class.
+- The codebase avoids heavy abstraction on purpose. A new feature usually goes into an existing module.
 
 ## Setting up
 
-You need Windows 10/11 x64, the .NET 11 SDK, PowerShell 5.1+ and Git.
+You need Windows 10/11 x64, a stable Rust toolchain from rustup with the Visual Studio C++ build tools for the MSVC linker, PowerShell 5.1+ and Git.
 
 ```powershell
 git clone https://github.com/RealWhyKnot/VRCResolver.git
@@ -24,8 +24,8 @@ The first `build.ps1` run also sets `git config core.hooksPath .githooks`, which
 
 1. Fork and branch off `main`. Branch names are up to you (`fix/...`, `feat/...` and `chore/...` are common).
 2. Make your change. Small diffs please. A "while I'm here" cleanup is its own PR.
-3. `dotnet build vrcresolver.slnx` has to pass with `-warnaserror`.
-4. Run `powershell -File build.ps1 -SkipZip` once on the branch before opening the PR. It catches publish problems that `dotnet build` misses.
+3. `scripts/lint.ps1` and `cargo test --workspace` have to pass. The lint script runs `cargo fmt --check` and `cargo clippy` with warnings treated as errors.
+4. Run `powershell -File build.ps1 -SkipZip` once on the branch before opening the PR. It builds the release exes and checks their version stamps, which a plain `cargo build` skips.
 5. Open the PR and fill in the template.
 
 ## Commit messages
@@ -38,12 +38,12 @@ Subjects follow the existing log: `type(scope?): short summary (YYYY.M.D.N-XXXX)
 
 ## Code style
 
-C# follows the surrounding file. For decisions that aren't obvious, leave a short comment saying why.
+Rust code follows the surrounding file and `rustfmt.toml`. For decisions that aren't obvious, leave a short comment saying why.
 
 ## What to avoid in PRs
 
 - Refactors bundled with feature work. Split them.
-- A new class for a one-off case.
+- A new type or trait for a one-off case.
 - Any code path that can leave VRChat with a broken `yt-dlp.exe`, without either the patched build or the fallback to the original. That fallback always has to work.
 
 ## Bugs and questions

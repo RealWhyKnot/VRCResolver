@@ -15,7 +15,7 @@ I try to acknowledge new reports within **7 days** and give a first assessment w
 - Local privilege escalation, unsafe operations run as admin, or an unprivileged caller tampering with the hosts file.
 - Anything that lets a remote URL or VRChat world make VRCResolver run attacker-controlled code, exfiltrate local files, or persist beyond the running session.
 - The local relay server, the IPC servers (HTTP, pipe, WebSocket), or any endpoint reachable from `localhost` while VRCResolver is running, if they expose capabilities they shouldn't.
-- The patcher (`PatcherService.cs`) writing or restoring the wrong file, or being tricked into corrupting VRChat's install.
+- The patcher (`crates/vrcr-watchdog/src/maintenance/patch.rs`) writing or restoring the wrong file, or being tricked into corrupting VRChat's install.
 - Update and fetch paths in `build.ps1` that could be tricked into installing a tampered binary.
 
 ## Out of scope

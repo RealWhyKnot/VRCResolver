@@ -65,53 +65,36 @@ else {
 $isDevLiteral = if ($isDev) { "true" } else { "false" }
 Write-Host "BuildInfo: GitSha=$gitSha$gitDirty BuildTime=$buildTime IsDevBuild=$isDevLiteral" -ForegroundColor DarkGray
 
-$BuildInfoProps = @(
-    "/p:BuildInfoGitSha=$gitSha$gitDirty",
-    "/p:BuildInfoBuildTime=$buildTime",
-    "/p:BuildInfoIsDevBuild=$isDevLiteral"
-)
+Write-Host "`n--- Building ---" -ForegroundColor Cyan
+$env:VRCR_VERSION = $AsmVersion
+$env:VRCR_GIT_SHA = "$gitSha$gitDirty"
+$env:VRCR_BUILD_TIME = $buildTime
+$env:VRCR_DEV = $isDevLiteral
+cargo build --release --locked -p vrcr-watchdog -p vrcr-updater -p vrcr-uninstaller -p vrcr-ytdlp
+if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 
-Write-Host "`n--- Publishing ---" -ForegroundColor Cyan
-$ProgFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
-$VsInstaller = Join-Path $ProgFilesX86 'Microsoft Visual Studio\Installer'
-if (Test-Path (Join-Path $VsInstaller 'vswhere.exe')) {
-    if ($env:PATH -notlike "*$VsInstaller*") { $env:PATH = "$VsInstaller;$env:PATH" }
-}
-else {
-    Write-Warning "vswhere.exe not found at $VsInstaller -- AOT link step may fail. Install Visual Studio Build Tools with the Desktop C++ workload."
-}
-
-$AotPubArgs = @("-c", "Release", "-r", "win-x64", "--self-contained", "true",
-    "/p:Version=$AsmVersion",
-    "-o", $BuildDir, "--nologo")
-$WatchdogPubArgs = $AotPubArgs + $BuildInfoProps
-dotnet publish "src/VrcResolver/VrcResolver.csproj" @WatchdogPubArgs
-if ($LASTEXITCODE -ne 0) { throw "VrcResolver publish failed" }
-dotnet publish "src/VrcResolver.Updater/VrcResolver.Updater.csproj" @AotPubArgs
-if ($LASTEXITCODE -ne 0) { throw "VrcResolver.Updater publish failed" }
-$UpdaterExe = Join-Path $BuildDir "vrcresolver.Updater.exe"
-if (Test-Path $UpdaterExe) {
-    Copy-Item $UpdaterExe (Join-Path $BuildDir "vrcresolver.Updater.next.exe") -Force
-}
-else {
-    throw "vrcresolver.Updater.exe missing after publish"
-}
-dotnet publish "src/VrcResolver.Uninstaller/VrcResolver.Uninstaller.csproj" @AotPubArgs
-if ($LASTEXITCODE -ne 0) { throw "VrcResolver.Uninstaller publish failed" }
-
-foreach ($StaleName in @("WKVRCProxy.exe", "WKVRCProxy.Updater.exe", "WKVRCProxy.Updater.next.exe")) {
-    $StalePath = Join-Path $BuildDir $StaleName
-    if (Test-Path $StalePath) { Remove-Item $StalePath -Force }
-}
-
+$TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $PSScriptRoot "target" }
+$ReleaseDir = Join-Path $TargetDir "release"
 $BuildTools = Join-Path $BuildDir "tools"
 New-Item -ItemType Directory $BuildTools -Force | Out-Null
 
-$YtDlpPubArgs = @("-c", "Release", "-r", "win-x64", "--self-contained", "true",
-    "/p:Version=$AsmVersion",
-    "-o", $BuildTools, "--nologo")
-dotnet publish "src/VrcResolver.YtDlp/VrcResolver.YtDlp.csproj" @YtDlpPubArgs
-if ($LASTEXITCODE -ne 0) { throw "VrcResolver.YtDlp publish failed" }
+$Outputs = [ordered]@{
+    "vrcresolver.exe"             = "vrcresolver.exe"
+    "vrcresolver-updater.exe"     = "vrcresolver.Updater.exe"
+    "vrcresolver-uninstaller.exe" = "vrcresolver.Uninstaller.exe"
+    "yt-dlp.exe"                  = "tools/yt-dlp.exe"
+}
+foreach ($Name in $Outputs.Keys) {
+    $Source = Join-Path $ReleaseDir $Name
+    if (-not (Test-Path $Source)) { throw "$Name missing after cargo build" }
+    Copy-Item $Source (Join-Path $BuildDir $Outputs[$Name]) -Force
+}
+Copy-Item (Join-Path $BuildDir "vrcresolver.Updater.exe") (Join-Path $BuildDir "vrcresolver.Updater.next.exe") -Force
+
+foreach ($Exe in Get-ChildItem $BuildDir -Filter "*.exe" -Recurse) {
+    $Stamped = $Exe.VersionInfo.FileVersion
+    if ($Stamped -ne $AsmVersion) { throw "$($Exe.Name) carries FileVersion '$Stamped', expected '$AsmVersion'" }
+}
 
 $BuildData = Join-Path $BuildDir "data"
 New-Item -ItemType Directory $BuildData -Force | Out-Null
@@ -124,7 +107,6 @@ else {
     "" | Out-File (Join-Path $BuildData "wrapper_hashes.txt") -Encoding utf8 -NoNewline
 }
 
-Get-ChildItem $BuildDir -Filter "*.pdb" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
 
 $InstallManifestPath = Join-Path $BuildData "release-manifest.tsv"
 $InstallManifestLines = Get-ChildItem $BuildDir -Recurse -File |

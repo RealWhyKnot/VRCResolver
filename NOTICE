@@ -11,13 +11,13 @@ party software. Each item retains its original license, which is GPL-3.0
 compatible. The upstream URL points to the canonical license text.
 
 ============================================================
-.NET runtime and Microsoft NuGet libraries (MIT)
-  https://github.com/dotnet/runtime
-  vrcresolver is published as self-contained AOT-compiled binaries that
-  include the .NET runtime, plus libraries such as System.Net.Http,
-  System.Text.Json, and Microsoft.Extensions.* from the dotnet org.
+Rust crates (MIT, Apache-2.0, ISC, BSD, Zlib, Unicode-3.0)
+  The executables are built with Cargo and statically link the crates
+  listed in Cargo.lock. The larger ones are tokio, hyper, reqwest, ureq,
+  rustls, ring, rcgen, tokio-tungstenite, zip and rmp. Each crate's license
+  is in its published source on https://crates.io.
 ============================================================
-MessagePack-CSharp (MIT)
-  https://github.com/MessagePack-CSharp/MessagePack-CSharp
-  Used for v3.1 mesh-protocol msgpack encoding.
+webpki-roots (CDLA-Permissive-2.0)
+  https://github.com/rustls/webpki-roots
+  Mozilla's root certificate list, bundled through the ureq HTTP client.
 ============================================================

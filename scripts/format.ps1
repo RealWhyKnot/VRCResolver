@@ -15,7 +15,7 @@ function Invoke-Native {
 
 & git config --local core.hooksPath .githooks
 
-Invoke-Native 'dotnet format' { dotnet format vrcresolver.slnx }
+Invoke-Native 'cargo fmt' { cargo fmt --all }
 
 if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
     Import-Module PSScriptAnalyzer

@@ -34,4 +34,5 @@ if ($psFiles) {
     }
 }
 
-Invoke-Native 'dotnet format check' { dotnet format vrcresolver.slnx --verify-no-changes --no-restore }
+Invoke-Native 'cargo fmt check' { cargo fmt --all --check }
+Invoke-Native 'cargo clippy' { cargo clippy --workspace --all-targets --locked -- -D warnings }

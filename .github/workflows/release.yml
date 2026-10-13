@@ -61,11 +61,11 @@ jobs:
         shell: pwsh
         run: ./.github/scripts/Test-GenerateReleaseNotes.ps1
 
-      - name: Setup .NET 11
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '11.0.x'
-          dotnet-quality: preview
+      - name: Toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
 
       - name: Promote Unreleased -> tagged section
         shell: pwsh

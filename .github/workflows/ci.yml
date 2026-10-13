@@ -32,9 +32,9 @@ permissions:
 
 jobs:
   test:
-    name: dotnet build + test
+    name: cargo build + test
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -48,14 +48,11 @@ jobs:
           ./.github/scripts/Test-UpdateChangelog.ps1
           ./.github/scripts/Test-GenerateReleaseNotes.ps1
 
-      - name: Setup .NET 11
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: "11.0.x"
-          dotnet-quality: preview
-
-      - name: Restore
-        run: dotnet restore vrcresolver.slnx
+      - name: Toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
 
       - name: Install PowerShell analyzer
         shell: pwsh
@@ -65,16 +62,9 @@ jobs:
         shell: pwsh
         run: ./scripts/lint.ps1
 
-      - name: Build
-        run: dotnet build vrcresolver.slnx --configuration Release --no-restore -warnaserror
-
       - name: Test
-        run: dotnet test src/VrcResolver.Tests/VrcResolver.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory ./test-results
+        run: cargo test --workspace --locked
 
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-results
-          path: ./test-results
-          if-no-files-found: ignore
+      - name: Release build
+        shell: pwsh
+        run: ./build.ps1 -SkipZip
