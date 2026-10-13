@@ -1,7 +1,10 @@
 pub mod clock;
+pub mod display;
 pub mod health;
+pub mod hosts;
 pub mod ipc;
 pub mod mesh;
+pub mod monitoring;
 pub mod og_hint;
 pub mod relay;
 pub mod resolve_cache;
