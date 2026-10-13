@@ -878,6 +878,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vrcr-watchdog"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vrcr-shared",
+]
+
+[[package]]
 name = "vrcr-ytdlp"
 version = "0.0.0"
 dependencies = [
