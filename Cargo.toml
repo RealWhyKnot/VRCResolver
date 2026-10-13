@@ -22,12 +22,14 @@ hyper = { version = "1.12.0", features = ["server", "http1"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
 proptest = "1.12.0"
 regex-lite = "0.1.9"
+rcgen = { version = "0.14.10", default-features = false, features = ["ring"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "stream"] }
 rmpv = "1.3.1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-platform-verifier = "0.7.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sha1 = "0.11.0"
 sha2 = "0.11.1"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
@@ -35,6 +37,7 @@ tokio = { version = "1.53.2", features = ["rt", "net", "time", "io-util", "proce
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["handshake"] }
 tokio-util = { version = "0.7.20", features = ["rt"] }
+x509-parser = "0.18.1"
 ureq = { version = "3.4.2", default-features = false, features = ["rustls", "platform-verifier", "json"] }
 url = "2.5.8"
 uuid = { version = "1.28.0", features = ["v4"] }
