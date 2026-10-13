@@ -3,6 +3,7 @@ pub mod health;
 pub mod ipc;
 pub mod mesh;
 pub mod og_hint;
+pub mod relay;
 pub mod resolve_cache;
 pub mod settings;
 pub mod stats;
