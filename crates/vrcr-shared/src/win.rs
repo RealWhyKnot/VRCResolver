@@ -695,3 +695,237 @@ impl crate::wininet::DwordStore for RegDword<'_> {
 pub fn process_alive(pid: u32) -> bool {
     pid == 0 || std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyEvent {
+    pub vk: u16,
+    pub ch: u16,
+    pub ctrl: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CtrlEvent {
+    CtrlC,
+    Close,
+    Logoff,
+    Shutdown,
+}
+
+pub fn ctrl_event(code: u32) -> Option<CtrlEvent> {
+    match code {
+        0 | 1 => Some(CtrlEvent::CtrlC),
+        2 => Some(CtrlEvent::Close),
+        5 => Some(CtrlEvent::Logoff),
+        6 => Some(CtrlEvent::Shutdown),
+        _ => None,
+    }
+}
+
+pub const QUICK_EDIT_MODE: u32 = 0x0040;
+pub const EXTENDED_FLAGS: u32 = 0x0080;
+
+pub fn without_quick_edit(mode: u32) -> u32 {
+    (mode & !QUICK_EDIT_MODE) | EXTENDED_FLAGS
+}
+
+pub type CtrlHandler = Box<dyn Fn(CtrlEvent) + Send + Sync>;
+
+static CTRL_HANDLER: std::sync::OnceLock<CtrlHandler> = std::sync::OnceLock::new();
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod console {
+    use std::ffi::OsStr;
+    use std::io;
+    use std::os::windows::ffi::OsStrExt;
+    use std::time::Duration;
+
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_ACCESS_DENIED, HANDLE, INVALID_HANDLE_VALUE, WAIT_ABANDONED, WAIT_OBJECT_0,
+        WAIT_TIMEOUT,
+    };
+    use windows_sys::Win32::System::Console::{
+        CONSOLE_SCREEN_BUFFER_INFO, ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode,
+        GetConsoleScreenBufferInfo, GetStdHandle, INPUT_RECORD, KEY_EVENT, LEFT_CTRL_PRESSED,
+        RIGHT_CTRL_PRESSED, ReadConsoleInputW, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleCtrlHandler,
+        SetConsoleMode,
+    };
+    use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
+
+    use super::{CTRL_HANDLER, CtrlHandler, KeyEvent, QUICK_EDIT_MODE, ctrl_event, without_quick_edit};
+
+    fn std_handle(which: u32) -> Option<HANDLE> {
+        let h = unsafe { GetStdHandle(which) };
+        (!h.is_null() && h != INVALID_HANDLE_VALUE).then_some(h)
+    }
+
+    fn mode_of(h: HANDLE) -> Option<u32> {
+        let mut mode = 0u32;
+        (unsafe { GetConsoleMode(h, &mut mode) } != 0).then_some(mode)
+    }
+
+    pub fn enable_vt_output() -> bool {
+        let Some(h) = std_handle(STD_OUTPUT_HANDLE) else {
+            return false;
+        };
+        let Some(mode) = mode_of(h) else {
+            return false;
+        };
+        if mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING != 0 {
+            return true;
+        }
+        unsafe { SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0 }
+    }
+
+    pub fn disable_quick_edit() -> &'static str {
+        let Some(h) = std_handle(STD_INPUT_HANDLE) else {
+            return "unavailable";
+        };
+        let Some(mode) = mode_of(h) else {
+            return "unavailable";
+        };
+        if mode & QUICK_EDIT_MODE == 0 {
+            return "already_off";
+        }
+        if unsafe { SetConsoleMode(h, without_quick_edit(mode)) } != 0 {
+            "disabled"
+        } else {
+            "failed"
+        }
+    }
+
+    pub fn console_width() -> Option<usize> {
+        let h = std_handle(STD_OUTPUT_HANDLE)?;
+        let mut info = unsafe { std::mem::zeroed::<CONSOLE_SCREEN_BUFFER_INFO>() };
+        if unsafe { GetConsoleScreenBufferInfo(h, &mut info) } == 0 {
+            return None;
+        }
+        let width = i32::from(info.srWindow.Right) - i32::from(info.srWindow.Left) + 1;
+        usize::try_from(width).ok().filter(|w| *w > 0)
+    }
+
+    pub struct KeyReader {
+        handle: HANDLE,
+    }
+
+    unsafe impl Send for KeyReader {}
+
+    impl KeyReader {
+        pub fn open() -> Option<KeyReader> {
+            let handle = std_handle(STD_INPUT_HANDLE)?;
+            mode_of(handle)?;
+            Some(KeyReader { handle })
+        }
+
+        pub fn read(&self, timeout: Duration) -> io::Result<Option<KeyEvent>> {
+            let ms = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX);
+            match unsafe { WaitForSingleObject(self.handle, ms) } {
+                WAIT_OBJECT_0 => {}
+                WAIT_TIMEOUT => return Ok(None),
+                _ => return Err(io::Error::last_os_error()),
+            }
+            let mut record = INPUT_RECORD::default();
+            let mut read = 0u32;
+            if unsafe { ReadConsoleInputW(self.handle, &mut record, 1, &mut read) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if read == 0 || u32::from(record.EventType) != KEY_EVENT {
+                return Ok(None);
+            }
+            let key = unsafe { record.Event.KeyEvent };
+            if key.bKeyDown == 0 {
+                return Ok(None);
+            }
+            Ok(Some(KeyEvent {
+                vk: key.wVirtualKeyCode,
+                ch: unsafe { key.uChar.UnicodeChar },
+                ctrl: key.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED) != 0,
+            }))
+        }
+    }
+
+    unsafe extern "system" fn on_ctrl(code: u32) -> windows_sys::core::BOOL {
+        let (Some(event), Some(handler)) = (ctrl_event(code), CTRL_HANDLER.get()) else {
+            return 0;
+        };
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(event)));
+        1
+    }
+
+    pub fn install_ctrl_handler(handler: CtrlHandler) -> bool {
+        if CTRL_HANDLER.set(handler).is_err() {
+            return false;
+        }
+        unsafe { SetConsoleCtrlHandler(Some(on_ctrl), 1) != 0 }
+    }
+
+    pub enum MutexError {
+        AccessDenied,
+        Other(io::Error),
+    }
+
+    pub struct NamedMutex {
+        handle: HANDLE,
+        owned: bool,
+    }
+
+    impl NamedMutex {
+        pub fn create(name: &str) -> Result<NamedMutex, MutexError> {
+            let wide: Vec<u16> = OsStr::new(name).encode_wide().chain(std::iter::once(0)).collect();
+            let handle = unsafe { CreateMutexW(std::ptr::null(), 0, wide.as_ptr()) };
+            if handle.is_null() {
+                let e = io::Error::last_os_error();
+                return Err(if e.raw_os_error() == i32::try_from(ERROR_ACCESS_DENIED).ok() {
+                    MutexError::AccessDenied
+                } else {
+                    MutexError::Other(e)
+                });
+            }
+            Ok(NamedMutex { handle, owned: false })
+        }
+
+        pub fn try_acquire(&mut self) -> bool {
+            if !self.owned {
+                let r = unsafe { WaitForSingleObject(self.handle, 0) };
+                self.owned = r == WAIT_OBJECT_0 || r == WAIT_ABANDONED;
+            }
+            self.owned
+        }
+    }
+
+    impl Drop for NamedMutex {
+        fn drop(&mut self) {
+            if self.owned {
+                unsafe { ReleaseMutex(self.handle) };
+            }
+            unsafe { CloseHandle(self.handle) };
+        }
+    }
+}
+
+#[cfg(windows)]
+pub use console::{
+    KeyReader, MutexError, NamedMutex, console_width, disable_quick_edit, enable_vt_output,
+    install_ctrl_handler,
+};
+
+#[cfg(not(windows))]
+pub fn enable_vt_output() -> bool {
+    true
+}
+
+#[cfg(not(windows))]
+pub fn disable_quick_edit() -> &'static str {
+    "unavailable"
+}
+
+#[cfg(not(windows))]
+pub fn console_width() -> Option<usize> {
+    None
+}
+
+#[cfg(not(windows))]
+pub fn install_ctrl_handler(handler: CtrlHandler) -> bool {
+    let _ = CTRL_HANDLER.set(handler);
+    false
+}

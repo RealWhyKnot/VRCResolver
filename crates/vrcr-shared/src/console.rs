@@ -154,6 +154,7 @@ pub struct Ux {
 struct State {
     out: Box<dyn Write + Send>,
     overlay: Option<(u64, Box<dyn Overlay>)>,
+    tee: Option<crate::log::Log>,
     next_id: u64,
 }
 
@@ -178,6 +179,7 @@ impl Ux {
             inner: Arc::new(Mutex::new(State {
                 out,
                 overlay: None,
+                tee: None,
                 next_id: 1,
             })),
             style,
@@ -218,6 +220,24 @@ impl Ux {
     pub fn with_lock<R>(&self, f: impl FnOnce(&mut dyn Write) -> R) -> R {
         let mut st = self.state();
         f(&mut *st.out)
+    }
+
+    pub fn tee_to(&self, log: crate::log::Log) {
+        self.state().tee = Some(log);
+    }
+
+    pub fn with_overlay_cleared<R>(&self, f: impl FnOnce(&mut dyn Write) -> R) -> R {
+        let mut st = self.state();
+        clear_overlay(&mut st);
+        let r = f(&mut *st.out);
+        let _ = st.out.flush();
+        render_overlay(&mut st);
+        r
+    }
+
+    pub fn refresh_overlay(&self) {
+        let mut st = self.state();
+        render_overlay(&mut st);
     }
 
     pub fn write(&self, c: Component, body: &str) {
@@ -287,6 +307,9 @@ impl Ux {
 }
 
 fn raw(st: &mut State, style: Style, color: Color, text: &str) {
+    if let Some(log) = &st.tee {
+        log.line(text);
+    }
     clear_overlay(st);
     let _ = if style.color {
         writeln!(st.out, "{}{text}{RESET}", color.sgr())

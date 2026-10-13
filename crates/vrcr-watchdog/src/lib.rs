@@ -11,3 +11,4 @@ pub mod relay;
 pub mod resolve_cache;
 pub mod settings;
 pub mod stats;
+pub mod terminal;
