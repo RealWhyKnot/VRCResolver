@@ -1983,6 +1983,7 @@ dependencies = [
  "uuid",
  "vrcr-shared",
  "windows-sys 0.61.2",
+ "winresource",
  "x509-parser",
 ]
 

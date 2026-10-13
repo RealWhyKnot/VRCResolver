@@ -929,3 +929,29 @@ pub fn install_ctrl_handler(handler: CtrlHandler) -> bool {
     let _ = CTRL_HANDLER.set(handler);
     false
 }
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod version {
+    use windows_sys::Win32::System::SystemInformation::{GetVersionExW, OSVERSIONINFOW};
+
+    pub fn os_description() -> String {
+        let mut info = unsafe { std::mem::zeroed::<OSVERSIONINFOW>() };
+        info.dwOSVersionInfoSize = u32::try_from(std::mem::size_of::<OSVERSIONINFOW>()).unwrap_or(0);
+        if unsafe { GetVersionExW(&mut info) } == 0 {
+            return "Microsoft Windows".to_owned();
+        }
+        format!(
+            "Microsoft Windows {}.{}.{}",
+            info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber
+        )
+    }
+}
+
+#[cfg(windows)]
+pub use version::os_description;
+
+#[cfg(not(windows))]
+pub fn os_description() -> String {
+    std::env::consts::OS.to_owned()
+}

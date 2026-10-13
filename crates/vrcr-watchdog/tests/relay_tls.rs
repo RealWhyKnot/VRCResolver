@@ -332,6 +332,19 @@ fn first_run_elevates_once_then_reuses_the_trusted_cert() {
 }
 
 #[test]
+fn disable_switch_skips_https_without_elevating_or_writing_a_cert() {
+    let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
+    let host = FakeHost::new(Behaviour::RunChild, &dir);
+    let clock = ManualClock::utc(NOW);
+    let (m, out) = manager(&host, &clock);
+    assert!(m.disabled(true).ensure_ready(51234).is_none());
+    assert!(host.elevations().is_empty());
+    assert!(host.certs(MachineStore::Root).is_empty());
+    assert!(!host.paths.state_dir.join(CERT_FILE).exists());
+    assert!(out.text().is_empty(), "{}", out.text());
+}
+
+#[test]
 fn declined_uac_keeps_the_cert_for_the_next_attempt() {
     let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
     let clock = ManualClock::utc(NOW);

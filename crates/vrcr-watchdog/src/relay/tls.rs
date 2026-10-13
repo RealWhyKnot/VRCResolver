@@ -227,6 +227,7 @@ pub struct RelayTls<'a> {
     state_dir: PathBuf,
     ux: Ux,
     now: Now,
+    disabled: bool,
 }
 
 impl<'a> RelayTls<'a> {
@@ -236,11 +237,17 @@ impl<'a> RelayTls<'a> {
             state_dir: state_dir.to_path_buf(),
             ux,
             now,
+            disabled: disabled_by_env(),
         }
     }
 
+    pub fn disabled(mut self, disabled: bool) -> RelayTls<'a> {
+        self.disabled = disabled;
+        self
+    }
+
     pub fn ensure_ready(&self, port: u16) -> Option<Arc<rustls::ServerConfig>> {
-        if !valid_port(port) {
+        if self.disabled || !valid_port(port) {
             return None;
         }
         let material = self.load_or_create()?;

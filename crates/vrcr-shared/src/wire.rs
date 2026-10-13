@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 pub const PIPE_NAME: &str = "vrcresolver.resolve";
+pub const WATCHDOG_MUTEX: &str = "Global\\vrcresolver.Watchdog";
+pub const WATCHDOG_MUTEX_LOCAL: &str = "Local\\vrcresolver.Watchdog";
 pub const CLIENT_PROTOCOL_VERSION: i32 = 3;
 pub const SUBPROTOCOL_V3: &str = "vrcresolver-v3";
 
