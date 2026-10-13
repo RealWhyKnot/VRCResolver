@@ -1941,6 +1941,7 @@ version = "0.0.0"
 dependencies = [
  "base64",
  "hex",
+ "memchr",
  "proptest",
  "serde",
  "serde_json",

@@ -456,6 +456,213 @@ pub fn probe_default_output() -> DefaultOutput {
     DefaultOutput::Unknown
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub parent_pid: u32,
+    pub exe: String,
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod procs {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    use super::ProcessInfo;
+
+    const FILETIME_TO_UNIX_SECS: u64 = 11_644_473_600;
+
+    pub fn list_processes() -> Vec<ProcessInfo> {
+        let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if snap == INVALID_HANDLE_VALUE || snap.is_null() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut entry = unsafe { std::mem::zeroed::<PROCESSENTRY32W>() };
+        entry.dwSize = u32::try_from(size_of::<PROCESSENTRY32W>()).unwrap_or(0);
+        let mut ok = unsafe { Process32FirstW(snap, &mut entry) };
+        while ok != 0 {
+            let raw = entry.szExeFile;
+            let len = raw.iter().position(|&c| c == 0).unwrap_or(raw.len());
+            out.push(ProcessInfo {
+                pid: entry.th32ProcessID,
+                parent_pid: entry.th32ParentProcessID,
+                exe: String::from_utf16_lossy(&raw[..len]),
+            });
+            ok = unsafe { Process32NextW(snap, &mut entry) };
+        }
+        unsafe { CloseHandle(snap) };
+        out
+    }
+
+    pub fn process_start_time(pid: u32) -> Option<SystemTime> {
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if handle.is_null() {
+            return None;
+        }
+        let zero = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+        let ok = unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) };
+        unsafe { CloseHandle(handle) };
+        if ok == 0 {
+            return None;
+        }
+        let ticks = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+        let since_1601 = Duration::from_nanos(ticks.saturating_mul(100));
+        since_1601
+            .checked_sub(Duration::from_secs(FILETIME_TO_UNIX_SECS))
+            .map(|d| UNIX_EPOCH + d)
+    }
+}
+
+#[cfg(windows)]
+pub use procs::{list_processes, process_start_time};
+
+#[cfg(not(windows))]
+pub fn list_processes() -> Vec<ProcessInfo> {
+    Vec::new()
+}
+
+#[cfg(not(windows))]
+pub fn process_start_time(_pid: u32) -> Option<std::time::SystemTime> {
+    None
+}
+
+pub fn process_stem(exe: &str) -> &str {
+    let len = exe.len();
+    if len > 4 && exe.is_char_boundary(len - 4) && exe[len - 4..].eq_ignore_ascii_case(".exe") {
+        &exe[..len - 4]
+    } else {
+        exe
+    }
+}
+
+pub fn describe_parent(processes: &[ProcessInfo], own_pid: u32) -> Option<String> {
+    let me = processes.iter().find(|p| p.pid == own_pid)?;
+    let parent = processes
+        .iter()
+        .find(|p| p.pid == me.parent_pid && p.pid != own_pid)?;
+    Some(format!("{} pid={}", process_stem(&parent.exe), parent.pid))
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod mf {
+    use std::ffi::c_void;
+
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::core::{GUID, HRESULT};
+
+    #[repr(C)]
+    struct RegisterTypeInfo {
+        major: GUID,
+        subtype: GUID,
+    }
+
+    #[link(name = "mfplat", kind = "raw-dylib")]
+    unsafe extern "system" {
+        fn MFStartup(version: u32, flags: u32) -> HRESULT;
+        fn MFShutdown() -> HRESULT;
+        fn MFTEnumEx(
+            category: GUID,
+            flags: u32,
+            input: *const RegisterTypeInfo,
+            output: *const RegisterTypeInfo,
+            activates: *mut *mut *mut c_void,
+            count: *mut u32,
+        ) -> HRESULT;
+    }
+
+    const MF_VERSION: u32 = 0x0002_0070;
+    const MFSTARTUP_LITE: u32 = 1;
+    const MFT_ENUM_SYNC_ASYNC_HARDWARE: u32 = 0x1 | 0x2 | 0x4;
+    const CATEGORY_VIDEO_DECODER: GUID = GUID::from_u128(0xd6c02d4b_6833_45b4_971a_05a4b04bab91);
+    const MEDIA_TYPE_VIDEO: GUID = GUID::from_u128(0x73646976_0000_0010_8000_00aa00389b71);
+
+    type Release = unsafe extern "system" fn(*mut c_void) -> u32;
+
+    pub struct MediaFoundation(());
+
+    impl MediaFoundation {
+        pub fn start() -> Option<MediaFoundation> {
+            (unsafe { MFStartup(MF_VERSION, MFSTARTUP_LITE) } >= 0).then_some(MediaFoundation(()))
+        }
+
+        pub fn has_video_decoder(&self, fourcc: u32) -> Option<bool> {
+            let input = RegisterTypeInfo {
+                major: MEDIA_TYPE_VIDEO,
+                subtype: GUID {
+                    data1: fourcc,
+                    data2: 0x0000,
+                    data3: 0x0010,
+                    data4: [0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71],
+                },
+            };
+            let mut activates: *mut *mut c_void = std::ptr::null_mut();
+            let mut count: u32 = 0;
+            let hr = unsafe {
+                MFTEnumEx(
+                    CATEGORY_VIDEO_DECODER,
+                    MFT_ENUM_SYNC_ASYNC_HARDWARE,
+                    &input,
+                    std::ptr::null(),
+                    &mut activates,
+                    &mut count,
+                )
+            };
+            if hr < 0 {
+                return None;
+            }
+            if !activates.is_null() {
+                for i in 0..count as usize {
+                    let p = unsafe { *activates.add(i) };
+                    if !p.is_null() {
+                        let vtbl = unsafe { *p.cast::<*const Release>() };
+                        let release = unsafe { *vtbl.add(2) };
+                        unsafe { release(p) };
+                    }
+                }
+                unsafe { CoTaskMemFree(activates.cast()) };
+            }
+            Some(count > 0)
+        }
+    }
+
+    impl Drop for MediaFoundation {
+        fn drop(&mut self) {
+            unsafe { MFShutdown() };
+        }
+    }
+}
+
+#[cfg(windows)]
+pub use mf::MediaFoundation;
+
+#[cfg(not(windows))]
+pub struct MediaFoundation(());
+
+#[cfg(not(windows))]
+impl MediaFoundation {
+    pub fn start() -> Option<MediaFoundation> {
+        None
+    }
+
+    pub fn has_video_decoder(&self, _fourcc: u32) -> Option<bool> {
+        None
+    }
+}
+
 #[cfg(not(windows))]
 pub fn local_hms() -> (u16, u16, u16) {
     let s = crate::logutil::UtcStamp::at(std::time::SystemTime::now());

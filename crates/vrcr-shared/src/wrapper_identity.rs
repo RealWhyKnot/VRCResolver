@@ -146,7 +146,7 @@ pub fn known_hash_list_contains(list: &Path, sha256: &str) -> bool {
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty() && hay.len() >= needle.len() && hay.windows(needle.len()).any(|w| w == needle)
+    !needle.is_empty() && memchr::memmem::find(hay, needle).is_some()
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
