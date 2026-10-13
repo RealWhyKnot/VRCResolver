@@ -141,7 +141,7 @@ fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| (*s).to_owned()).collect()
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ResolveRequest {
     pub action: String,
@@ -173,10 +173,31 @@ pub struct ResolveRequest {
     pub extra: Map<String, Value>,
 }
 
+impl Default for ResolveRequest {
+    fn default() -> Self {
+        Self {
+            action: action::RESOLVE.to_owned(),
+            id: String::new(),
+            url: String::new(),
+            player: None,
+            max_height: None,
+            protocol_version: None,
+            correlation_id: None,
+            accept_protocols: None,
+            accept_codecs: None,
+            max_audio_channels: None,
+            vrchat_format_arg: None,
+            wrapper_deadline_ms: None,
+            prefer_highest: None,
+            skip_native_hint: None,
+            extra: Map::new(),
+        }
+    }
+}
+
 impl ResolveRequest {
     pub fn for_player(id: String, url: String, player: Player) -> Self {
         Self {
-            action: action::RESOLVE.to_owned(),
             id,
             url,
             player: Some(player),

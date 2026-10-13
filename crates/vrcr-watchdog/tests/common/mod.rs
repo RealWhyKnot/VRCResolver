@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod mesh;
+
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
