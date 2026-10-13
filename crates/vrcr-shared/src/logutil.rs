@@ -71,6 +71,49 @@ pub fn iso8601_utc(at: std::time::SystemTime) -> String {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UtcStamp {
+    pub year: i64,
+    pub month: u32,
+    pub day: u32,
+    pub hour: u64,
+    pub minute: u64,
+    pub second: u64,
+    pub millis: u32,
+}
+
+impl UtcStamp {
+    pub fn at(at: std::time::SystemTime) -> UtcStamp {
+        let since = at.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+        let secs = since.as_secs();
+        let rem = secs % 86_400;
+        let (year, month, day) = civil_from_days(i64::try_from(secs / 86_400).unwrap_or(0));
+        UtcStamp {
+            year,
+            month,
+            day,
+            hour: rem / 3600,
+            minute: (rem % 3600) / 60,
+            second: rem % 60,
+            millis: since.subsec_millis(),
+        }
+    }
+
+    pub fn log_prefix(&self) -> String {
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+            self.year, self.month, self.day, self.hour, self.minute, self.second, self.millis
+        )
+    }
+
+    pub fn file_stamp(&self) -> String {
+        format!(
+            "{:04}{:02}{:02}-{:02}{:02}{:02}-{:03}",
+            self.year, self.month, self.day, self.hour, self.minute, self.second, self.millis
+        )
+    }
+}
+
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = z.div_euclid(146_097);
