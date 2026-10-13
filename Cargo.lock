@@ -881,10 +881,16 @@ dependencies = [
 name = "vrcr-watchdog"
 version = "0.0.0"
 dependencies = [
+ "hex",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
+ "tokio",
+ "url",
+ "uuid",
  "vrcr-shared",
+ "windows-sys",
 ]
 
 [[package]]

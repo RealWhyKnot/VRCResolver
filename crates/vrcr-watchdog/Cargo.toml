@@ -10,12 +10,21 @@ license.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+url.workspace = true
+uuid.workspace = true
 vrcr-shared.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
 
 [lints]
 workspace = true

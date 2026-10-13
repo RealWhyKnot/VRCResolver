@@ -126,3 +126,67 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let y = yoe + era * 400 + i64::from(m <= 2);
     (y, m, d)
 }
+
+pub fn parse_iso8601_utc(text: &str) -> Option<std::time::SystemTime> {
+    let t = text.trim();
+    let b = t.as_bytes();
+    if b.len() < 19
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || !matches!(b[10], b'T' | b't' | b' ')
+        || b[13] != b':'
+        || b[16] != b':'
+    {
+        return None;
+    }
+    let num = |r: std::ops::Range<usize>| -> Option<i64> {
+        let s = t.get(r)?;
+        s.bytes().all(|c| c.is_ascii_digit()).then(|| s.parse().ok())?
+    };
+    let (year, month, day) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (hour, minute, second) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
+        return None;
+    }
+    let mut rest = &t[19..];
+    let mut nanos: u64 = 0;
+    if let Some(frac) = rest.strip_prefix('.') {
+        let digits = frac.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 {
+            return None;
+        }
+        for (i, c) in frac.bytes().take(digits).enumerate() {
+            if i < 9 {
+                nanos = nanos * 10 + u64::from(c - b'0');
+            }
+        }
+        for _ in digits..9 {
+            nanos *= 10;
+        }
+        rest = &frac[digits..];
+    }
+    let offset_secs: i64 = match rest {
+        "" | "Z" | "z" => 0,
+        o if o.len() == 6 && matches!(&o[..1], "+" | "-") && &o[3..4] == ":" => {
+            let h: i64 = o[1..3].parse().ok()?;
+            let m: i64 = o[4..6].parse().ok()?;
+            let v = h * 3600 + m * 60;
+            if o.starts_with('-') { -v } else { v }
+        }
+        _ => return None,
+    };
+    let days = days_from_civil(year, u32::try_from(month).ok()?, u32::try_from(day).ok()?);
+    let secs = days * 86_400 + hour * 3600 + minute * 60 + second - offset_secs;
+    let secs = u64::try_from(secs).ok()?;
+    std::time::UNIX_EPOCH.checked_add(std::time::Duration::new(secs, u32::try_from(nanos).ok()?))
+}
+
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = i64::from(if m > 2 { m - 3 } else { m + 9 });
+    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
