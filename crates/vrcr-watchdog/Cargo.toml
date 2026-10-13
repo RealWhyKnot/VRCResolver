@@ -45,7 +45,7 @@ x509-parser.workspace = true
 windows-sys.workspace = true
 
 [build-dependencies]
-winresource.workspace = true
+vrcr-build.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
@@ -8,13 +8,13 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use vrcr_shared::console::{Component, Ux};
+pub use vrcr_shared::hosts::{MARKER_IP, contains_bypass_entry, hosts_path, line_is_bypass_entry};
 use vrcr_shared::log::Log;
 use vrcr_shared::trust_gateway::GATEWAY_HOST;
 use vrcr_shared::win::Elevated;
 
 use crate::clock::Now;
 
-pub const MARKER_IP: &str = "127.0.0.1";
 pub const ADD_ARG: &str = "--add-hosts-entry";
 pub const REMOVE_ARG: &str = "--remove-hosts-entry";
 pub const TICK_INTERVAL: Duration = Duration::from_secs(60);
@@ -22,30 +22,6 @@ pub const ELEVATION_TIMEOUT: Duration = Duration::from_secs(60);
 const READ_ATTEMPTS: u32 = 3;
 const READ_RETRY_DELAY: Duration = Duration::from_millis(200);
 const DECLINED_REASON: &str = "UAC declined or write blocked";
-
-pub fn hosts_path() -> PathBuf {
-    let root = std::env::var_os("SystemRoot")
-        .or_else(|| std::env::var_os("windir"))
-        .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
-    root.join("System32").join("drivers").join("etc").join("hosts")
-}
-
-pub fn line_is_bypass_entry(raw: &str) -> bool {
-    let trimmed = raw.trim_start();
-    if trimmed.is_empty() || trimmed.starts_with('#') {
-        return false;
-    }
-    let body = trimmed.split('#').next().unwrap_or_default();
-    let mut tokens = body.split([' ', '\t']).filter(|t| !t.is_empty());
-    if tokens.next() != Some(MARKER_IP) {
-        return false;
-    }
-    tokens.any(|t| t.eq_ignore_ascii_case(GATEWAY_HOST))
-}
-
-pub fn contains_bypass_entry(text: &str) -> bool {
-    text.lines().any(line_is_bypass_entry)
-}
 
 fn error_text(e: &io::Error) -> String {
     format!("{:?}: {e}", e.kind())

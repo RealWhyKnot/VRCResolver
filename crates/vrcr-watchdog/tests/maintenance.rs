@@ -605,6 +605,11 @@ fn available_message_only_for_a_newer_remote() {
     assert_eq!(update::available_message(&stable, false, "2026.10.14.0"), None);
     assert_eq!(update::available_message(&stable, false, "2026.10.15.0"), None);
     assert_eq!(update::available_message(&stable, false, "not-a-version"), None);
+    assert!(update::available_message(&stable, false, "2026.10.13.2-C0A0").is_some());
+    assert_eq!(
+        update::available_message(&stable, false, "2026.10.14.0-C0A0"),
+        None
+    );
     let bare = json!({"tag_name": "v9.0", "prerelease": true});
     assert_eq!(
         update::available_message(&bare, false, "1.0").as_deref(),

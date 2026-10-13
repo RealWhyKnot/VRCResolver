@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::fs;
 use std::future::Future;
 use std::io;
@@ -10,60 +9,15 @@ use std::time::Duration;
 use serde_json::Value;
 use vrcr_shared::console::{Component, Ux};
 use vrcr_shared::log::Log;
+use vrcr_shared::release::pick_highest_entry;
+pub use vrcr_shared::release::{ANY_RELEASES_URL, REPO, STABLE_LATEST_URL, Version};
 
-pub const REPO: &str = "RealWhyKnot/VRCResolver";
-pub const STABLE_LATEST_URL: &str = "https://api.github.com/repos/RealWhyKnot/VRCResolver/releases/latest";
-pub const ANY_RELEASES_URL: &str =
-    "https://api.github.com/repos/RealWhyKnot/VRCResolver/releases?per_page=10";
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 pub const UPDATE_REQUESTED_ENV: &str = "VRCRESOLVER_UPDATE_REQUESTED";
 pub const UPDATER_EXE: &str = "vrcresolver.Updater.exe";
 pub const STAGED_UPDATER_PAIRS: [(&str, &str); 1] = [("vrcresolver.Updater.next.exe", UPDATER_EXE)];
 const MOVE_RETRIES: u32 = 3;
 const MOVE_RETRY_DELAY: Duration = Duration::from_millis(200);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Version([i64; 4]);
-
-impl Version {
-    pub fn parse(text: &str) -> Option<Version> {
-        let parts: Vec<&str> = text.split('.').collect();
-        if !(2..=4).contains(&parts.len()) {
-            return None;
-        }
-        let mut v = [-1i64; 4];
-        for (slot, part) in v.iter_mut().zip(&parts) {
-            let p = part.trim();
-            if p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) {
-                return None;
-            }
-            let n: i64 = p.parse().ok()?;
-            if n > i64::from(i32::MAX) {
-                return None;
-            }
-            *slot = n;
-        }
-        Some(Version(v))
-    }
-
-    pub fn from_tag(tag: &str) -> Option<Version> {
-        let numeric = tag.trim_start_matches(['v', 'V']);
-        let numeric = numeric.split_once('-').map_or(numeric, |(head, _)| head);
-        Version::parse(numeric)
-    }
-}
-
-impl PartialOrd for Version {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Version {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.cmp(&other.0)
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
@@ -92,24 +46,7 @@ pub fn pick_single(doc: &Value) -> Option<Release> {
 }
 
 pub fn pick_highest(list: &Value) -> Option<Release> {
-    let mut best: Option<(Version, Release)> = None;
-    for entry in list.as_array()? {
-        let Some(release) = release_of(entry).filter(|r| !r.tag.is_empty()) else {
-            continue;
-        };
-        let Some(version) = Version::from_tag(&release.tag) else {
-            continue;
-        };
-        if let Some((best_version, best_release)) = &best {
-            match version.cmp(best_version) {
-                Ordering::Less => continue,
-                Ordering::Equal if release.prerelease || !best_release.prerelease => continue,
-                _ => {}
-            }
-        }
-        best = Some((version, release));
-    }
-    best.map(|(_, r)| r)
+    pick_highest_entry(list).and_then(release_of)
 }
 
 pub fn available_message(doc: &Value, include_prereleases: bool, local: &str) -> Option<String> {
@@ -122,7 +59,7 @@ pub fn available_message(doc: &Value, include_prereleases: bool, local: &str) ->
         return None;
     }
     let remote = Version::from_tag(&best.tag)?;
-    let local = Version::parse(local)?;
+    let local = Version::from_tag(local)?;
     if remote <= local {
         return None;
     }
