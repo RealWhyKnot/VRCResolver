@@ -11,13 +11,50 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
+### Added
+- **rust:** Port the uninstaller and only elevate relay TLS cleanup when something is left (072753c)
+- **rust:** Port the updater with shared release, hosts and stop helpers (d61fe09)
+- **rust:** Add the vrcresolver watchdog binary wiring startup, relay fallback and shutdown (05dd89b)
+- **rust:** Port the interactive terminal, command registry and console input (c03a85b)
+- **rust:** Port patch manager, codec probe, update and shutdown maintenance (bff4e39)
+- **rust:** Port the hosts entry manager and the VRChat log monitor (bffe32d)
+- **rust:** Serve the relay over https with a locally trusted certificate (828e765)
+- **rust:** Port the local video relay (cc61491)
+- **rust:** Port the mesh client, welcome cache and failure reporting (2c14b0c)
+- **rust:** Port the IPC pipe server, resolve cache, og hint and health gate (da45a0a)
+- **rust:** Start the watchdog crate with settings and the setting registry (cd5a571)
+- **rust:** Port the logger, console, tools restore, crash log and WinINet limit (cc2eba5)
+- **rust:** Port the shared library and the yt-dlp shim to Rust (75cf477)
+
 ### Changed
 - **terminal:** Block on key input and skip unchanged idle frames; rescan the VRChat log dir every 5 s (960d706)
 - **relay:** Stop allocating per chunk and per manifest line (1bdf338)
 - **build:** Cap the gen0 GC budget at 4 MB for the shipped exes (8c07082)
+- **build:** Ship the Rust executables and remove the C# projects (c8bd85c)
 
 ### Fixed
 - **vrclog:** Say when videos fail because VRChat has no sound output (7efd757)
+- **patch:** Only keep a newer VRChat binary when it checks out (e0f3122)
+- **mesh:** Resend a pending resolve once, then fall back (2ea71fc)
+- **hosts:** Don't prompt again after a declined startup UAC prompt (e864ea9)
+- **client:** Stop repeat UAC prompts, log replays and id churn (4f35345)
+- **uninstall:** Skip a watchdog process that has already exited (7794f2f)
+- **uninstall:** Share the watchdog's restore and stop on a watchdog it can't inspect (34b00e1)
+- **updater:** Relaunch the watchdog even though the console is gone (f179043)
+- **shutdown:** Log whether the clean-exit flag was written (9b663d2)
+- **shutdown:** Restore VRChat's tools first and run one shutdown for every exit path (4baed9c)
+- **patch:** Back up VRChat's yt-dlp only once the download is complete (ae604e4)
+- **patch:** Restore yt-dlp safely when the wrapper is running or the og is gone (23a56cb)
+- **wrapper:** Skip notifications once the watchdog pipe is gone (c93a0c8)
+- **ipc:** Let real timeouts and probes reach the health gate (1099ec4)
+- **ipc:** Don't count a skipped video as a resolver failure (0bc0576)
+- **ipc:** Tell the server the time that's actually left on every attempt (94b1415)
+- **mesh:** Accept the server's playback quality update quietly (55168e3)
+- **mesh:** Notice a dead socket within seconds while a resolve is waiting (7da2b4a)
+- **mesh:** Keep backing off from a node that drops links right after welcome (94541f4)
+- **mesh:** Reconnect at once when a resolve arrives during a backoff (26a67f5)
+- **mesh:** Give up on a stuck connect after 8 s and log which phase stalled (e1b03f7)
+- **mesh:** Keep retrying the mesh socket after a failed first connect (1a698a0)
 
 ---
 
