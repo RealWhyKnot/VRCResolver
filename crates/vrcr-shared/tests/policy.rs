@@ -25,12 +25,17 @@ fn playback_proxy_urls_accept_only_first_party_proxy_shapes() {
         ("https://node1.whyknot.dev/api/proxy/manifest.m3u8?q=abc", true),
         ("https://whyknot.dev/api/proxy/lazy-hls/wk_abc/index.m3u8", true),
         (
-            "https://node2.whyknot.dev/api/popcorn/proxy/manifest.m3u8?clientId=c&index=1",
+            "https://node2.vrcresolver.com/api/stream/0123456789abcdef01234567.m3u8?rsedge=node2",
             true,
         ),
         (
-            "https://node2.whyknot.dev/api/popcorn/proxy/seg.ts?clientId=c&url=abc",
+            "https://vrcresolver.com/api/stream/0123456789abcdef01234567/4.ts?rsedge=node2",
             true,
+        ),
+        ("https://vrcresolver.com/api/streamer/x.m3u8", false),
+        (
+            "https://example.com/api/stream/0123456789abcdef01234567.m3u8",
+            false,
         ),
         ("https://node1.whyknot.dev/api/restream/shared-status", false),
         ("https://example.com/api/proxy/manifest.m3u8?q=abc", false),
@@ -76,8 +81,12 @@ fn trust_gateway_extension_keeps_the_avpro_dispatch_extension() {
         ("https://node1.whyknot.dev/api/proxy/manifest.mpd?q=abc", "mpd"),
         ("https://node1.whyknot.dev/api/proxy?q=legacy", "m3u8"),
         (
-            "https://node1.whyknot.dev/api/popcorn/proxy/manifest.m3u8?clientId=c&index=1",
+            "https://vrcresolver.com/api/stream/0123456789abcdef01234567.m3u8?rsedge=node1",
             "m3u8",
+        ),
+        (
+            "https://vrcresolver.com/api/stream/0123456789abcdef01234567/4.ts?rsedge=node1",
+            "ts",
         ),
         ("https://cdn.example.com/video/seg.ts?sig=abc", "ts"),
         ("https://node1.whyknot.dev/api/proxy?url=legacy", "bin"),

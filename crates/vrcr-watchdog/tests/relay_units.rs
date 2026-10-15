@@ -385,7 +385,7 @@ fn only_first_party_proxy_targets_are_allowed() {
             true,
         ),
         (
-            "https://us1.vrcresolver.com/api/popcorn/proxy/manifest.m3u8?clientId=c&index=1",
+            "https://vrcresolver.com/api/stream/0123456789abcdef01234567.m3u8?rsedge=node1",
             true,
         ),
         ("https://node1.whyknot.dev/api/proxy/manifest.m3u8?q=abc", true),
@@ -631,12 +631,12 @@ fn manifest_stream_stops_once_output_exceeds_the_cap() {
 }
 
 #[test]
-fn manifest_rewrites_popcorn_proxy_urls() {
-    let upstream = "https://eu1.vrcresolver.com/api/popcorn/proxy/seg.ts?clientId=c&url=abc";
+fn manifest_rewrites_browser_stream_segments() {
+    let upstream = "https://eu1.vrcresolver.com/api/stream/0123456789abcdef01234567/7.ts?rsedge=eu1";
     let out = localize(&policy(), &format!("#EXTM3U\n#EXTINF:4.000,\n{upstream}\n"));
     assert!(!out.contains(upstream));
     assert!(out.contains("proxy/"));
-    assert!(out.contains("/seg.ts?target="));
+    assert!(out.contains("/7.ts?target="));
 }
 
 #[test]

@@ -12,7 +12,7 @@ pub const ALLOWED_PATH_EXTENSIONS: [&str; 18] = [
 ];
 
 const BUILT_IN_HOSTS: [&str; 2] = ["vrcresolver.com", "whyknot.dev"];
-const BUILT_IN_PROXY_PATHS: [&str; 2] = ["/api/proxy", "/api/popcorn/proxy"];
+const BUILT_IN_PROXY_PATHS: [&str; 2] = ["/api/proxy", "/api/stream"];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FirstPartyPolicy {

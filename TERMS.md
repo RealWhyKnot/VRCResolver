@@ -1,6 +1,6 @@
 # Terms of service
 
-**Effective 24 August 2026.**
+**Effective 15 October 2026.**
 
 These terms are a binding agreement between you and WhyKnot ("we", "us", the "Operator"), covering
 VRCResolver and everything that runs on vrcresolver.com. Read them before you use the service. If
@@ -14,8 +14,7 @@ signed away.
 <a id="s1"></a>
 
 "Service" means the vrcresolver.com website and its subdomains, the resolver and media proxy API,
-the Popcorn and Archive browsing features, the peer relay, the VRCResolver desktop application, and
-the patched `yt-dlp` shim the desktop application installs. "You" means whoever uses any of it.
+the peer relay, browser streaming, the VRCResolver desktop application, and the patched `yt-dlp` shim the desktop application installs. "You" means whoever uses any of it.
 
 Using the Service means you accept these terms. That includes automated use by the desktop client
 running on your machine, which acts on your behalf.
@@ -58,8 +57,8 @@ breach of these terms.
 
 <a id="s3"></a>
 
-Every time you submit a URL, share a file over the relay, or otherwise direct the Service to fetch
-something, you warrant that:
+Every time you submit a URL, share a file over the relay, stream from your browser, or otherwise
+direct the Service to fetch something, you warrant that:
 
 - you own the material or have the rights and licences needed to do what you're asking for;
 - your request is lawful where you are, and would be lawful where our servers are;
@@ -76,6 +75,11 @@ ends.
 Files shared over the peer relay are streamed from your own browser, in chunks, on demand. They
 aren't stored on our servers. When you close the tab, the share stops working.
 
+Browser streams are encoded in your browser and passed through our servers to whoever has the link.
+The server keeps only the last few seconds in memory so viewers can catch up, and nothing is
+recorded. What you put on the stream is your responsibility, the same as anything else you send
+through the Service.
+
 ## 4. Third-party services and content
 
 <a id="s4"></a>
@@ -85,10 +89,6 @@ directly:
 
 - Upstream media hosts. Whatever the URL you paste points at. Their terms apply to their
   material.
-- The Internet Archive. Archive browsing queries archive.org from your own browser. We don't
-  proxy it, we don't host it, and archive.org's terms and privacy policy apply to that traffic.
-- Popcorn (vr-m.net). A third-party catalogue we query on your behalf. We neither operate it nor
-  control what it returns.
 - Cloudflare. It's in front of the Service as a network and security layer.
 
 We don't control these services. We don't warrant their availability, accuracy, or lawfulness, and
@@ -101,7 +101,7 @@ or remedy.
 <a id="s5"></a>
 
 VRCResolver is an independent project. It isn't affiliated with, endorsed by, sponsored by, or
-approved by VRChat Inc., Google LLC, YouTube, the Internet Archive, SoundCloud, Twitch, or any other
+approved by VRChat Inc., Google LLC, YouTube, SoundCloud, Twitch, or any other
 platform it can resolve links from. All trademarks belong to their owners and are used only to
 describe what the software interoperates with.
 
@@ -141,8 +141,8 @@ You may not:
 The Service is free, and capacity is finite and shared. It's sized for ordinary personal use:
 resolving links you're about to watch, in a world you're actually in.
 
-Rate limits apply per address across the resolver, the media proxy, the Popcorn endpoints, and the
-relay, and we may enforce them at any time. **We don't publish the thresholds.** Publishing them
+Rate limits apply per address across the resolver, the media proxy, the relay, and browser
+streaming, and we may enforce them at any time. **We don't publish the thresholds.** Publishing them
 would show abusive users exactly where the limits are, and would tie us to numbers we adjust as load
 changes. They may change at any time without notice.
 
@@ -274,7 +274,8 @@ service providers, against all claims, demands, actions, damages, losses, liabil
 costs, and expenses, including reasonable legal fees, arising out of or relating to:
 
 - your use of the Service;
-- any URL you submit, any file you relay, and any material you transmit or receive;
+- any URL you submit, any file you relay, anything you stream, and any material you transmit or
+  receive;
 - your breach of these terms or of any warranty you gave in them;
 - your violation of any law or of any right of any third party, including intellectual property,
   privacy, and publicity rights.

@@ -1,10 +1,10 @@
 # Privacy policy
 
-**Effective 24 August 2026.**
+**Effective 15 October 2026.**
 
 This policy explains what VRCResolver collects, why, and how long it's kept. It covers
-vrcresolver.com, the resolver and media proxy API, the Popcorn and Archive browsing features, the
-peer relay, and the VRCResolver desktop client. The operator is WhyKnot. Contact:
+vrcresolver.com, the resolver and media proxy API, the peer relay, browser streaming, and the
+VRCResolver desktop client. The operator is WhyKnot. Contact:
 **contact@whyknot.dev**.
 
 The short version, before the detail:
@@ -65,8 +65,7 @@ These are kept in your browser's local storage and are never sent to us:
 
 - your resolve history on the website, including titles and URLs;
 - player volume and playback rate;
-- a mesh welcome hash, used to avoid re-sending configuration the client already has;
-- the Popcorn access value.
+- a mesh welcome hash, used to avoid re-sending configuration the client already has.
 
 Clearing site data for vrcresolver.com removes all of it. For the desktop client, the uninstaller
 deletes `%LOCALAPPDATA%Low\vrcresolver\`.
@@ -75,12 +74,8 @@ deletes `%LOCALAPPDATA%Low\vrcresolver\`.
 
 <a id="s4"></a>
 
-There's one cookie, for the Popcorn access gate. It stores the access value you entered, lasts 30
-days, and is set with `SameSite=Strict`. It's strictly necessary: without it you'd re-enter the
-value on every page load.
-
-We don't set analytics, advertising or third-party cookies. That's also why there's no consent
-banner. There's nothing non-essential to consent to.
+We don't set any cookies, including analytics, advertising and third-party ones. That's why there's
+no consent banner.
 
 ## 5. Why we process this, and on what basis
 
@@ -96,9 +91,8 @@ banner. There's nothing non-essential to consent to.
 
 For users in the European Economic Area and the United Kingdom, our legal basis for logging,
 security, and abuse prevention is legitimate interests under Article 6(1)(f) of the GDPR, being our
-interest in keeping a free service running and available. The Popcorn cookie is strictly necessary
-for a service you asked for. We don't process special-category data, and we don't carry out
-automated decision-making with legal or similarly significant effects. Rate limiting is applied to
+interest in keeping a free service running and available. We don't process special-category data,
+and we don't carry out automated decision-making with legal or similarly significant effects. Rate limiting is applied to
 an address, not to a person. It limits request volume and doesn't make any judgement about you.
 
 ## 6. How long it's kept
@@ -111,6 +105,10 @@ an address, not to a person. It limits request volume and doesn't make any judge
 - Caches. Short-lived and technical. A resolved URL is cached for about 30 seconds, manifest
   bodies for about 20 seconds, and streaming session state for an hour or two. Transcoded segments
   are written to disk only while a stream is being watched, and are evicted under disk pressure.
+- Browser streams. Kept in memory only and never written to disk. While you're live, the server
+  holds the last few segments, about 12 seconds of video, so viewers can catch up, and drops older
+  ones as new ones arrive. When the stream ends, the rest is dropped within a minute. Anyone who has
+  the link can watch while it's live.
 - Relayed files. Never stored. The relay streams chunks out of the sharing browser on demand and
   forwards them without writing them to server storage, and closing the tab ends the share.
 
@@ -136,13 +134,9 @@ for, and we consider the reduced exposure to upstream hosts a feature.
 
 <a id="s8"></a>
 
-Some features aren't proxied. Those services receive your IP address directly and their own
-policies apply:
+Your browser connects to these directly, so they receive your IP address and their own policies
+apply:
 
-- The Internet Archive (archive.org). Archive browsing, search, metadata, thumbnails, and
-  downloads are fetched by your browser. See
-  [archive.org/about/terms](https://archive.org/about/terms.php).
-- Popcorn (vr-m.net). Catalogue queries go to a third-party service.
 - Cloudflare. Fronts the Service. See
   [cloudflare.com/privacypolicy](https://www.cloudflare.com/privacypolicy/).
 

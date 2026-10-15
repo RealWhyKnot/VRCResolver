@@ -27,7 +27,6 @@
     "msgpack_format",
     "playback_feedback",
     "playback_feedback_v2",
-    "popcorn_palace_mesh",
     "resolve_log",
     "unity_format_selection",
     "v3_compression",
@@ -90,8 +89,8 @@
     "webm"
   ],
   "playback_proxy_paths": [
-    "/api/popcorn/proxy",
-    "/api/proxy"
+    "/api/proxy",
+    "/api/stream"
   ],
   "resolve_window": {
     "no_deadline_ms": 30000,
@@ -111,7 +110,7 @@
     "rate_limited": "{\"action\":\"rate_limited\",\"meshAction\":\"resolve\",\"limit\":30,\"windowSeconds\":60,\"retryAfterSeconds\":2,\"id\":\"req-1\"}",
     "resolve_log": "{\"action\":\"resolve_log\",\"id\":\"req-1\",\"message\":\"trying default\"}",
     "resolved": "{\"action\":\"resolved\",\"id\":\"req-1\",\"url\":\"https://node1.example.test/api/proxy/manifest.m3u8?q=AAAA\",\"engine\":\"yt-dlp\",\"config\":\"default\",\"container\":\"mp4\",\"video_codec\":\"avc1\",\"audio_codec\":\"mp4a\",\"protocol\":\"https\",\"audio_channels\":2,\"bytes_estimate\":123456789,\"expires_at\":\"2026-01-01T00:00:00Z\",\"resolved_height\":1080}",
-    "welcome": "{\"action\":\"welcome\",\"protocol_version\":3,\"node\":\"node1\",\"warp_active\":true,\"engines\":[\"yt-dlp\",\"passthrough\"],\"features\":[\"unity_format_selection\",\"accept_protocols\",\"accept_codecs\",\"vrchat_format_arg_passthrough\",\"resolve_log\",\"config_history\",\"warp_health_monitor\",\"playback_feedback\",\"v3_compression\",\"welcome_hash_ack\",\"msgpack_format\",\"popcorn_palace_mesh\",\"welcome_hosts\",\"playback_feedback_v2\"],\"yt_dlp_version\":\"2026.01.01\",\"server_version\":\"2026.1.1.1-0000\",\"welcome_hash\":\"0123456789abcdef\",\"negotiated_format\":\"msgpack\",\"first_party_hosts\":[\"example.test\",\"node1.example.test\"],\"playback_proxy_paths\":[\"/api/proxy\",\"/api/popcorn/proxy\"],\"node_region\":\"eu\"}",
+    "welcome": "{\"action\":\"welcome\",\"protocol_version\":3,\"node\":\"node1\",\"warp_active\":true,\"engines\":[\"yt-dlp\",\"passthrough\"],\"features\":[\"unity_format_selection\",\"accept_protocols\",\"accept_codecs\",\"vrchat_format_arg_passthrough\",\"resolve_log\",\"config_history\",\"warp_health_monitor\",\"playback_feedback\",\"v3_compression\",\"welcome_hash_ack\",\"msgpack_format\",\"welcome_hosts\",\"playback_feedback_v2\"],\"yt_dlp_version\":\"2026.01.01\",\"server_version\":\"2026.1.1.1-0000\",\"welcome_hash\":\"0123456789abcdef\",\"negotiated_format\":\"msgpack\",\"first_party_hosts\":[\"example.test\",\"node1.example.test\"],\"playback_proxy_paths\":[\"/api/proxy\",\"/api/stream\"],\"node_region\":\"eu\"}",
     "welcome_cached": "{\"action\":\"welcome_cached\",\"protocol_version\":3,\"node\":\"node1\",\"warp_active\":true,\"negotiated_format\":\"msgpack\",\"node_region\":\"eu\"}"
   },
   "msgpack_samples_hex": {

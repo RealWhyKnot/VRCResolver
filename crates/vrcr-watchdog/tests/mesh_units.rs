@@ -961,7 +961,7 @@ fn welcome_cache_keeps_the_welcome_hosts_fields() {
     let frame = WelcomeFrame {
         features: owned(&[feature::WELCOME_HOSTS]),
         first_party_hosts: owned(&["vrcresolver.com", "whyknot.dev"]),
-        playback_proxy_paths: owned(&["/api/proxy", "/api/popcorn/proxy"]),
+        playback_proxy_paths: owned(&["/api/proxy", "/api/stream"]),
         ..welcome(Some("node1"))
     };
     wc.store("us1.vrcresolver.com", &frame, "hash1");
@@ -972,10 +972,7 @@ fn welcome_cache_keeps_the_welcome_hosts_fields() {
         entry.first_party_hosts,
         owned(&["vrcresolver.com", "whyknot.dev"])
     );
-    assert_eq!(
-        entry.playback_proxy_paths,
-        owned(&["/api/proxy", "/api/popcorn/proxy"])
-    );
+    assert_eq!(entry.playback_proxy_paths, owned(&["/api/proxy", "/api/stream"]));
 }
 
 fn machine() -> Machine {
