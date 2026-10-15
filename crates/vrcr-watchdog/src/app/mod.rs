@@ -42,11 +42,41 @@ pub fn step_budget(name: &str) -> Duration {
         .map_or(Duration::from_millis(500), |(_, ms)| Duration::from_millis(*ms))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Channel {
+    Release,
+    Nightly,
+    Dev,
+}
+
+impl Channel {
+    pub fn parse(raw: Option<&str>) -> Channel {
+        match raw.map(str::trim) {
+            Some(v) if v.eq_ignore_ascii_case("release") => Channel::Release,
+            Some(v) if v.eq_ignore_ascii_case("nightly") => Channel::Nightly,
+            _ => Channel::Dev,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Channel::Release => "release",
+            Channel::Nightly => "nightly",
+            Channel::Dev => "dev",
+        }
+    }
+
+    pub fn debug(self) -> bool {
+        self != Channel::Release
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildInfo {
     pub version: String,
     pub sha: String,
     pub build_time: String,
+    pub channel: Channel,
     pub dev: bool,
     pub runtime: String,
 }
@@ -56,7 +86,7 @@ impl BuildInfo {
         version: &str,
         sha: Option<&str>,
         build_time: Option<&str>,
-        dev: Option<&str>,
+        channel: Option<&str>,
         runtime: &str,
     ) -> BuildInfo {
         let known = |v: Option<&str>| {
@@ -65,15 +95,19 @@ impl BuildInfo {
                 .unwrap_or("<unknown>")
                 .to_owned()
         };
+        let channel = Channel::parse(channel);
         BuildInfo {
             version: version.to_owned(),
             sha: known(sha),
             build_time: known(build_time),
-            dev: !dev
-                .map(str::trim)
-                .is_some_and(|v| v == "0" || v.eq_ignore_ascii_case("false")),
+            channel,
+            dev: channel.debug(),
             runtime: runtime.to_owned(),
         }
+    }
+
+    pub fn channel_label(&self) -> Option<&'static str> {
+        (self.channel != Channel::Release).then(|| self.channel.name())
     }
 }
 

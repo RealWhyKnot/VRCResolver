@@ -26,11 +26,12 @@ use crate::hosts::{self, HostsControl, HostsManager, HostsTicker, TickerHandle};
 use crate::ipc::{Ipc, Mesh};
 use crate::maintenance::codec::{self, CodecCapabilities};
 use crate::maintenance::patch::{self, PatchConfig, PatchManager};
-use crate::maintenance::shutdown::{ShutdownCoordinator, ShutdownStep, panic_text};
+use crate::maintenance::shutdown::{ShutdownCoordinator, ShutdownStep, cancel_all, panic_text};
 use crate::maintenance::{describe_parent_process, update};
 use crate::mesh::reporting::Reporter;
 use crate::mesh::{Config, MeshClient, connect};
 use crate::monitoring::heartbeat::{self, Heartbeat};
+use crate::monitoring::perf::{self, PerfReporter, Phases, SystemInfo};
 use crate::monitoring::vrclog::{MonitorDeps, PlaybackSink, RelayWedge, VrcLogMonitor};
 use crate::og_hint::{self, OgFallbackHint};
 use crate::relay::server::RelayDeps;
@@ -239,6 +240,7 @@ type Task = (CancellationToken, JoinHandle<()>);
 struct Parts {
     terminal: Mutex<Option<Arc<Terminal>>>,
     heartbeat: Mutex<Option<Task>>,
+    perf: Mutex<Option<Task>>,
     hosts_ticker: Mutex<Option<TickerHandle>>,
     logmon: Mutex<Option<Task>>,
     ipc: Mutex<Option<Vec<JoinHandle<()>>>>,
@@ -273,7 +275,6 @@ async fn cancel_task((cancel, handle): Task) -> Result<(), String> {
     cancel.cancel();
     handle.await.map_err(|e| panic_text(&e))
 }
-
 fn step<F, Fut>(name: &str, run: F) -> ShutdownStep
 where
     F: FnOnce() -> Fut + Send + 'static,
@@ -288,8 +289,12 @@ impl Parts {
         if let Some(terminal) = peek(&self.terminal) {
             steps.push(step("terminal", move || blocking(move || terminal.stop())));
         }
-        if let Some(task) = take(&self.heartbeat) {
-            steps.push(step("heartbeat", move || cancel_task(task)));
+        let beats: Vec<Task> = take(&self.perf)
+            .into_iter()
+            .chain(take(&self.heartbeat))
+            .collect();
+        if !beats.is_empty() {
+            steps.push(step("heartbeat", move || cancel_all(beats)));
         }
         if let Some(ticker) = take(&self.hosts_ticker) {
             steps.push(step("hosts-ticker", move || blocking(move || ticker.stop())));
@@ -384,6 +389,7 @@ impl App {
             .map_or_else(|| TOOLS_NOT_FOUND.to_owned(), |p| p.display().to_string());
         self.ux.banner(&Banner {
             version: &self.build.version,
+            channel: self.build.channel_label(),
             sha: &self.build.sha,
             build_time: &self.build.build_time,
             dev: self.build.dev,
@@ -436,6 +442,7 @@ impl App {
     }
 
     fn watch(&self, runtime: &Runtime) -> i32 {
+        let mut phases = Phases::start();
         self.hook_console();
         let state_root = self.paths.state_root();
         let settings = Arc::new(Store::new(state_root.join("settings.json"), {
@@ -444,6 +451,12 @@ impl App {
         }));
         let prefs = settings.snapshot();
         self.banner(&state_root);
+        if self.build.dev {
+            let json = serde_json::to_string(&prefs).unwrap_or_default();
+            self.log
+                .line(&perf::system_line(&SystemInfo::probe(&state_root, json)));
+        }
+        phases.mark("settings");
 
         patch::log_vrc_process_state(&self.ux);
         let patcher = Arc::new(PatchManager::new(
@@ -459,9 +472,13 @@ impl App {
         put(&self.parts.patch, patcher.clone());
         self.install_shutdown(patcher.clone());
         patcher.recover_from_unclean_shutdown();
+        phases.mark("recover");
 
         let started = SystemTime::now();
         let stats = Arc::new(Stats::new(started));
+        if self.build.dev {
+            stats.perf.enable();
+        }
         let mesh = MeshClient::new(
             Config::new(&state_root, &self.build.version),
             self.ux.clone(),
@@ -506,8 +523,10 @@ impl App {
             vec![ipc.serve(wire::PIPE_NAME), ipc.serve(legacy::PIPE_NAME)],
         );
         mesh.start();
+        phases.mark("ipc");
 
         self.raise_wininet(&state_root);
+        phases.mark("wininet");
 
         let ports = Arc::new(RelayPortManager::new(&state_root, self.ux.clone()));
         put(&self.parts.ports, ports.clone());
@@ -543,6 +562,8 @@ impl App {
             None
         };
 
+        phases.mark("relay");
+
         let mut deps = MonitorDeps::new(
             Arc::new(mesh.clone()) as Arc<dyn PlaybackSink>,
             mesh.first_party(),
@@ -566,11 +587,13 @@ impl App {
         let cancel = CancellationToken::new();
         let handle = VrcLogMonitor::new(deps, vrc_dir).spawn(clock::system(), cancel.clone());
         put(&self.parts.logmon, (cancel, handle));
+        phases.mark("logmon");
 
         if !patcher.start() {
             self.life.shutdown("patch-refused", false, None);
             return 2;
         }
+        phases.mark("patch");
 
         self.ux.success(
             Component::Patch,
@@ -586,6 +609,7 @@ impl App {
         );
 
         self.start_hosts();
+        phases.mark("hosts");
 
         let cancel = CancellationToken::new();
         let beat = Arc::new(Heartbeat {
@@ -606,6 +630,19 @@ impl App {
             &self.parts.heartbeat,
             (cancel.clone(), beat.spawn(heartbeat::INTERVAL, cancel)),
         );
+        if self.build.dev {
+            let cancel = CancellationToken::new();
+            let reporter = Arc::new(PerfReporter {
+                stats: stats.clone(),
+                cores: perf::logical_cores(),
+                now: clock::system(),
+                log: self.log.clone(),
+            });
+            put(
+                &self.parts.perf,
+                (cancel.clone(), reporter.spawn(perf::INTERVAL, cancel)),
+            );
+        }
 
         let _ = update::start_background_check(
             prefs.maintenance.update_check,
@@ -629,7 +666,13 @@ impl App {
             ));
         }
 
+        phases.mark("background");
+
         self.start_terminal(settings, stats, mesh, &state_root, started);
+        phases.mark("terminal");
+        if self.build.dev {
+            self.log.line(&phases.line());
+        }
 
         self.life.wait_quit();
         self.ux.write(

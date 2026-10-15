@@ -180,5 +180,5 @@ If the workflow breaks mid-release, the tag is already pushed and gh's partial s
 cleaning up. In the worst case, run `gh release delete <tag> --cleanup-tag` and re-tag the same SHA
 after the fix.
 
-Cosmetic build pipeline fixes, like tweaking the IsDevBuild detection in build.ps1, go out with a
+Cosmetic build pipeline fixes, like tweaking the channel detection in build.ps1, go out with a
 real release. Never tag a release only to test the workflow.

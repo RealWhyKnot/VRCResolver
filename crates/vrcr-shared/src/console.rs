@@ -376,6 +376,7 @@ pub fn resolve_outcome_line(bullet: &str, o: &Outcome<'_>) -> (Color, String) {
 
 pub struct Banner<'a> {
     pub version: &'a str,
+    pub channel: Option<&'a str>,
     pub sha: &'a str,
     pub build_time: &'a str,
     pub dev: bool,
@@ -383,16 +384,18 @@ pub struct Banner<'a> {
 }
 
 pub fn banner_lines(b: &Banner<'_>) -> Vec<(Color, String)> {
+    let channel = b.channel.map(|c| format!(" ({c})")).unwrap_or_default();
     let mut lines = vec![
         (Color::DarkGray, DIVIDER.to_owned()),
-        (Color::White, format!("  VRCResolver {}", b.version)),
+        (Color::White, format!("  VRCResolver {}{channel}", b.version)),
         (Color::Gray, "  local video relay for VRChat".to_owned()),
         (Color::Gray, format!("  sha {}  built {}", b.sha, b.build_time)),
     ];
     if b.dev {
         lines.push((
             Color::Yellow,
-            "  mode: DEV (diagnostic logs mirrored to console; relay trace enabled)".to_owned(),
+            "  debug: on (relay trace and hitch warnings here, timings and perf numbers in the log)"
+                .to_owned(),
         ));
     }
     lines.push((Color::DarkGray, SUBDIVIDER.to_owned()));

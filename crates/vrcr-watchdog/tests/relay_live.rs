@@ -799,6 +799,51 @@ async fn hls_manifest_then_every_segment() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn perf_window_counts_relay_traffic_only_when_enabled() {
+    let h = harness(None).await;
+    let mut c = Conn::open(h.server.port()).await;
+    let r = c
+        .get(&play(
+            "perf0",
+            "manifest.m3u8",
+            &upstream_url("hls", "index.m3u8"),
+        ))
+        .await;
+    assert_eq!(r.status, 200);
+    assert!(eventually(|| h.server.in_flight() == 0, WITHIN).await);
+    assert!(!h.stats.perf.take().is_active());
+
+    h.stats.perf.enable();
+    let r = c
+        .get(&play(
+            "perf1",
+            "manifest.m3u8",
+            &upstream_url("hls", "index.m3u8"),
+        ))
+        .await;
+    let text = String::from_utf8(r.body).unwrap_or_else(|e| panic!("{e}"));
+    let segments: Vec<&str> = text
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .collect();
+    for seg in &segments {
+        let r = c.get(&format!("/play/perf1/{seg}")).await;
+        assert_eq!(r.status, 200, "{seg}");
+    }
+    c.send("HEAD", &format!("/play/perf1/{}", segments[0]), &[]).await;
+    assert_eq!(c.reply(true).await.status, 200);
+    assert!(eventually(|| h.server.in_flight() == 0, WITHIN).await);
+    let mut snap = h.stats.perf.take();
+    assert_eq!(snap.relay_requests, 4);
+    assert_eq!(snap.relay_errors, 0);
+    assert!(snap.relay_bytes >= 3000, "{}", snap.relay_bytes);
+    assert_eq!(snap.segment_total.spread().map(|s| s.count), Some(3));
+    assert_eq!(snap.segment_header.spread().map(|s| s.count), Some(3));
+    assert_eq!(snap.manifest_total.spread().map(|s| s.count), Some(1));
+    assert!(!h.stats.perf.take().is_active());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_mid_stream_drops_everything() {
     let h = harness(None).await;
     let mut c = Conn::open(h.server.port()).await;
@@ -843,7 +888,7 @@ async fn reqwest_upstream_refuses_internal_targets() {
     let up = ReqwestUpstream::new(tls()).unwrap_or_else(|e| panic!("{e}"));
     for target in [
         "http://127.0.0.1/api/proxy/x.ts",
-        "http://localhost:9/api/proxy/x.ts",
+        "http://localhost:9/api/proxy/x.ts?sig=secret",
         "http://169.254.169.254/latest/meta-data",
         "http://10.0.0.5/api/proxy/x.ts",
         "http://[::1]/api/proxy/x.ts",
@@ -858,6 +903,7 @@ async fn reqwest_upstream_refuses_internal_targets() {
             Err(e) => {
                 assert_eq!(e.kind, "blocked_address", "{target}: {e}");
                 assert!(e.message.contains("blocked internal address"), "{target}: {e}");
+                assert!(!e.message.contains("/api/proxy"), "{target}: {e}");
             }
         }
     }

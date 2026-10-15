@@ -56,20 +56,23 @@ try {
 catch { }
 $buildTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
-if ($env:GITHUB_ACTIONS -eq 'true') {
-    $isDev = $FullVersion -match '-'
+$dirtyLocal = ($env:GITHUB_ACTIONS -ne 'true') -and ($gitDirty -ne "")
+if ($FullVersion -match '-beta$') {
+    $channel = "nightly"
+}
+elseif (($FullVersion -match '-') -or $dirtyLocal) {
+    $channel = "dev"
 }
 else {
-    $isDev = ($FullVersion -match '-') -or ($gitDirty -ne "")
+    $channel = "release"
 }
-$isDevLiteral = if ($isDev) { "true" } else { "false" }
-Write-Host "BuildInfo: GitSha=$gitSha$gitDirty BuildTime=$buildTime IsDevBuild=$isDevLiteral" -ForegroundColor DarkGray
+Write-Host "BuildInfo: GitSha=$gitSha$gitDirty BuildTime=$buildTime Channel=$channel" -ForegroundColor DarkGray
 
 Write-Host "`n--- Building ---" -ForegroundColor Cyan
 $env:VRCR_VERSION = $AsmVersion
 $env:VRCR_GIT_SHA = "$gitSha$gitDirty"
 $env:VRCR_BUILD_TIME = $buildTime
-$env:VRCR_DEV = $isDevLiteral
+$env:VRCR_CHANNEL = $channel
 cargo build --release --locked -p vrcr-watchdog -p vrcr-updater -p vrcr-uninstaller -p vrcr-ytdlp
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 

@@ -3,7 +3,7 @@ fn main() {
         option_env!("VRCR_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
         option_env!("VRCR_GIT_SHA"),
         option_env!("VRCR_BUILD_TIME"),
-        option_env!("VRCR_DEV"),
+        option_env!("VRCR_CHANNEL"),
         env!("VRCR_RUSTC"),
     );
     let args: Vec<String> = std::env::args().skip(1).collect();

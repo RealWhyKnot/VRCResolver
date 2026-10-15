@@ -778,10 +778,12 @@ impl Inner {
                 return;
             }
             sleep(self.cfg.pong_deadline).await;
-            if lock(&self.last_pong).is_none_or(|p| p < sent_at) {
+            let last_pong = *lock(&self.last_pong);
+            let Some(pong) = last_pong.filter(|p| *p >= sent_at) else {
                 link.abort();
                 return;
-            }
+            };
+            self.stats.perf.record_mesh_rtt(pong - sent_at);
         }
     }
 

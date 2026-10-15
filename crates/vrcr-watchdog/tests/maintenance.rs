@@ -10,13 +10,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use common::mesh::Capture;
 use serde_json::json;
 use tempfile::TempDir;
+use tokio_util::sync::CancellationToken;
 use vrcr_shared::console::{Style, Ux};
 use vrcr_shared::log::Log;
 use vrcr_shared::wire;
 use vrcr_watchdog::maintenance::codec::{
     self, Codec, CodecCapabilities, CodecEntry, CodecEnv, CodecOutcome, CodecState, Installer, WingetResult,
 };
-use vrcr_watchdog::maintenance::shutdown::{ShutdownCoordinator, ShutdownStep};
+use vrcr_watchdog::maintenance::shutdown::{ShutdownCoordinator, ShutdownStep, cancel_all};
 use vrcr_watchdog::maintenance::update::{self, Release, UpdateStart, Version};
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -1189,6 +1190,34 @@ fn steps_are_read_when_the_shutdown_starts() {
     });
     assert!(c.started());
     assert!(ran.load(Ordering::SeqCst));
+}
+
+#[test]
+fn cancel_all_stops_every_task_even_when_one_panicked() {
+    let stopped = Arc::new(AtomicBool::new(false));
+    let second = CancellationToken::new();
+    let result = rt().block_on(async {
+        let first = CancellationToken::new();
+        let a = first.clone();
+        let failing = tokio::spawn(async move {
+            a.cancelled().await;
+            panic!("boom");
+        });
+        let (b, seen) = (second.clone(), stopped.clone());
+        let quiet = tokio::spawn(async move {
+            b.cancelled().await;
+            seen.store(true, Ordering::SeqCst);
+        });
+        tokio::time::timeout(
+            GENEROUS,
+            cancel_all(vec![(first, failing), (second.clone(), quiet)]),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("{e}"))
+    });
+    assert_eq!(result, Err("panicked".to_owned()));
+    assert!(second.is_cancelled());
+    assert!(stopped.load(Ordering::SeqCst));
 }
 
 #[cfg(windows)]

@@ -1,6 +1,6 @@
 use std::process::Command;
 
-pub const BUILD_VARS: [&str; 4] = ["VRCR_VERSION", "VRCR_GIT_SHA", "VRCR_BUILD_TIME", "VRCR_DEV"];
+pub const BUILD_VARS: [&str; 4] = ["VRCR_VERSION", "VRCR_GIT_SHA", "VRCR_BUILD_TIME", "VRCR_CHANNEL"];
 
 pub struct Exe<'a> {
     pub description: &'a str,

@@ -19,6 +19,7 @@ use vrcr_watchdog::relay::activity::play_id;
 use vrcr_watchdog::relay::headers::{
     copy_response_headers, forward_request_headers, should_drop_response_header,
 };
+use vrcr_watchdog::relay::hitch;
 use vrcr_watchdog::relay::hitch::parse_lazy_segment;
 use vrcr_watchdog::relay::manifest::{
     self, MAX_MANIFEST_BYTES, is_likely_manifest, localize, localize_stream,
@@ -31,6 +32,7 @@ use vrcr_watchdog::relay::targets::{
 use vrcr_watchdog::relay::{
     HitchDetector, RelayActivity, RelayBypass, RelayPortManager, TargetResolver, TimingSample, short_url,
 };
+use vrcr_watchdog::stats::RelayKind;
 
 use common::mesh::Capture;
 
@@ -854,6 +856,23 @@ fn sample(method: &str, local: &str, target: &str, status: u16, header: i64, tot
 
 fn utc(secs: u64) -> SystemTime {
     UNIX_EPOCH + Duration::from_secs(secs)
+}
+
+#[test]
+fn relay_kind_splits_segments_manifests_and_the_rest() {
+    let kind = |local: &str, target: &str| hitch::relay_kind(&sample("GET", local, target, 200, 1, 2));
+    assert_eq!(
+        kind(
+            "/a/x",
+            "https://us1.vrcresolver.com/api/proxy/lazy-hls/wk_s1/seg_000010.ts"
+        ),
+        RelayKind::Segment
+    );
+    assert_eq!(kind("/a/x", "https://h/p/chunk.m4s?sig=1"), RelayKind::Segment);
+    assert_eq!(kind("/a/seg.ts", "https://h/p/data"), RelayKind::Segment);
+    assert_eq!(kind("/a/x", "https://h/p/index.m3u8?sig=1"), RelayKind::Manifest);
+    assert_eq!(kind("/a/manifest.mpd", "https://h/p/data"), RelayKind::Manifest);
+    assert_eq!(kind("/a/x.bin", "https://h/x.bin"), RelayKind::Other);
 }
 
 #[test]

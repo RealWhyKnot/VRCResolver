@@ -11,18 +11,19 @@ use common::ManualClock;
 use common::mesh::Capture;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
-use vrcr_shared::console::{Style, Ux};
+use vrcr_shared::console::{ResolveStatus, Style, Ux};
 use vrcr_shared::first_party::FirstPartyPolicy;
 use vrcr_shared::log::Log;
 use vrcr_shared::logutil::iso8601_utc;
 use vrcr_shared::trust_gateway;
-use vrcr_shared::win::DefaultOutput;
+use vrcr_shared::win::{DefaultOutput, MemoryStatus, ProcessUsage};
 use vrcr_shared::wire::{ResolveResponse, action, feedback};
 use vrcr_watchdog::display::{format_bytes, format_bytes_per_second};
 use vrcr_watchdog::health::{self, HealthGate};
 use vrcr_watchdog::ipc::Feedback;
 use vrcr_watchdog::monitoring::audio::{self, AudioCheck, AudioState};
 use vrcr_watchdog::monitoring::heartbeat::{self, Heartbeat};
+use vrcr_watchdog::monitoring::perf::{self, Phases, SystemInfo};
 use vrcr_watchdog::monitoring::vrclog::{
     self, MonitorDeps, PlaybackSink, RelayWedge, VrcLogMonitor, initial_read_offset_for_new_file,
     parse_observed_resolution, should_rescan_directory,
@@ -30,7 +31,7 @@ use vrcr_watchdog::monitoring::vrclog::{
 use vrcr_watchdog::og_hint::{self, OgFallbackHint};
 use vrcr_watchdog::relay::RelayActivity;
 use vrcr_watchdog::resolve_cache::{Key, ResolveCache};
-use vrcr_watchdog::stats::{Activity, Stats};
+use vrcr_watchdog::stats::{Activity, PERF_SAMPLE_CAP, PerfSnapshot, RelayKind, Series, Spread, Stats};
 
 const T0: u64 = common::T_2026_09_29;
 const PLAYBACK: &str = "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=abc";
@@ -1042,4 +1043,252 @@ fn heartbeat_stays_quiet_while_the_log_is_busy() {
         ..hb
     };
     assert!(silent.tick().is_some());
+}
+
+#[test]
+fn series_reports_nearest_rank_percentiles() {
+    let mut s = Series::default();
+    assert_eq!(s.spread(), None);
+    for v in (1..=20).rev() {
+        s.push(v * 10);
+    }
+    s.push(-5);
+    assert_eq!(
+        s.spread(),
+        Some(Spread {
+            count: 21,
+            p50: 100,
+            p95: 190,
+            max: 200
+        })
+    );
+
+    let mut one = Series::default();
+    one.push(42);
+    assert_eq!(
+        one.spread(),
+        Some(Spread {
+            count: 1,
+            p50: 42,
+            p95: 42,
+            max: 42
+        })
+    );
+}
+
+#[test]
+fn series_caps_samples_but_keeps_count_and_max() {
+    let mut s = Series::default();
+    for _ in 0..PERF_SAMPLE_CAP {
+        s.push(5);
+    }
+    s.push(9_000);
+    s.push(i64::MAX);
+    let spread = s.spread().unwrap_or_else(|| panic!("no spread"));
+    assert_eq!(spread.count, PERF_SAMPLE_CAP as u64 + 2);
+    assert_eq!((spread.p50, spread.p95), (5, 5));
+    assert_eq!(spread.max, u32::MAX);
+}
+
+#[test]
+fn perf_window_records_nothing_until_enabled() {
+    let stats = Stats::new(SystemTime::now());
+    stats.perf.record_relay(RelayKind::Segment, false, 10, 20, 100);
+    stats
+        .perf
+        .record_resolve(ResolveStatus::Resolved, false, Duration::from_millis(900));
+    stats.perf.record_mesh_rtt(Duration::from_millis(30));
+    assert!(!stats.perf.enabled());
+    assert_eq!(stats.perf.take(), PerfSnapshot::default());
+}
+
+#[test]
+fn perf_window_sorts_samples_and_resets_on_take() {
+    let stats = Stats::new(SystemTime::now());
+    stats.perf.enable();
+    stats.perf.record_relay(RelayKind::Segment, false, 40, 120, 1000);
+    stats.perf.record_relay(RelayKind::Manifest, false, 30, 60, 200);
+    stats.perf.record_relay(RelayKind::Other, false, 5, 5, 50);
+    stats.perf.record_relay(RelayKind::Segment, true, 0, 3000, 0);
+    let ms = Duration::from_millis;
+    stats
+        .perf
+        .record_resolve(ResolveStatus::Resolved, false, ms(1800));
+    stats.perf.record_resolve(ResolveStatus::Resolved, true, ms(1));
+    stats
+        .perf
+        .record_resolve(ResolveStatus::Fallback, false, ms(9000));
+    stats.perf.record_resolve(ResolveStatus::Failed, false, ms(15000));
+    stats
+        .perf
+        .record_resolve(ResolveStatus::Unexpected, false, ms(10));
+    stats.perf.record_mesh_rtt(ms(35));
+
+    let mut snap = stats.perf.take();
+    assert!(snap.is_active());
+    assert_eq!(
+        (snap.relay_requests, snap.relay_errors, snap.relay_bytes),
+        (4, 1, 1250)
+    );
+    assert_eq!(
+        snap.segment_header.spread().map(|s| (s.count, s.max)),
+        Some((1, 40))
+    );
+    assert_eq!(
+        snap.segment_total.spread().map(|s| (s.count, s.max)),
+        Some((1, 120))
+    );
+    assert_eq!(
+        snap.manifest_total.spread().map(|s| (s.count, s.max)),
+        Some((1, 60))
+    );
+    assert_eq!(
+        (
+            snap.resolves,
+            snap.resolves_cached,
+            snap.resolves_fallback,
+            snap.resolves_failed
+        ),
+        (5, 1, 1, 2)
+    );
+    assert_eq!(
+        snap.resolve_ms.spread().map(|s| (s.count, s.max)),
+        Some((1, 1800))
+    );
+    assert_eq!(snap.mesh_rtt.spread().map(|s| s.max), Some(35));
+    assert_eq!(stats.perf.take(), PerfSnapshot::default());
+
+    stats.perf.record_mesh_rtt(ms(35));
+    assert!(!stats.perf.take().is_active());
+}
+
+#[test]
+fn perf_line_drops_empty_sections() {
+    let stats = Stats::new(SystemTime::now());
+    stats.perf.enable();
+    stats
+        .perf
+        .record_relay(RelayKind::Segment, false, 40, 120, 3 * 1024 * 1024);
+    stats
+        .perf
+        .record_relay(RelayKind::Segment, false, 60, 200, 1024 * 1024);
+    stats.perf.record_mesh_rtt(Duration::from_millis(35));
+    let mut snap = stats.perf.take();
+    let usage = ProcessUsage {
+        cpu_100ns: 0,
+        working_set: 48 * 1024 * 1024,
+        peak_working_set: 64 * 1024 * 1024,
+        private_bytes: 40 * 1024 * 1024 + 512 * 1024,
+        handles: 312,
+    };
+    assert_eq!(
+        perf::perf_line(secs(60), &mut snap, Some(&usage), Some(1.26)),
+        "[perf] window=60s relay_req=2 relay_err=0 relay_mib=4.0 seg_header_ms=p50:40,p95:60,max:60,n:2 seg_total_ms=p50:120,p95:200,max:200,n:2 mesh_rtt_ms=p50:35,p95:35,max:35,n:1 cpu=1.3% ws_mib=48.0 private_mib=40.5 handles=312"
+    );
+
+    stats
+        .perf
+        .record_resolve(ResolveStatus::Resolved, false, Duration::from_millis(2100));
+    stats
+        .perf
+        .record_resolve(ResolveStatus::Resolved, true, Duration::from_millis(1));
+    let mut snap = stats.perf.take();
+    assert_eq!(
+        perf::perf_line(secs(23), &mut snap, None, None),
+        "[perf] window=23s resolves=2 cached=1 resolve_ms=p50:2100,p95:2100,max:2100,n:1"
+    );
+}
+
+#[test]
+fn cpu_percent_is_a_share_of_every_core() {
+    let wall = secs(10);
+    assert_eq!(perf::cpu_percent(0, 10_000_000, wall, 1), Some(10.0));
+    assert_eq!(perf::cpu_percent(0, 10_000_000, wall, 4), Some(2.5));
+    assert_eq!(perf::cpu_percent(500, 100, wall, 4), Some(0.0));
+    assert_eq!(perf::cpu_percent(0, 100, Duration::ZERO, 4), None);
+    assert_eq!(perf::cpu_percent(0, 10_000_000, wall, 0), Some(10.0));
+}
+
+#[test]
+fn session_line_sums_the_whole_run() {
+    let a = Activity {
+        resolves_total: 12,
+        resolves_via_lh_yt: 2,
+        resolves_cache_hits: 3,
+        reconnects: 1,
+        relay_requests: 4000,
+        relay_bytes: 900 * 1024 * 1024,
+        upstream_relay_bytes: 512 * 1024 * 1024,
+        ..Activity::default()
+    };
+    let usage = ProcessUsage {
+        cpu_100ns: 1_234_000_000,
+        working_set: 50 * 1024 * 1024,
+        peak_working_set: 150 * 1024 * 1024,
+        private_bytes: 45 * 1024 * 1024,
+        handles: 320,
+    };
+    assert_eq!(
+        perf::session_line(secs(2 * 3600 + 13 * 60), &a, Some(&usage)),
+        "[session] up=2h13m resolves=12 cached=3 local_video=2 relay_req=4000 relay_mib=900.0 upstream_mib=512.0 reconnects=1 cpu_s=123.4 peak_ws_mib=150.0 ws_mib=50.0 private_mib=45.0 handles=320"
+    );
+    assert_eq!(
+        perf::session_line(secs(30), &Activity::default(), None),
+        "[session] up=0m resolves=0 cached=0 local_video=0 relay_req=0 relay_mib=0.0 upstream_mib=0.0 reconnects=0"
+    );
+}
+
+#[test]
+fn system_line_lists_hardware_and_settings() {
+    let info = SystemInfo {
+        cpu: Some("AMD Ryzen 9 7950X 16-Core Processor".to_owned()),
+        cores: 32,
+        memory: Some(MemoryStatus {
+            total: 64 * 1024 * 1024 * 1024,
+            available: 20 * 1024 * 1024 * 1024 + 300 * 1024 * 1024,
+        }),
+        disk_free: Some(120 * 1024 * 1024 * 1024),
+        settings: r#"{"playback":{"high_quality":false}}"#.to_owned(),
+    };
+    assert_eq!(
+        perf::system_line(&info),
+        r#"[startup] system cpu="AMD Ryzen 9 7950X 16-Core Processor" cores=32 ram_gib=64.0 ram_free_gib=20.3 disk_free_gib=120.0 settings={"playback":{"high_quality":false}}"#
+    );
+    let bare = SystemInfo {
+        cores: 1,
+        settings: "{}".to_owned(),
+        ..SystemInfo::default()
+    };
+    assert_eq!(perf::system_line(&bare), "[startup] system cores=1 settings={}");
+    assert!(perf::logical_cores() >= 1);
+}
+
+#[test]
+fn startup_phases_name_each_step_and_the_total() {
+    let mut p = Phases::start();
+    p.mark("settings");
+    std::thread::sleep(Duration::from_millis(5));
+    p.mark("relay");
+    assert_eq!(p.names(), vec!["settings", "relay"]);
+    let line = p.line();
+    assert!(line.starts_with("[startup] phases settings="), "{line}");
+    assert!(line.contains("ms relay="), "{line}");
+    let total: u128 = line
+        .rsplit("total=")
+        .next()
+        .and_then(|t| t.strip_suffix("ms"))
+        .and_then(|t| t.parse().ok())
+        .unwrap_or_else(|| panic!("{line}"));
+    assert!(total >= 5, "{line}");
+}
+
+#[cfg(windows)]
+#[test]
+fn process_usage_reads_this_process() {
+    let u = vrcr_shared::win::process_usage().unwrap_or_else(|| panic!("no usage"));
+    assert!(u.working_set > 0 && u.peak_working_set >= u.working_set);
+    assert!(u.private_bytes > 0 && u.handles > 0);
+    let m = vrcr_shared::win::memory_status().unwrap_or_else(|| panic!("no memory status"));
+    assert!(m.total > 0 && m.available <= m.total);
+    assert!(vrcr_shared::win::cpu_name().is_some_and(|n| !n.is_empty() && !n.contains('\0')));
 }

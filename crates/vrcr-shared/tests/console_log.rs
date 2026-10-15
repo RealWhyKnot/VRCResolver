@@ -315,23 +315,29 @@ fn banner_pads_labels_and_flags_dev_mode() {
     ];
     let b = Banner {
         version: "2026.10.14.0",
+        channel: Some("nightly"),
         sha: "abc1234",
         build_time: "now",
         dev: true,
         paths: &paths,
     };
     let lines: Vec<String> = console::banner_lines(&b).into_iter().map(|(_, l)| l).collect();
-    assert_eq!(lines[1], "  VRCResolver 2026.10.14.0");
-    assert!(lines[4].contains("mode: DEV"));
+    assert_eq!(lines[1], "  VRCResolver 2026.10.14.0 (nightly)");
+    assert!(lines[4].starts_with("  debug: on"));
     assert_eq!(lines[6], "  logs:        C:\\logs");
     assert_eq!(lines[7], "  state root:  C:\\state");
     assert_eq!(lines.last().map(String::as_str), Some(""));
-    let quiet = Banner { dev: false, ..b };
-    assert!(
-        !console::banner_lines(&quiet)
-            .iter()
-            .any(|(_, l)| l.contains("DEV"))
-    );
+    let quiet = Banner {
+        channel: None,
+        dev: false,
+        ..b
+    };
+    let quiet: Vec<String> = console::banner_lines(&quiet)
+        .into_iter()
+        .map(|(_, l)| l)
+        .collect();
+    assert_eq!(quiet[1], "  VRCResolver 2026.10.14.0");
+    assert!(!quiet.iter().any(|l| l.contains("debug")));
 }
 
 #[test]
@@ -431,6 +437,34 @@ fn prune_keeps_recent_logs_and_unrelated_files() {
     );
     assert!(!recent.exists());
     assert!(unrelated.exists());
+}
+
+#[test]
+fn prune_drops_the_oldest_logs_past_the_size_budget() {
+    let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
+    let names = [
+        "watchdog-20261010-000000-000.log",
+        "watchdog-20261011-000000-000.log",
+        "watchdog-20261012-000000-000.log",
+        "watchdog-20261013-000000-000.log",
+    ];
+    for name in names {
+        fs::write(dir.path().join(name), [b'x'; 100]).unwrap_or_else(|e| panic!("{e}"));
+    }
+    let other = dir.path().join("updater-20261001-000000-000.log");
+    let crash = dir.path().join("crash-watchdog-20261001-000000.log");
+    for p in [&other, &crash] {
+        fs::write(p, [b'x'; 500]).unwrap_or_else(|e| panic!("{e}"));
+    }
+
+    log::prune_within(dir.path(), "watchdog", SystemTime::now(), 250);
+
+    let left: Vec<bool> = names.iter().map(|n| dir.path().join(n).exists()).collect();
+    assert_eq!(left, vec![false, false, true, true]);
+    assert!(other.exists());
+    assert!(crash.exists());
+    assert_eq!(log::MAX_TOTAL_BYTES, 64 * 1024 * 1024);
+    const { assert!(log::MAX_BYTES < log::MAX_TOTAL_BYTES) };
 }
 
 #[test]

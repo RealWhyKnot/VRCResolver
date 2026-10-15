@@ -139,6 +139,7 @@ impl Upstream for ReqwestUpstream {
 }
 
 fn describe(e: reqwest::Error) -> UpstreamError {
+    let e = e.without_url();
     let mut message = e.to_string();
     let mut source = std::error::Error::source(&e);
     while let Some(s) = source {

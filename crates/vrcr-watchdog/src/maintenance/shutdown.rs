@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 pub const TOTAL_BUDGET: Duration = Duration::from_secs(12);
 
@@ -46,6 +48,21 @@ pub fn panic_text(e: &tokio::task::JoinError) -> String {
         return "cancelled".to_owned();
     }
     "panicked".to_owned()
+}
+
+pub async fn cancel_all(tasks: Vec<(CancellationToken, JoinHandle<()>)>) -> Result<(), String> {
+    for (cancel, _) in &tasks {
+        cancel.cancel();
+    }
+    let mut result = Ok(());
+    for (_, handle) in tasks {
+        if let Err(e) = handle.await
+            && result.is_ok()
+        {
+            result = Err(panic_text(&e));
+        }
+    }
+    result
 }
 
 impl ShutdownCoordinator {

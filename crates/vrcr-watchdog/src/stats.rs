@@ -1,8 +1,11 @@
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use vrcr_shared::console::ResolveStatus;
+
 pub const BANDWIDTH_BUCKETS: usize = 32;
+pub const PERF_SAMPLE_CAP: usize = 2048;
 
 pub struct Stats {
     pub started: SystemTime,
@@ -18,6 +21,7 @@ pub struct Stats {
     last_relay_ms: AtomicU64,
     last_upstream_relay_ms: AtomicU64,
     bandwidth: Mutex<[(u64, u64); BANDWIDTH_BUCKETS]>,
+    pub perf: PerfWindow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -84,6 +88,7 @@ impl Stats {
             last_relay_ms: AtomicU64::new(0),
             last_upstream_relay_ms: AtomicU64::new(0),
             bandwidth: Mutex::new([(0, 0); BANDWIDTH_BUCKETS]),
+            perf: PerfWindow::default(),
         }
     }
 
@@ -182,4 +187,146 @@ fn bucket(second: u64) -> usize {
 
 fn from_ms(ms: u64) -> Option<SystemTime> {
     (ms > 0).then(|| UNIX_EPOCH + Duration::from_millis(ms))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayKind {
+    Segment,
+    Manifest,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Spread {
+    pub count: u64,
+    pub p50: u32,
+    pub p95: u32,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Series {
+    count: u64,
+    max: u32,
+    samples: Vec<u32>,
+}
+
+impl Series {
+    pub fn push(&mut self, ms: i64) {
+        let v = u32::try_from(ms.max(0)).unwrap_or(u32::MAX);
+        self.count += 1;
+        self.max = self.max.max(v);
+        if self.samples.len() < PERF_SAMPLE_CAP {
+            self.samples.push(v);
+        }
+    }
+
+    pub fn spread(&mut self) -> Option<Spread> {
+        if self.samples.is_empty() {
+            return None;
+        }
+        self.samples.sort_unstable();
+        let rank = |p: usize| {
+            let n = self.samples.len();
+            self.samples[(p * n).div_ceil(100).clamp(1, n) - 1]
+        };
+        Some(Spread {
+            count: self.count,
+            p50: rank(50),
+            p95: rank(95),
+            max: self.max,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PerfSnapshot {
+    pub relay_requests: u64,
+    pub relay_errors: u64,
+    pub relay_bytes: u64,
+    pub segment_header: Series,
+    pub segment_total: Series,
+    pub manifest_total: Series,
+    pub resolves: u64,
+    pub resolves_cached: u64,
+    pub resolves_fallback: u64,
+    pub resolves_failed: u64,
+    pub resolve_ms: Series,
+    pub mesh_rtt: Series,
+}
+
+impl PerfSnapshot {
+    pub fn is_active(&self) -> bool {
+        self.relay_requests > 0 || self.resolves > 0
+    }
+}
+
+#[derive(Default)]
+pub struct PerfWindow {
+    enabled: AtomicBool,
+    window: Mutex<PerfSnapshot>,
+}
+
+impl PerfWindow {
+    pub fn enable(&self) {
+        self.enabled.store(true, Ordering::Relaxed);
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn record_relay(&self, kind: RelayKind, failed: bool, header_ms: i64, total_ms: i64, bytes: u64) {
+        if !self.enabled() {
+            return;
+        }
+        let mut w = self.lock();
+        w.relay_requests += 1;
+        w.relay_bytes = w.relay_bytes.saturating_add(bytes);
+        if failed {
+            w.relay_errors += 1;
+            return;
+        }
+        match kind {
+            RelayKind::Segment => {
+                w.segment_header.push(header_ms);
+                w.segment_total.push(total_ms);
+            }
+            RelayKind::Manifest => w.manifest_total.push(total_ms),
+            RelayKind::Other => {}
+        }
+    }
+
+    pub fn record_resolve(&self, status: ResolveStatus, via_cache: bool, elapsed: Duration) {
+        if !self.enabled() {
+            return;
+        }
+        let mut w = self.lock();
+        w.resolves += 1;
+        match status {
+            ResolveStatus::Resolved if via_cache => w.resolves_cached += 1,
+            ResolveStatus::Resolved => w
+                .resolve_ms
+                .push(i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)),
+            ResolveStatus::Fallback => w.resolves_fallback += 1,
+            ResolveStatus::Failed | ResolveStatus::Unexpected => w.resolves_failed += 1,
+        }
+    }
+
+    pub fn record_mesh_rtt(&self, rtt: Duration) {
+        if !self.enabled() {
+            return;
+        }
+        self.lock()
+            .mesh_rtt
+            .push(i64::try_from(rtt.as_millis()).unwrap_or(i64::MAX));
+    }
+
+    pub fn take(&self) -> PerfSnapshot {
+        std::mem::take(&mut *self.lock())
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, PerfSnapshot> {
+        self.window.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }

@@ -28,7 +28,7 @@ use vrcr_shared::trust_gateway;
 
 use super::activity::RelayActivity;
 use super::headers::{self, content_length};
-use super::hitch::{HitchDetector, TimingSample};
+use super::hitch::{self, HitchDetector, TimingSample};
 use super::manifest::{self, ManifestSink};
 use super::security;
 use super::short_url;
@@ -746,6 +746,18 @@ impl Inner {
     fn record_hitch(&self, sample: &TimingSample) {
         if sample.target_url.trim().is_empty() {
             return;
+        }
+        let perf = &self.deps.stats.perf;
+        if perf.enabled() && sample.method.eq_ignore_ascii_case("GET") {
+            let failed =
+                sample.status >= 400 || sample.failure.as_deref().is_some_and(|f| !f.trim().is_empty());
+            perf.record_relay(
+                hitch::relay_kind(sample),
+                failed,
+                sample.header_ms,
+                sample.total_ms,
+                sample.bytes_out,
+            );
         }
         self.deps
             .hitch

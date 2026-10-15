@@ -10,8 +10,8 @@ use tempfile::TempDir;
 use vrcr_shared::console::{Style, Ux};
 use vrcr_shared::{legacy, wire};
 use vrcr_watchdog::app::{
-    self, BuildInfo, ChildMode, CreateError, Instance, InstanceMutex, MeshSnapshot, STEP_BUDGETS, ServerTls,
-    Snapshot,
+    self, BuildInfo, Channel, ChildMode, CreateError, Instance, InstanceMutex, MeshSnapshot, STEP_BUDGETS,
+    ServerTls, Snapshot,
 };
 use vrcr_watchdog::relay::RelayPortManager;
 use vrcr_watchdog::relay::ports::{PORT_FILE, SCHEME_FILE};
@@ -34,21 +34,37 @@ fn build_info_defaults_match_the_csharp_build_constants() {
     assert_eq!(b.version, "2026.10.14.0");
     assert_eq!(b.sha, "<unknown>");
     assert_eq!(b.build_time, "<unknown>");
+    assert_eq!(b.channel, Channel::Dev);
     assert!(b.dev);
+    assert_eq!(b.channel_label(), Some("dev"));
     assert_eq!(b.runtime, "rustc 1.99.0");
 
     let release = BuildInfo::new(
         "1.2.3.4",
         Some("abc1234"),
         Some("2026-10-14T08:00:00Z"),
-        Some("0"),
+        Some("release"),
         "r",
     );
     assert_eq!(release.sha, "abc1234");
     assert_eq!(release.build_time, "2026-10-14T08:00:00Z");
+    assert_eq!(release.channel, Channel::Release);
     assert!(!release.dev);
-    assert!(!BuildInfo::new("v", None, None, Some("False"), "r").dev);
-    assert!(BuildInfo::new("v", None, None, Some("1"), "r").dev);
+    assert_eq!(release.channel_label(), None);
+}
+
+#[test]
+fn nightly_and_unknown_channels_turn_debug_on() {
+    let nightly = BuildInfo::new("v", None, None, Some(" Nightly "), "r");
+    assert_eq!(nightly.channel, Channel::Nightly);
+    assert!(nightly.dev);
+    assert_eq!(nightly.channel_label(), Some("nightly"));
+    for raw in [None, Some(""), Some("false"), Some("beta")] {
+        let b = BuildInfo::new("v", None, None, raw, "r");
+        assert_eq!(b.channel, Channel::Dev, "{raw:?}");
+        assert!(b.dev, "{raw:?}");
+    }
+    assert!(!BuildInfo::new("v", None, None, Some("RELEASE"), "r").dev);
 }
 
 #[test]

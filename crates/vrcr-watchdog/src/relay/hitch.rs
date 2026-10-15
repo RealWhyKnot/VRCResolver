@@ -7,6 +7,8 @@ use vrcr_shared::console::{Component, Ux};
 use vrcr_shared::log::Log;
 use vrcr_shared::logutil::sanitize_for_console;
 
+use crate::stats::RelayKind;
+
 const SEGMENT_SLOW_HEADER_MS: i64 = 1500;
 const SEGMENT_SLOW_TOTAL_MS: i64 = 2500;
 const MANIFEST_SLOW_HEADER_MS: i64 = 2000;
@@ -108,13 +110,9 @@ impl HitchDetector {
         if !sample.method.eq_ignore_ascii_case("GET") {
             return None;
         }
-        let parsed = Url::parse(&sample.target_url).ok();
-        let path = parsed.as_ref().map_or(sample.target_url.as_str(), |u| u.path());
-        let lazy = parsed.as_ref().and_then(|u| parse_lazy_path(u.path()));
-        let is_segment =
-            lazy.is_some() || ends_with_segment_ext(path) || ends_with_segment_ext(&sample.local_path);
-        let is_manifest =
-            !is_segment && (ends_with_manifest_ext(path) || ends_with_manifest_ext(&sample.local_path));
+        let (kind, lazy) = classify(sample);
+        let is_segment = kind == RelayKind::Segment;
+        let is_manifest = kind == RelayKind::Manifest;
 
         let mut reasons: Vec<String> = Vec::new();
         let mut previous_segment = -1;
@@ -212,6 +210,24 @@ impl HitchDetector {
         state.last_seen = Some(now);
         (previous, gap)
     }
+}
+
+pub fn relay_kind(sample: &TimingSample) -> RelayKind {
+    classify(sample).0
+}
+
+fn classify(sample: &TimingSample) -> (RelayKind, Option<(String, i64)>) {
+    let parsed = Url::parse(&sample.target_url).ok();
+    let path = parsed.as_ref().map_or(sample.target_url.as_str(), |u| u.path());
+    let lazy = parsed.as_ref().and_then(|u| parse_lazy_path(u.path()));
+    let kind = if lazy.is_some() || ends_with_segment_ext(path) || ends_with_segment_ext(&sample.local_path) {
+        RelayKind::Segment
+    } else if ends_with_manifest_ext(path) || ends_with_manifest_ext(&sample.local_path) {
+        RelayKind::Manifest
+    } else {
+        RelayKind::Other
+    };
+    (kind, lazy)
 }
 
 pub fn parse_lazy_segment(url: &str) -> Option<(String, i64)> {

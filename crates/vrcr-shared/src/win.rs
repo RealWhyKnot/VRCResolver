@@ -1088,3 +1088,123 @@ pub use version::os_description;
 pub fn os_description() -> String {
     std::env::consts::OS.to_owned()
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProcessUsage {
+    pub cpu_100ns: u64,
+    pub working_set: u64,
+    pub peak_working_set: u64,
+    pub private_bytes: u64,
+    pub handles: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MemoryStatus {
+    pub total: u64,
+    pub available: u64,
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod usage {
+    use windows_sys::Win32::Foundation::{ERROR_SUCCESS, FILETIME};
+    use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS_EX};
+    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount, GetProcessTimes};
+
+    use super::{MemoryStatus, ProcessUsage};
+
+    fn ticks(t: &FILETIME) -> u64 {
+        (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime)
+    }
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    pub fn process_usage() -> Option<ProcessUsage> {
+        let process = unsafe { GetCurrentProcess() };
+        let zero = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+        if unsafe { GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user) } == 0 {
+            return None;
+        }
+        let mut mem = unsafe { std::mem::zeroed::<PROCESS_MEMORY_COUNTERS_EX>() };
+        let size = u32::try_from(std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>()).unwrap_or(0);
+        mem.cb = size;
+        let mem_ok = unsafe { K32GetProcessMemoryInfo(process, (&raw mut mem).cast(), size) } != 0;
+        let mut handles = 0u32;
+        let handles_ok = unsafe { GetProcessHandleCount(process, &mut handles) } != 0;
+        let bytes = |v: usize| u64::try_from(v).unwrap_or(u64::MAX);
+        Some(ProcessUsage {
+            cpu_100ns: ticks(&kernel).saturating_add(ticks(&user)),
+            working_set: if mem_ok { bytes(mem.WorkingSetSize) } else { 0 },
+            peak_working_set: if mem_ok { bytes(mem.PeakWorkingSetSize) } else { 0 },
+            private_bytes: if mem_ok { bytes(mem.PrivateUsage) } else { 0 },
+            handles: if handles_ok { handles } else { 0 },
+        })
+    }
+
+    pub fn memory_status() -> Option<MemoryStatus> {
+        let mut status = unsafe { std::mem::zeroed::<MEMORYSTATUSEX>() };
+        status.dwLength = u32::try_from(std::mem::size_of::<MEMORYSTATUSEX>()).unwrap_or(0);
+        if unsafe { GlobalMemoryStatusEx(&mut status) } == 0 {
+            return None;
+        }
+        Some(MemoryStatus {
+            total: status.ullTotalPhys,
+            available: status.ullAvailPhys,
+        })
+    }
+
+    pub fn cpu_name() -> Option<String> {
+        let key = wide(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+        let value = wide("ProcessorNameString");
+        let mut buf = [0u16; 256];
+        let mut len = u32::try_from(std::mem::size_of_val(&buf)).unwrap_or(0);
+        let rc = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                key.as_ptr(),
+                value.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buf.as_mut_ptr().cast(),
+                &mut len,
+            )
+        };
+        if rc != ERROR_SUCCESS {
+            return None;
+        }
+        let chars = (len as usize / 2).min(buf.len());
+        let name = String::from_utf16_lossy(&buf[..chars]);
+        let name = name
+            .trim_end_matches('\0')
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        (!name.is_empty()).then_some(name)
+    }
+}
+
+#[cfg(windows)]
+pub use usage::{cpu_name, memory_status, process_usage};
+
+#[cfg(not(windows))]
+pub fn process_usage() -> Option<ProcessUsage> {
+    None
+}
+
+#[cfg(not(windows))]
+pub fn memory_status() -> Option<MemoryStatus> {
+    None
+}
+
+#[cfg(not(windows))]
+pub fn cpu_name() -> Option<String> {
+    None
+}

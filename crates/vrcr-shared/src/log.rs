@@ -9,6 +9,7 @@ use crate::logutil::UtcStamp;
 
 pub const MAX_BYTES: u64 = 10 * 1024 * 1024;
 pub const RETENTION: Duration = Duration::from_secs(7 * 24 * 3600);
+pub const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Default)]
 pub struct Log {
@@ -142,21 +143,35 @@ fn is_component_log(name: &str, component: &str) -> bool {
 }
 
 pub fn prune(dir: &Path, component: &str, now: SystemTime) {
+    prune_within(dir, component, now, MAX_TOTAL_BYTES - MAX_BYTES);
+}
+
+pub fn prune_within(dir: &Path, component: &str, now: SystemTime, budget: u64) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
     let cutoff = now.checked_sub(RETENTION).unwrap_or(UNIX_EPOCH);
+    let mut kept: Vec<(PathBuf, u64)> = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name();
         if !is_component_log(&name.to_string_lossy(), component) {
             continue;
         }
-        let old = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .is_ok_and(|t| t < cutoff);
-        if old {
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if meta.modified().is_ok_and(|t| t < cutoff) {
             let _ = fs::remove_file(entry.path());
+        } else {
+            kept.push((entry.path(), meta.len()));
+        }
+    }
+    kept.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut total = 0u64;
+    for (path, len) in kept {
+        total = total.saturating_add(len);
+        if total > budget {
+            let _ = fs::remove_file(path);
         }
     }
 }

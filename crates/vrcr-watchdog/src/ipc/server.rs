@@ -440,6 +440,7 @@ impl<M: Mesh> Ipc<M> {
             (ResolveStatus::Unexpected, Some(outcome.clone()))
         };
         let elapsed = started.elapsed();
+        self.stats.perf.record_resolve(status, via_cache, elapsed);
         self.ux.resolve_outcome(&Outcome {
             host: &host,
             player: &player_label,
