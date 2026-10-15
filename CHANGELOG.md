@@ -25,6 +25,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **rust:** Start the watchdog crate with settings and the setting registry (cd5a571)
 - **rust:** Port the logger, console, tools restore, crash log and WinINet limit (cc2eba5)
 - **rust:** Port the shared library and the yt-dlp shim to Rust (75cf477)
+- **relay:** Treat /api/stream links as first-party playback and drop the Popcorn and Archive sections from the legal docs (ddc252e)
 
 ### Changed
 - **terminal:** Block on key input and skip unchanged idle frames; rescan the VRChat log dir every 5 s (960d706)
