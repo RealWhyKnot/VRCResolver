@@ -12,7 +12,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 ## Unreleased
 
 ### Added
-- **rust:** Port the uninstaller and only elevate relay TLS cleanup when something is left (072753c)
+- **rust:** Port the uninstaller and only ask for admin rights to clean up relay TLS when something is left (072753c)
 - **rust:** Port the updater with shared release, hosts and stop helpers (d61fe09)
 - **rust:** Add the vrcresolver watchdog binary wiring startup, relay fallback and shutdown (05dd89b)
 - **rust:** Port the interactive terminal, command registry and console input (c03a85b)
