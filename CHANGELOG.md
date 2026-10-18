@@ -11,6 +11,12 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
+_No notable changes since the last release._
+
+---
+
+## [v2026.10.17.0](https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.10.17.0) - 2026-10-17
+
 ### Added
 - **rust:** Port the uninstaller and only ask for admin rights to clean up relay TLS when something is left (072753c)
 - **rust:** Port the updater with shared release, hosts and stop helpers (d61fe09)
