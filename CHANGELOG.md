@@ -11,7 +11,8 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
-_No notable changes since the last release._
+### Changed
+- **deps:** Bump tokio-tungstenite from 0.29.0 to 0.30.0 (#78) (794caec)
 
 ---
 
