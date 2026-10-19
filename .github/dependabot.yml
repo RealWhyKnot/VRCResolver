@@ -1,6 +1,6 @@
 version: 2
 updates:
-  - package-ecosystem: "nuget"
+  - package-ecosystem: "cargo"
     directory: "/"
     commit-message:
       prefix: "chore"
