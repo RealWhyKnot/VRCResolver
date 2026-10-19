@@ -13,6 +13,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ### Changed
 - **deps:** Bump tokio-tungstenite from 0.29.0 to 0.30.0 (#78) (794caec)
+- **deps:** Bump rustls from 0.23.45 to 0.23.46 (#79) (f70544e)
 
 ---
 
