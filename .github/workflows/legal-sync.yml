@@ -1,0 +1,104 @@
+name: Legal sync
+
+on:
+  repository_dispatch:
+    types: [legal-sync]
+  schedule:
+    - cron: '20 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: changelog-append
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: sync terms and privacy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Fetch from vrcresolver.com
+        id: fetch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/legal"
+          changed=()
+          for pair in "terms.md:TERMS.md:# Terms of service" "privacy.md:PRIVACY.md:# Privacy policy"; do
+            IFS=: read -r remote local title <<< "$pair"
+            out="$RUNNER_TEMP/legal/$local"
+            curl -fsSL --retry 3 --retry-all-errors --max-time 30 \
+              -A "VRCResolver-legal-sync (+https://github.com/$GITHUB_REPOSITORY)" \
+              -o "$out" "https://vrcresolver.com/legal/$remote"
+            if [[ "$(head -n 1 "$out")" != "$title" ]] || ! grep -q '<a id="s1"></a>' "$out" || [[ $(wc -c < "$out") -lt 2000 ]]; then
+              echo "::error::$remote does not look like the legal page"
+              head -c 300 "$out"
+              exit 1
+            fi
+            if ! cmp -s "$out" "$local"; then
+              changed+=("$local")
+            fi
+          done
+          echo "changed=${changed[*]:-}" >> "$GITHUB_OUTPUT"
+          echo "Changed: ${changed[*]:-none}"
+
+      - name: Commit to main (verified)
+        if: ${{ steps.fetch.outputs.changed != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGED: ${{ steps.fetch.outputs.changed }}
+        run: |
+          set -euo pipefail
+          additions='[]'
+          for f in $CHANGED; do
+            additions=$(jq -c --arg path "$f" --arg contents "$(base64 -w 0 "$RUNNER_TEMP/legal/$f")" \
+              '. + [{path: $path, contents: $contents}]' <<< "$additions")
+          done
+
+          expected_oid=$(gh api "repos/$GITHUB_REPOSITORY/git/refs/heads/main" --jq '.object.sha')
+          headline="docs(legal): update ${CHANGED// / and } from vrcresolver.com [skip changelog]"
+
+          payload=$(jq -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg headline "$headline" \
+            --arg oid "$expected_oid" \
+            --argjson additions "$additions" \
+            '{
+              query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
+              variables: {
+                input: {
+                  branch: { repositoryNameWithOwner: $repo, branchName: "main" },
+                  message: { headline: $headline },
+                  fileChanges: { additions: $additions },
+                  expectedHeadOid: $oid
+                }
+              }
+            }')
+
+          response=$(printf '%s' "$payload" | gh api graphql --input -)
+          if echo "$response" | jq -e '.errors // empty' >/dev/null; then
+            echo "$response" | jq .
+            echo "::error::createCommitOnBranch returned GraphQL errors"
+            exit 1
+          fi
+
+          new_oid=$(echo "$response" | jq -r '.data.createCommitOnBranch.commit.oid')
+          if [[ -z "$new_oid" || "$new_oid" == "null" ]]; then
+            echo "::error::createCommitOnBranch did not return a commit oid"
+            exit 1
+          fi
+
+          verified=$(gh api "repos/$GITHUB_REPOSITORY/commits/$new_oid" --jq '.commit.verification.verified')
+          if [[ "$verified" != "true" ]]; then
+            echo "::error::Commit $new_oid is not verified (got: $verified)"
+            exit 1
+          fi
+          echo "Committed $new_oid: $headline"

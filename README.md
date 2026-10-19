@@ -1,10 +1,26 @@
-# VRCResolver
+<p align="center">
+  <img src=".github/assets/banner.png" alt="VRCResolver" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/RealWhyKnot/VRCResolver/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/RealWhyKnot/VRCResolver/ci.yml?branch=main&label=ci&style=flat-square&labelColor=0c2830"></a>
+  <a href="https://github.com/RealWhyKnot/VRCResolver/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/RealWhyKnot/VRCResolver?label=release&style=flat-square&labelColor=0c2830&color=33e0ff"></a>
+  <a href="https://vrcresolver.com"><img alt="vrcresolver.com status" src="https://img.shields.io/website?url=https%3A%2F%2Fvrcresolver.com&label=vrcresolver.com&up_message=online&down_message=offline&style=flat-square&labelColor=0c2830"></a>
+  <img alt="Windows 10 and 11, 64-bit" src="https://img.shields.io/badge/windows-10%20%7C%2011%20x64-33e0ff?style=flat-square&labelColor=0c2830">
+  <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-33e0ff?style=flat-square&labelColor=0c2830"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/RealWhyKnot/VRCResolver/releases/latest">Download</a> ·
+  <a href="https://vrcresolver.com">Website</a> ·
+  <a href="https://github.com/RealWhyKnot/VRCResolver/issues/new?template=bug_report.yml">Report a bug</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href=".github/SECURITY.md">Security</a>
+</p>
 
 VRChat plays videos through yt-dlp. Stock yt-dlp is slow, breaks whenever YouTube changes something, and returns URLs that AVPro blocks in public worlds. VRCResolver replaces VRChat's `Tools/yt-dlp.exe` with a patched build that resolves videos through vrcresolver.com and serves them from a local address AVPro trusts. If anything fails, it falls back to VRChat's original yt-dlp. Playback is never worse than stock.
 
 Formerly WKVRCProxy.
-
-[Report a bug](https://github.com/RealWhyKnot/VRCResolver/issues/new?template=bug_report.yml)
 
 ## What you get
 
@@ -42,6 +58,14 @@ vrcresolver.com         remote resolver
 ```
 
 The resolved stream comes back through the watchdog's local listener at `http://localhost.youtube.com:{port}/play/<session>/manifest.<ext>?target=...`. If any link in that chain breaks, the shim runs the backed-up `yt-dlp-og.exe` instead.
+
+## Building from source
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers setup, the build script and the checks a pull request has to pass.
+
+## Terms and privacy
+
+The app resolves the links you paste through vrcresolver.com, so the site's [terms of service](TERMS.md) and [privacy policy](PRIVACY.md) apply. The copies in this repo update automatically when the site's versions change.
 
 ## License
 
