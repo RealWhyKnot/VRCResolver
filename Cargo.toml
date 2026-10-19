@@ -37,7 +37,7 @@ tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["rt", "net", "time", "io-util", "process", "macros", "sync"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
-tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["handshake"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 tokio-util = { version = "0.7.20", features = ["rt"] }
 x509-parser = "0.18.1"
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
