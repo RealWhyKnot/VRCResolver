@@ -6,12 +6,13 @@ pub mod install;
 pub mod release;
 pub mod temp;
 
+pub use vrcr_shared::install_manifest::MANIFEST_REL;
+
 pub const WATCHDOG_EXE: &str = "vrcresolver.exe";
 pub const LEGACY_WATCHDOG_EXE: &str = "WKVRCProxy.exe";
 pub const WATCHDOG_PROCESSES: [&str; 2] = ["vrcresolver", "WKVRCProxy"];
 pub const UPDATER_EXE: &str = "vrcresolver.Updater.exe";
 pub const STAGED_UPDATER_EXE: &str = "vrcresolver.Updater.next.exe";
-pub const MANIFEST_REL: &str = "data/release-manifest.tsv";
 pub const ASSUME_YES_SUFFIX: &str = "UPDATE_REQUESTED";
 pub const PROMPT_TIMEOUT: Duration = Duration::from_secs(15);
 pub const FETCH_TIMEOUT: Duration = Duration::from_secs(30);

@@ -145,6 +145,19 @@ impl Host for RealHost {
             .map_err(|e| e.to_string())
     }
 
+    fn remove_file(&self, path: &Path) -> Result<bool, String> {
+        if !path.is_file() {
+            return Ok(false);
+        }
+        std::fs::remove_file(path)
+            .map(|()| true)
+            .map_err(|e| e.to_string())
+    }
+
+    fn remove_empty_dir(&self, dir: &Path) -> bool {
+        std::fs::remove_dir(dir).is_ok()
+    }
+
     fn temp_dir(&self) -> PathBuf {
         std::env::temp_dir()
     }
@@ -181,12 +194,11 @@ fn main() {
     let log = Log::install(&paths.logs_dir(), "uninstaller");
     let _crash = Crash::install(paths.crashes_dir(), "uninstaller", VERSION);
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("vrcresolver.Uninstaller.exe"));
-    let install_dir = exe.parent().map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let roots = state_roots(&paths);
     let host = RealHost {
         log,
         paths,
-        ops: SystemOps::new(exe),
+        ops: SystemOps::new(exe.clone()),
     };
-    std::process::exit(flow::run(&host, &install_dir, &roots));
+    std::process::exit(flow::run(&host, &exe, &roots));
 }

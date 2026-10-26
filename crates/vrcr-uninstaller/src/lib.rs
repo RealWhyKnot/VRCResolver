@@ -1,6 +1,8 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use vrcr_shared::install_manifest::{MANIFEST_REL, manifest_paths, normalize_rel};
 use vrcr_shared::legacy;
 use vrcr_shared::logutil::UtcStamp;
 use vrcr_shared::paths::AppPaths;
@@ -8,6 +10,15 @@ use vrcr_shared::paths::AppPaths;
 pub mod flow;
 
 pub const WATCHDOG_EXE: &str = "vrcresolver.exe";
+pub const SHIPPED_FILES: [&str; 7] = [
+    WATCHDOG_EXE,
+    "vrcresolver.Updater.exe",
+    "vrcresolver.Updater.next.exe",
+    "vrcresolver.Uninstaller.exe",
+    "data/wrapper_hashes.txt",
+    MANIFEST_REL,
+    "tools/yt-dlp.exe",
+];
 pub const WATCHDOG_EXES: [&str; 2] = [WATCHDOG_EXE, "WKVRCProxy.exe"];
 pub const WATCHDOG_PROCESSES: [&str; 2] = ["vrcresolver", "WKVRCProxy"];
 pub const HOSTS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -122,16 +133,44 @@ pub fn rmdir_log_name(stamp: &UtcStamp) -> String {
     )
 }
 
-pub fn self_delete_args(install_dir: &Path, log: &Path) -> Result<String, String> {
-    let dir = install_dir.to_string_lossy();
-    if dir.contains('"') {
-        return Err(format!("install dir contains a quote character: {dir}"));
+pub fn install_files(manifest: Option<&str>) -> Vec<PathBuf> {
+    let listed = manifest.map(manifest_paths).unwrap_or_default();
+    let mut files = BTreeMap::new();
+    for rel in SHIPPED_FILES
+        .iter()
+        .filter_map(|p| normalize_rel(p))
+        .chain(listed)
+    {
+        files.entry(comparable(&rel)).or_insert(rel);
     }
-    let log = log.to_string_lossy();
-    if log.contains('"') {
-        return Err(format!("temp dir contains a quote character: {log}"));
+    files.into_values().collect()
+}
+
+pub fn install_subdirs(files: &[PathBuf]) -> Vec<PathBuf> {
+    let mut dirs = BTreeSet::new();
+    for file in files {
+        for dir in file.ancestors().skip(1).filter(|d| !d.as_os_str().is_empty()) {
+            dirs.insert(dir.to_path_buf());
+        }
     }
+    let mut dirs: Vec<PathBuf> = dirs.into_iter().collect();
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+    dirs
+}
+
+fn cmd_safe(path: &Path, what: &str) -> Result<String, String> {
+    let text = path.to_string_lossy().into_owned();
+    if text.contains('"') || text.contains('%') {
+        return Err(format!("{what} contains a quote or percent character: {text}"));
+    }
+    Ok(text)
+}
+
+pub fn self_delete_args(install_dir: &Path, exe: &Path, log: &Path) -> Result<String, String> {
+    let dir = cmd_safe(install_dir, "install dir")?;
+    let exe = cmd_safe(exe, "uninstaller path")?;
+    let log = cmd_safe(log, "temp dir")?;
     Ok(format!(
-        "/c (ping 127.0.0.1 -n 4 > nul) & (rmdir /s /q \"{dir}\") > \"{log}\" 2>&1"
+        "/c (ping 127.0.0.1 -n 4 > nul) & (del /f /q \"{exe}\" & rmdir \"{dir}\") > \"{log}\" 2>&1"
     ))
 }

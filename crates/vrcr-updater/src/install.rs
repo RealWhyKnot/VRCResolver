@@ -6,22 +6,13 @@ use std::path::{Component, Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
+use vrcr_shared::install_manifest::manifest_paths;
+pub use vrcr_shared::install_manifest::normalize_rel;
+
 use crate::{LEGACY_WATCHDOG_EXE, MANIFEST_REL, STAGED_UPDATER_EXE, UPDATER_EXE, WATCHDOG_EXE};
 
 const MOVE_RETRIES: u32 = 3;
 const MOVE_RETRY_DELAY: Duration = Duration::from_millis(200);
-
-pub fn normalize_rel(path: &str) -> Option<PathBuf> {
-    let cleaned = path.trim().replace('\\', "/");
-    if cleaned.is_empty() || cleaned.starts_with('/') || cleaned.contains(':') {
-        return None;
-    }
-    let parts: Vec<&str> = cleaned.split('/').filter(|p| !p.is_empty()).collect();
-    if parts.is_empty() || parts.iter().any(|p| *p == "." || *p == "..") {
-        return None;
-    }
-    Some(parts.iter().collect())
-}
 
 pub fn safe_install_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let rel = normalize_rel(relative).ok_or_else(|| format!("Unsafe release manifest path: {relative}"))?;
@@ -43,17 +34,8 @@ pub fn read_manifest_paths(root: &Path) -> BTreeMap<String, String> {
     let Ok(text) = fs::read_to_string(manifest) else {
         return paths;
     };
-    for line in text.lines() {
-        if line.trim().is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let parts: Vec<&str> = line.splitn(3, '\t').collect();
-        if parts.len() != 3 {
-            continue;
-        }
-        if let Some(rel) = normalize_rel(parts[2]) {
-            paths.insert(key(&rel), rel.to_string_lossy().replace('\\', "/"));
-        }
+    for rel in manifest_paths(&text) {
+        paths.insert(key(&rel), rel.to_string_lossy().replace('\\', "/"));
     }
     paths
 }

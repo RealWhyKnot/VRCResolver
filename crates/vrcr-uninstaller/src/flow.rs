@@ -1,12 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use vrcr_shared::install_manifest::MANIFEST_REL;
 use vrcr_shared::tools::RestoreOutcome;
 use vrcr_shared::win::Elevated;
 use vrcr_shared::{hosts, relay_tls};
 
 use crate::{
-    CloseReport, HOSTS_TIMEOUT, TLS_TIMEOUT, WATCHDOG_EXE, close_watchdogs, rmdir_log_name, self_delete_args,
+    CloseReport, HOSTS_TIMEOUT, TLS_TIMEOUT, WATCHDOG_EXE, close_watchdogs, comparable, install_files,
+    install_subdirs, rmdir_log_name, self_delete_args,
 };
 
 pub const EXIT_OK: i32 = 0;
@@ -29,6 +31,8 @@ pub trait Host {
     fn restore_wininet(&self) -> Result<(), String>;
     fn close_log(&self);
     fn remove_dir(&self, dir: &Path) -> Result<bool, String>;
+    fn remove_file(&self, path: &Path) -> Result<bool, String>;
+    fn remove_empty_dir(&self, dir: &Path) -> bool;
     fn temp_dir(&self) -> PathBuf;
     fn utc_stamp(&self) -> vrcr_shared::logutil::UtcStamp;
     fn spawn_hidden_cmd(&self, args: &str, cwd: &Path) -> Result<(), String>;
@@ -172,10 +176,49 @@ pub fn wipe_state(host: &dyn Host, roots: &[PathBuf]) -> Result<(), String> {
     Ok(())
 }
 
-pub fn schedule_self_delete(host: &dyn Host, install_dir: &Path) -> Result<(), String> {
+pub fn remove_install_files(host: &dyn Host, install_dir: &Path, exe: &Path) -> Result<(), String> {
+    let manifest = std::fs::read_to_string(install_dir.join(MANIFEST_REL)).ok();
+    let files = install_files(manifest.as_deref());
+    let running = comparable(exe);
+    let mut removed = 0;
+    let mut failed = 0;
+    for rel in &files {
+        let path = install_dir.join(rel);
+        if comparable(&path) == running {
+            continue;
+        }
+        match host.remove_file(&path) {
+            Ok(true) => removed += 1,
+            Ok(false) => {}
+            Err(e) => {
+                failed += 1;
+                host.err(&format!("[uninstall] could not remove {}: {e}", path.display()));
+            }
+        }
+    }
+    for dir in install_subdirs(&files) {
+        host.remove_empty_dir(&install_dir.join(dir));
+    }
+    host.say(&format!("[uninstall] remove-files removed={removed}"));
+    if failed > 0 {
+        return Err(format!("{failed} file(s) could not be removed"));
+    }
+    Ok(())
+}
+
+fn other_files_left(install_dir: &Path, exe: &Path) -> bool {
+    let running = comparable(exe);
+    std::fs::read_dir(install_dir).is_ok_and(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .any(|e| comparable(&e.path()) != running)
+    })
+}
+
+pub fn schedule_self_delete(host: &dyn Host, install_dir: &Path, exe: &Path) -> Result<(), String> {
     let temp = host.temp_dir();
     let log = temp.join(rmdir_log_name(&host.utc_stamp()));
-    let args = self_delete_args(install_dir, &log)?;
+    let args = self_delete_args(install_dir, exe, &log)?;
     host.spawn_hidden_cmd(&args, &temp)?;
     host.say(&format!(
         "[uninstall] schedule-self-delete cmd-log={}",
@@ -184,7 +227,8 @@ pub fn schedule_self_delete(host: &dyn Host, install_dir: &Path) -> Result<(), S
     Ok(())
 }
 
-pub fn run(host: &dyn Host, install_dir: &Path, roots: &[PathBuf]) -> i32 {
+pub fn run(host: &dyn Host, exe: &Path, roots: &[PathBuf]) -> i32 {
+    let install_dir = exe.parent().unwrap_or_else(|| Path::new("."));
     let watchdog = install_dir.join(WATCHDOG_EXE);
     host.say(&format!("[uninstall] start installDir={}", install_dir.display()));
 
@@ -202,11 +246,20 @@ pub fn run(host: &dyn Host, install_dir: &Path, roots: &[PathBuf]) -> i32 {
     errors += run_step(host, "remove-relay-tls", || remove_relay_tls(host, &watchdog));
     errors += run_step(host, "restore-wininet-limit", || host.restore_wininet());
     errors += run_step(host, "wipe-state", || wipe_state(host, roots));
+    errors += run_step(host, "remove-files", || {
+        remove_install_files(host, install_dir, exe)
+    });
     errors += run_step(host, "schedule-self-delete", || {
-        schedule_self_delete(host, install_dir)
+        schedule_self_delete(host, install_dir, exe)
     });
 
-    if errors == 0 {
+    if errors == 0 && other_files_left(install_dir, exe) {
+        host.say(&format!(
+            "VRCResolver uninstalled. Files it didn't install were left in {}.",
+            install_dir.display()
+        ));
+        EXIT_OK
+    } else if errors == 0 {
         host.say("VRCResolver uninstalled. The install folder will disappear in a moment.");
         EXIT_OK
     } else {

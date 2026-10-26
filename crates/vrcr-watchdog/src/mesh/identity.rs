@@ -18,12 +18,16 @@ pub fn parse_simple_guid(text: &str) -> Option<String> {
 }
 
 pub fn load_or_create(path: &Path) -> String {
+    load_or_create_with(path, &mut std::thread::sleep)
+}
+
+pub fn load_or_create_with(path: &Path, wait: &mut dyn FnMut(Duration)) -> String {
     for attempt in 0..=READ_RETRIES {
         match read_existing(path) {
             Ok(Some(id)) => return id,
             Ok(None) => break,
             Err(e) if e.kind() == io::ErrorKind::NotFound => break,
-            Err(_) if attempt < READ_RETRIES => std::thread::sleep(READ_RETRY_DELAY),
+            Err(_) if attempt < READ_RETRIES => wait(READ_RETRY_DELAY),
             Err(_) => return fresh_id(),
         }
     }

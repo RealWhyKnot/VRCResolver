@@ -5,6 +5,7 @@ pub mod crash;
 pub mod fallback_binary;
 pub mod first_party;
 pub mod hosts;
+pub mod install_manifest;
 pub mod legacy;
 pub mod log;
 pub mod logutil;

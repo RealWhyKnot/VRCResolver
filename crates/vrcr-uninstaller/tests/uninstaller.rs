@@ -11,8 +11,8 @@ use vrcr_shared::tools::RestoreOutcome;
 use vrcr_shared::win::Elevated;
 use vrcr_uninstaller::flow::{self, EXIT_ERRORS, EXIT_OK, Host};
 use vrcr_uninstaller::{
-    CloseReport, WatchdogMatch, close_watchdogs, match_watchdog, rmdir_log_name, self_delete_args,
-    state_roots,
+    CloseReport, SHIPPED_FILES, WatchdogMatch, close_watchdogs, install_files, install_subdirs,
+    match_watchdog, rmdir_log_name, self_delete_args, state_roots,
 };
 
 fn tmp() -> tempfile::TempDir {
@@ -130,20 +130,48 @@ fn stamp() -> UtcStamp {
 }
 
 #[test]
-fn self_delete_command_matches_the_csharp_shape_and_refuses_quotes() {
+fn self_delete_only_removes_the_uninstaller_and_an_empty_folder() {
     assert_eq!(
         rmdir_log_name(&stamp()),
         "vrcresolver-uninstall-rmdir-20261004070509.log"
     );
-    let args = self_delete_args(Path::new(r"C:\My Apps\vrcresolver"), Path::new(r"C:\Temp\x.log"));
+    let dir = Path::new(r"C:\My Apps\vrcresolver");
+    let exe = dir.join("vrcresolver.Uninstaller.exe");
+    let args = self_delete_args(dir, &exe, Path::new(r"C:\Temp\x.log"));
     assert_eq!(
         args.as_deref(),
         Ok(
-            r#"/c (ping 127.0.0.1 -n 4 > nul) & (rmdir /s /q "C:\My Apps\vrcresolver") > "C:\Temp\x.log" 2>&1"#
+            r#"/c (ping 127.0.0.1 -n 4 > nul) & (del /f /q "C:\My Apps\vrcresolver\vrcresolver.Uninstaller.exe" & rmdir "C:\My Apps\vrcresolver") > "C:\Temp\x.log" 2>&1"#
         )
     );
-    assert!(self_delete_args(Path::new("C:\\a\"b"), Path::new("x")).is_err());
-    assert!(self_delete_args(Path::new("C:\\a"), Path::new("x\"y")).is_err());
+    assert!(!args.unwrap_or_default().contains("/s"));
+    let exe = Path::new(r"C:\a\u.exe");
+    assert!(self_delete_args(Path::new("C:\\a\"b"), exe, Path::new("x")).is_err());
+    assert!(self_delete_args(Path::new(r"C:\a"), exe, Path::new("x\"y")).is_err());
+    assert!(self_delete_args(Path::new(r"C:\a"), Path::new("C:\\a\\u\".exe"), Path::new("x")).is_err());
+    assert!(self_delete_args(Path::new(r"C:\%USERPROFILE%"), exe, Path::new("x")).is_err());
+}
+
+#[test]
+fn install_files_merge_the_shipped_list_with_the_manifest() {
+    let rel = |p: &str| p.split('/').collect::<PathBuf>();
+    let bare = install_files(None);
+    assert_eq!(bare.len(), SHIPPED_FILES.len());
+    for name in SHIPPED_FILES {
+        assert!(bare.contains(&rel(name)), "{name}");
+    }
+    let manifest = "aa\t1\tVRCResolver.exe\naa\t2\tdata/extra/new.bin\naa\t3\t../outside.txt\naa\t4\tC:\\evil.txt\nbroken\n";
+    let files = install_files(Some(manifest));
+    assert_eq!(files.len(), SHIPPED_FILES.len() + 1);
+    assert!(files.contains(&rel("data/extra/new.bin")));
+    assert!(!files.iter().any(|f| {
+        let text = f.to_string_lossy();
+        text.contains("outside") || text.contains("evil")
+    }));
+    assert_eq!(
+        install_subdirs(&files),
+        vec![rel("data/extra"), rel("data"), rel("tools")]
+    );
 }
 
 struct Fake {
@@ -279,6 +307,20 @@ impl Host for Fake {
         Ok(self.existing.borrow_mut().remove(dir))
     }
 
+    fn remove_file(&self, path: &Path) -> Result<bool, String> {
+        if self.locked.contains(path) {
+            return Err("access denied".to_owned());
+        }
+        if !path.is_file() {
+            return Ok(false);
+        }
+        fs::remove_file(path).map(|()| true).map_err(|e| e.to_string())
+    }
+
+    fn remove_empty_dir(&self, dir: &Path) -> bool {
+        fs::remove_dir(dir).is_ok()
+    }
+
     fn temp_dir(&self) -> PathBuf {
         PathBuf::from(r"C:\Temp")
     }
@@ -300,16 +342,56 @@ impl Host for Fake {
 struct Install {
     _dir: tempfile::TempDir,
     path: PathBuf,
+    exe: PathBuf,
+}
+
+fn put(path: &Path, text: &str) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap_or_else(|e| panic!("{e}"));
+    }
+    fs::write(path, text).unwrap_or_else(|e| panic!("{e}"));
 }
 
 fn install(with_watchdog: bool) -> Install {
     let dir = tmp();
     let path = dir.path().join("vrcresolver");
-    fs::create_dir_all(&path).unwrap_or_else(|e| panic!("{e}"));
+    let exe = path.join("vrcresolver.Uninstaller.exe");
+    put(&exe, "uninstaller");
     if with_watchdog {
-        fs::write(path.join("vrcresolver.exe"), "watchdog").unwrap_or_else(|e| panic!("{e}"));
+        put(&path.join("vrcresolver.exe"), "watchdog");
     }
-    Install { _dir: dir, path }
+    Install { _dir: dir, path, exe }
+}
+
+fn full_install(extra_manifest_rows: &[&str]) -> Install {
+    let inst = install(true);
+    let mut rows = Vec::new();
+    for name in SHIPPED_FILES.iter().chain(extra_manifest_rows) {
+        if *name != "data/release-manifest.tsv" {
+            put(&inst.path.join(name), name);
+            rows.push(format!("AAAA\t1\t{name}"));
+        }
+    }
+    put(&inst.path.join("data/release-manifest.tsv"), &rows.join("\n"));
+    inst
+}
+
+fn self_delete_cmd(inst: &Install) -> String {
+    format!(
+        r#"cmd /c (ping 127.0.0.1 -n 4 > nul) & (del /f /q "{}" & rmdir "{}") > "C:\Temp\vrcresolver-uninstall-rmdir-20261004070509.log" 2>&1 in C:\Temp"#,
+        inst.exe.display(),
+        inst.path.display()
+    )
+}
+
+fn entries(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{e}"))
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
 }
 
 fn roots() -> Vec<PathBuf> {
@@ -329,11 +411,8 @@ fn clean_uninstall_runs_every_step_in_order() {
     f.hosts_entry = true;
     f.existing = RefCell::new(roots()[..2].iter().cloned().collect());
 
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_OK, "{}", f.errs());
-    let cmd = format!(
-        r#"cmd /c (ping 127.0.0.1 -n 4 > nul) & (rmdir /s /q "{}") > "C:\Temp\vrcresolver-uninstall-rmdir-20261004070509.log" 2>&1 in C:\Temp"#,
-        inst.path.display()
-    );
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK, "{}", f.errs());
+    let cmd = self_delete_cmd(&inst);
     assert_eq!(
         f.events(),
         vec![
@@ -358,6 +437,7 @@ fn clean_uninstall_runs_every_step_in_order() {
         "remove-relay-tls",
         "restore-wininet-limit",
         "wipe-state",
+        "remove-files",
         "schedule-self-delete",
     ] {
         assert!(out.contains(&format!("[uninstall] {step} start\n")), "{step}");
@@ -365,6 +445,7 @@ fn clean_uninstall_runs_every_step_in_order() {
     }
     assert!(out.contains("[uninstall] restore-yt-dlp Restored: moved yt-dlp-og.exe back"));
     assert!(out.contains("[uninstall] wipe-state directories_wiped=2"));
+    assert!(out.contains("[uninstall] remove-files removed=1"));
     assert!(out.starts_with(&format!("[uninstall] start installDir={}", inst.path.display())));
     assert_eq!(
         f.out.borrow().last().map(String::as_str),
@@ -379,7 +460,7 @@ fn unclosable_watchdog_stops_before_touching_anything() {
     f.pids = vec![11];
     f.images = HashMap::from([(11, Some(inst.path.join("vrcresolver.exe")))]);
     f.stop_ok = false;
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_ERRORS);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_ERRORS);
     assert_eq!(f.events(), vec!["stop 11".to_owned()]);
     assert!(
         f.errs()
@@ -399,7 +480,7 @@ fn other_installs_are_left_running() {
     let mut f = Fake::new();
     f.pids = vec![5];
     f.images = HashMap::from([(5, Some(PathBuf::from(r"Z:\elsewhere\vrcresolver.exe")))]);
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_OK);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK);
     assert!(!f.events().iter().any(|e| e.starts_with("stop") || e == "settle"));
     assert!(f.out().contains("skipped_other_installs=1"));
 }
@@ -409,7 +490,7 @@ fn nothing_to_elevate_means_no_uac_prompt() {
     let inst = install(true);
     let mut f = Fake::new();
     f.check = Some(relay_tls::CHECK_CLEAN);
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_OK);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK);
     assert!(
         !f.events().iter().any(|e| e.starts_with("elevate")),
         "{:?}",
@@ -427,7 +508,7 @@ fn a_failed_tls_check_still_elevates() {
     let inst = install(true);
     let mut f = Fake::new();
     f.check = None;
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_OK);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK);
     assert!(
         f.events()
             .contains(&"elevate vrcresolver.exe --local-relay-tls-remove 30".to_owned())
@@ -439,7 +520,7 @@ fn missing_watchdog_exe_skips_both_elevated_steps() {
     let inst = install(false);
     let mut f = Fake::new();
     f.hosts_entry = true;
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_OK);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK);
     assert!(
         !f.events()
             .iter()
@@ -458,7 +539,7 @@ fn declined_uac_is_not_an_error_but_a_failed_child_is() {
     let mut f = Fake::new();
     f.hosts_entry = true;
     f.elevation = Elevated::Declined;
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_OK);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK);
     let out = f.out();
     assert!(out.contains("UAC declined \u{2014} hosts entry left in place. Remove it manually if desired."));
     assert!(
@@ -467,18 +548,20 @@ fn declined_uac_is_not_an_error_but_a_failed_child_is() {
         )
     );
 
+    let inst = install(true);
     let mut f = Fake::new();
     f.elevation = Elevated::TimedOut;
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_OK);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK);
     assert!(
         f.out()
             .contains("[uninstall] remove-relay-tls elevation child still running after 30s")
     );
 
+    let inst = install(true);
     let mut f = Fake::new();
     f.hosts_entry = true;
     f.elevation = Elevated::Exited(1);
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_ERRORS);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_ERRORS);
     assert!(
         f.errs()
             .contains("[uninstall] remove-hosts ERROR elevated remove-hosts exited with code 1")
@@ -498,7 +581,7 @@ fn restore_outcomes_are_reported_like_the_csharp_uninstaller() {
     let inst = install(false);
     let mut f = Fake::new();
     f.restore = (RestoreOutcome::Failed, "access denied".to_owned());
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_ERRORS);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_ERRORS);
     assert!(f.errs().contains(
         "[uninstall] WARNING: yt-dlp.exe was not restored (access denied) -- check Tools/yt-dlp.exe by hand"
     ));
@@ -509,7 +592,7 @@ fn restore_outcomes_are_reported_like_the_csharp_uninstaller() {
 
     let mut f = Fake::new();
     f.restore = (RestoreOutcome::RemovedOrphanWrapper, String::new());
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_OK);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK);
     assert!(
         f.out()
             .contains("removed our Tools/yt-dlp.exe so VRChat redownloads its yt-dlp on next session.")
@@ -517,7 +600,7 @@ fn restore_outcomes_are_reported_like_the_csharp_uninstaller() {
 
     let mut f = Fake::new();
     f.tools = None;
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_OK);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK);
     assert!(
         f.out()
             .contains("[uninstall] restore-yt-dlp skipped: VRChat Tools dir not found")
@@ -533,7 +616,7 @@ fn wipe_and_wininet_failures_are_counted_but_do_not_stop_later_steps() {
     f.locked = HashSet::from([PathBuf::from(r"C:\pd")]);
     f.existing = RefCell::new(roots().into_iter().collect());
     f.spawn_ok = false;
-    assert_eq!(flow::run(&f, &inst.path, &roots()), EXIT_ERRORS);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_ERRORS);
     let errs = f.errs();
     assert!(errs.contains("[uninstall] restore-wininet-limit ERROR registry denied"));
     assert!(errs.contains(r"[uninstall] could not wipe C:\pd: access denied"));
@@ -544,4 +627,98 @@ fn wipe_and_wininet_failures_are_counted_but_do_not_stop_later_steps() {
         f.out.borrow().last().map(String::as_str),
         Some("Uninstall finished with 2 non-fatal error(s) \u{2014} see messages above.")
     );
+}
+
+#[test]
+fn extracted_into_a_shared_folder_only_our_files_go() {
+    let inst = full_install(&["data/extra.bin"]);
+    let user_files = [
+        "holiday.jpg",
+        "Projects/report.docx",
+        "data/notes.txt",
+        "tools/other.exe",
+    ];
+    for name in user_files {
+        put(&inst.path.join(name), "mine");
+    }
+    let f = Fake::new();
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK, "{}", f.errs());
+
+    for name in user_files {
+        assert!(inst.path.join(name).is_file(), "{name} was deleted");
+    }
+    for name in SHIPPED_FILES.iter().chain(&["data/extra.bin"]) {
+        if *name != "vrcresolver.Uninstaller.exe" {
+            assert!(!inst.path.join(name).exists(), "{name} was left behind");
+        }
+    }
+    assert_eq!(
+        entries(&inst.path),
+        vec![
+            "Projects",
+            "data",
+            "holiday.jpg",
+            "tools",
+            "vrcresolver.Uninstaller.exe"
+        ]
+    );
+    assert_eq!(f.events().last(), Some(&self_delete_cmd(&inst)));
+    assert!(!f.events().iter().any(|e| e.contains("rmdir /s")));
+    assert!(f.out().contains("[uninstall] remove-files removed=7"));
+    assert_eq!(
+        f.out.borrow().last().cloned(),
+        Some(format!(
+            "VRCResolver uninstalled. Files it didn't install were left in {}.",
+            inst.path.display()
+        ))
+    );
+}
+
+#[test]
+fn a_folder_with_only_our_files_is_emptied_for_the_self_delete() {
+    let inst = full_install(&["data/extra/deep.bin"]);
+    let f = Fake::new();
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK, "{}", f.errs());
+    assert_eq!(entries(&inst.path), vec!["vrcresolver.Uninstaller.exe"]);
+    assert_eq!(f.events().last(), Some(&self_delete_cmd(&inst)));
+    assert_eq!(
+        f.out.borrow().last().map(String::as_str),
+        Some("VRCResolver uninstalled. The install folder will disappear in a moment.")
+    );
+}
+
+#[test]
+fn manifest_paths_outside_the_install_folder_are_never_touched() {
+    let inst = full_install(&[]);
+    let outside = inst
+        .path
+        .parent()
+        .map(|p| p.join("outside.txt"))
+        .unwrap_or_default();
+    put(&outside, "mine");
+    put(
+        &inst.path.join("data/release-manifest.tsv"),
+        "AAAA\t1\t../outside.txt\nAAAA\t1\tvrcresolver.exe\n",
+    );
+    let f = Fake::new();
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_OK, "{}", f.errs());
+    assert!(outside.is_file());
+    assert_eq!(entries(&inst.path), vec!["vrcresolver.Uninstaller.exe"]);
+}
+
+#[test]
+fn a_file_we_cannot_remove_is_reported_and_the_folder_stays() {
+    let inst = full_install(&[]);
+    let mut f = Fake::new();
+    f.locked = HashSet::from([inst.path.join("tools").join("yt-dlp.exe")]);
+    assert_eq!(flow::run(&f, &inst.exe, &roots()), EXIT_ERRORS);
+    let errs = f.errs();
+    assert!(errs.contains("[uninstall] could not remove"), "{errs}");
+    assert!(
+        errs.contains("[uninstall] remove-files ERROR 1 file(s) could not be removed"),
+        "{errs}"
+    );
+    assert!(inst.path.join("tools").join("yt-dlp.exe").is_file());
+    assert_eq!(entries(&inst.path), vec!["tools", "vrcresolver.Uninstaller.exe"]);
+    assert_eq!(f.events().last(), Some(&self_delete_cmd(&inst)));
 }

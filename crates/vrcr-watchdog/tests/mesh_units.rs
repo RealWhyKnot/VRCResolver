@@ -27,7 +27,7 @@ use vrcr_watchdog::mesh::frames::{
     BinaryFrame, decode_binary, describe_connect_failure, fallback_native_line, playback_feedback_payload,
     playback_quality_line, resolve_log_line, wire_deadline_for,
 };
-use vrcr_watchdog::mesh::identity::{self, load_or_create, parse_simple_guid};
+use vrcr_watchdog::mesh::identity::{self, load_or_create, load_or_create_with, parse_simple_guid};
 use vrcr_watchdog::mesh::reporting::{
     MAX_PER_SESSION, MAX_SUMMARY_CHARS, MIN_INTERVAL, Machine, Post, ReportPayload, Reporter, extract_domain,
     failure_kind, hash_short, path_and_query, replace_ignore_ascii_case,
@@ -685,15 +685,13 @@ fn lock_exclusively(path: &Path) -> fs::File {
 fn identity_survives_a_brief_lock() {
     let f = id_file();
     let stored = load_or_create(&f.path);
-    let lock = lock_exclusively(&f.path);
-    let release = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(100));
-        drop(lock);
+    let mut lock = Some(lock_exclusively(&f.path));
+    let mut waits = Vec::new();
+    let id = load_or_create_with(&f.path, &mut |d| {
+        waits.push(d);
+        drop(lock.take());
     });
-    let id = load_or_create(&f.path);
-    release
-        .join()
-        .unwrap_or_else(|_| panic!("release thread panicked"));
+    assert_eq!(waits, vec![Duration::from_millis(50)]);
     assert_eq!(id, stored);
     assert_eq!(read_trimmed(&f.path), stored);
 }
@@ -1406,12 +1404,17 @@ fn contract_deadlines_nest_with_the_server_window() {
 
 #[test]
 fn contract_fixture_is_a_copy_of_the_server_fixture() {
-    let server = Path::new(env!("CARGO_MANIFEST_DIR")).join(
-        "../../../../Deployed/vrcresolver-server/apex/crates/vrcr-protocol/tests/fixtures/mesh-contract.json",
-    );
-    let Ok(server_copy) = fs::read_to_string(&server) else {
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../Deployed/vrcresolver-server/apex");
+    if !checkout.is_dir() {
         return;
-    };
+    }
+    let server = checkout.join("crates/vrcr-protocol/tests/fixtures/mesh-contract.json");
+    let server_copy = fs::read_to_string(&server).unwrap_or_else(|e| {
+        panic!(
+            "server checkout found but {} is unreadable: {e}",
+            server.display()
+        )
+    });
     assert_eq!(server_copy.replace("\r\n", "\n"), CONTRACT.replace("\r\n", "\n"));
 }
 
