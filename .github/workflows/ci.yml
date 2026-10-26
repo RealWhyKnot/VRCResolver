@@ -31,6 +31,11 @@ permissions:
   contents: read
 
 jobs:
+  checks:
+    permissions:
+      contents: read
+    uses: RealWhyKnot/workflows/.github/workflows/repo-checks.yml@v1
+
   test:
     name: cargo build + test
     runs-on: windows-latest
@@ -43,16 +48,14 @@ jobs:
       - name: Validate PowerShell and release scripts
         shell: pwsh
         run: |
-          ./.github/scripts/Test-WorkflowSyntax.ps1
           ./.github/scripts/Test-NightlyBetaPlan.ps1
           ./.github/scripts/Test-UpdateChangelog.ps1
           ./.github/scripts/Test-GenerateReleaseNotes.ps1
 
       - name: Toolchain
-        shell: pwsh
-        run: |
-          rustup toolchain install stable --profile minimal --component rustfmt,clippy
-          rustup default stable
+        uses: RealWhyKnot/workflows/setup-rust@v1
+        with:
+          components: rustfmt, clippy
 
       - name: Install PowerShell analyzer
         shell: pwsh

@@ -15,9 +15,6 @@ function Invoke-Native {
 
 & git config --local core.hooksPath .githooks
 
-Write-Host '== PowerShell syntax'
-& .\.github\scripts\Test-WorkflowSyntax.ps1
-
 if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
     throw 'PSScriptAnalyzer is required. Install it with: Install-Module PSScriptAnalyzer -Scope CurrentUser'
 }

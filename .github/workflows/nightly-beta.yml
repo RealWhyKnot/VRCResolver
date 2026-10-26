@@ -19,7 +19,6 @@ jobs:
     with:
       runs-on: windows-latest
       validate-scripts: |
-        ./.github/scripts/Test-WorkflowSyntax.ps1
         ./.github/scripts/Test-NightlyBetaPlan.ps1
         ./.github/scripts/Test-UpdateChangelog.ps1
         ./.github/scripts/Test-GenerateReleaseNotes.ps1
@@ -27,3 +26,4 @@ jobs:
       ignore-paths: |
         crates/*/tests/**
         data/wrapper_hashes.txt
+      ci-workflow: ci.yml

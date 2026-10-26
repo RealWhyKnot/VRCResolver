@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: changelog-append
@@ -38,10 +39,15 @@ jobs:
         with:
           tag: ${{ github.event.inputs.tag }}
 
-      - name: Validate PowerShell and changelog scripts
+      - name: Wait for CI
+        uses: RealWhyKnot/workflows/wait-for-ci@v1
+        with:
+          sha: ${{ steps.release_tag.outputs.sha }}
+          workflow: ci.yml
+
+      - name: Validate changelog scripts
         shell: pwsh
         run: |
-          ./.github/scripts/Test-WorkflowSyntax.ps1
           ./.github/scripts/Test-UpdateChangelog.ps1
 
       - name: Fetch release tags
@@ -62,10 +68,9 @@ jobs:
         run: ./.github/scripts/Test-GenerateReleaseNotes.ps1
 
       - name: Toolchain
-        shell: pwsh
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+        uses: RealWhyKnot/workflows/setup-rust@v1
+        with:
+          cache: 'false'
 
       - name: Promote Unreleased -> tagged section
         shell: pwsh
@@ -74,6 +79,7 @@ jobs:
         run: |
           $tag = '${{ steps.release_tag.outputs.tag }}'
           $prevTag = ''
+          $global:LASTEXITCODE = 0
           $prevOutput = & git describe --tags --abbrev=0 --exclude '*-*' "$tag^" 2>$null
           if ($LASTEXITCODE -eq 0 -and $prevOutput) {
             $prevTag = [string]$prevOutput
