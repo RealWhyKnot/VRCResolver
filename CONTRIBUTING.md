@@ -24,7 +24,7 @@ The first `build.ps1` run also sets `git config core.hooksPath .githooks`, which
 
 1. Fork and branch off `main`. Branch names are up to you (`fix/...`, `feat/...` and `chore/...` are common).
 2. Make your change. Small diffs please. A "while I'm here" cleanup is its own PR.
-3. `scripts/lint.ps1` and `cargo test --workspace` have to pass. The lint script runs `cargo fmt --check` and `cargo clippy` with warnings treated as errors.
+3. `.github/lint/lint.ps1` and `cargo test --workspace` have to pass. The lint script runs `cargo fmt --check` and `cargo clippy` with warnings treated as errors.
 4. Run `powershell -File build.ps1 -SkipZip` once on the branch before opening the PR. It builds the release exes and checks their version stamps, which a plain `cargo build` skips.
 5. Open the PR and fill in the template.
 

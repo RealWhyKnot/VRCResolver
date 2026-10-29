@@ -63,7 +63,7 @@ jobs:
 
       - name: Lint and format check
         shell: pwsh
-        run: ./scripts/lint.ps1
+        run: ./.github/lint/lint.ps1
 
       - name: Test
         run: cargo test --workspace --locked

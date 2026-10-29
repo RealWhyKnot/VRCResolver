@@ -6,7 +6,7 @@
 
 ## Checklist
 
-- [ ] `cargo test --workspace` and `scripts/lint.ps1` pass locally.
+- [ ] `cargo test --workspace` and `.github/lint/lint.ps1` pass locally.
 - [ ] If behaviour changed, a test was added or updated to cover it.
 - [ ] Ran `powershell -File build.ps1` end-to-end at least once on this branch.
 - [ ] Commit subjects pass `.githooks/commit-msg` (no duplicate `(YYYY.M.D.N-XXXX)` build-version stamps).
