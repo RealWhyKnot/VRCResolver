@@ -1,10 +1,10 @@
-#[allow(clippy::cast_precision_loss)]
+use num_traits::ToPrimitive;
 pub fn format_bytes(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = KB * 1024.0;
     const GB: f64 = MB * 1024.0;
     const TB: f64 = GB * 1024.0;
-    let b = bytes as f64;
+    let b = bytes.to_f64().expect("u64 values fit finite f64");
     if b < KB {
         format!("{bytes} B")
     } else if b < MB {

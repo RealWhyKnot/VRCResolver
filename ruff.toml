@@ -1,0 +1,37 @@
+line-length = 120
+per-file-target-version = { ".github/lint/**" = "py311" }
+extend-exclude = [
+  "vendor",
+  "third_party",
+  "node_modules",
+  ".yarn",
+]
+
+[lint]
+preview = true
+select = ["ALL"]
+ignore = [
+  "missing-trailing-comma",
+  "missing-copyright-notice",
+  "D",
+  "DOC",
+  "implicit-namespace-package",
+  "try-except-in-loop",
+  "import-outside-top-level",
+  "pytest-unittest-assertion",
+  "pytest-unittest-raises-assertion",
+  "noqa-comments",
+  "suspicious-url-open-usage",
+  "suspicious-non-cryptographic-random-usage",
+  "suspicious-subprocess-import",
+  "subprocess-without-shell-equals-true",
+  "raise-vanilla-args",
+]
+
+[lint.per-file-ignores]
+"**/firmware/**" = ["UP", "PTH", "read-whole-file", "write-whole-file"]
+
+[lint.flake8-tidy-imports.banned-api]
+"pytest".msg = "Tests use unittest (PY-20)."
+"typing.Any".msg = "No Any; use object, a Protocol or a TypeVar (PY-7)."
+"typing_extensions.Any".msg = "No Any; use object, a Protocol or a TypeVar (PY-7)."

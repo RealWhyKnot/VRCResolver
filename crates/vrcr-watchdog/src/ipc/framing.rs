@@ -128,7 +128,11 @@ pub fn cid_suffix(correlation_id: Option<&str>) -> String {
 }
 
 pub fn looks_like_wrapper_event(line: &str) -> bool {
-    let end = line.char_indices().nth(256).map(|(i, _)| i).unwrap_or(line.len());
+    let end = line
+        .char_indices()
+        .nth(256)
+        .map(|(i, _)| i)
+        .unwrap_or(line.len());
     let head = &line[..end];
     head.contains(action::OG_FALLBACK_NOTIFY) || head.contains(action::WRAPPER_OG_FAILED)
 }

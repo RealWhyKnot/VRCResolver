@@ -8,7 +8,7 @@ fn main() {
     );
     let args: Vec<String> = std::env::args().skip(1).collect();
     #[cfg(windows)]
-    std::process::exit(vrcr_watchdog::app::run(build, args));
+    std::process::exit(vrcr_watchdog::app::run(build, &args));
     #[cfg(not(windows))]
     {
         let _ = (build, args);

@@ -18,7 +18,8 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 pub const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub type BodyStream = Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send>>;
-pub type Sending<'a> = Pin<Box<dyn Future<Output = Result<UpstreamResponse, UpstreamError>> + Send + 'a>>;
+pub type Sending<'a> =
+    Pin<Box<dyn Future<Output = Result<UpstreamResponse, UpstreamError>> + Send + 'a>>;
 
 pub struct UpstreamRequest {
     pub method: Method,
@@ -86,7 +87,10 @@ impl ReqwestUpstream {
         ReqwestUpstream::build(tls, overrides)
     }
 
-    fn build(tls: rustls::ClientConfig, overrides: &[(&str, SocketAddr)]) -> Result<ReqwestUpstream, String> {
+    fn build(
+        tls: rustls::ClientConfig,
+        overrides: &[(&str, SocketAddr)],
+    ) -> Result<ReqwestUpstream, String> {
         let policy = redirect::Policy::custom(|attempt| {
             if attempt.previous().len() > MAX_REDIRECTS {
                 return attempt.error("too many redirects");
@@ -108,7 +112,9 @@ impl ReqwestUpstream {
         for (host, addr) in overrides {
             builder = builder.resolve(host, *addr);
         }
-        let client = builder.build().map_err(|e| e.to_string())?;
+        let client = builder
+            .build()
+            .map_err(|e| format!("configure upstream HTTP client: {e}"))?;
         Ok(ReqwestUpstream { client })
     }
 }
@@ -167,10 +173,12 @@ impl Resolve for GuardedResolver {
     fn resolve(&self, name: Name) -> Resolving {
         let host = name.as_str().to_owned();
         Box::pin(async move {
-            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
+            let addrs: Vec<SocketAddr> =
+                tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
             if let Some(bad) = addrs.iter().find(|a| url_guard::is_blocked(a.ip())) {
-                let err = io::Error::new(io::ErrorKind::PermissionDenied, blocked_message(bad.ip()));
-                return Err(Box::new(err) as Box<dyn std::error::Error + Send + Sync>);
+                let err =
+                    io::Error::new(io::ErrorKind::PermissionDenied, blocked_message(bad.ip()));
+                return Err(Box::<dyn std::error::Error + Send + Sync>::from(err));
             }
             let addrs: Addrs = Box::new(addrs.into_iter());
             Ok(addrs)

@@ -13,7 +13,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+use tokio_tungstenite::tungstenite::handshake::server::{
+    Callback, ErrorResponse, Request, Response,
+};
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -25,12 +27,13 @@ use vrcr_shared::wire::{SUBPROTOCOL_V3, action};
 use vrcr_watchdog::mesh::{Config, MeshClient};
 use vrcr_watchdog::stats::Stats;
 
-pub const MEDIA: &str = "https://media.example/v.mp4";
-pub const DEFAULT_WELCOME: &str = r#"{"action":"welcome","protocol_version":1,"node":"fake"}"#;
+pub(crate) const MEDIA: &str = "https://media.example/v.mp4";
+pub(crate) const DEFAULT_WELCOME: &str =
+    r#"{"action":"welcome","protocol_version":1,"node":"fake"}"#;
 const WELCOME_THEN_CLOSE: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
+pub(crate) enum Mode {
     Accept,
     Refuse,
     Hang,
@@ -47,39 +50,41 @@ enum Cmd {
 }
 
 #[derive(Clone)]
-pub struct Conn {
+pub(crate) struct Conn {
     pub index: u32,
     tx: mpsc::UnboundedSender<Cmd>,
 }
 
 impl Conn {
-    pub fn text(&self, s: impl Into<String>) {
+    pub(crate) fn text(&self, s: impl Into<String>) {
         let _ = self.tx.send(Cmd::Text(s.into()));
     }
 
-    pub fn binary(&self, b: Vec<u8>) {
+    pub(crate) fn binary(&self, b: Vec<u8>) {
         let _ = self.tx.send(Cmd::Binary(b));
     }
 
-    pub fn close(&self) {
+    pub(crate) fn close(&self) {
         let _ = self.tx.send(Cmd::Close);
     }
 
-    pub fn abort(&self) {
+    pub(crate) fn abort(&self) {
         let _ = self.tx.send(Cmd::Abort);
     }
 
-    pub fn resolved(&self, id: &str) {
-        self.text(format!(r#"{{"action":"resolved","id":"{id}","url":"{MEDIA}"}}"#));
+    pub(crate) fn resolved(&self, id: &str) {
+        self.text(format!(
+            r#"{{"action":"resolved","id":"{id}","url":"{MEDIA}"}}"#
+        ));
     }
 }
 
-pub type BoxFut = Pin<Box<dyn Future<Output = ()> + Send>>;
-pub type Handler = Arc<dyn Fn(Conn, String) -> BoxFut + Send + Sync>;
-pub type Policy = Arc<dyn Fn(u32) -> Mode + Send + Sync>;
-pub type Welcome = Arc<dyn Fn(u32, Option<&Value>) -> String + Send + Sync>;
+pub(crate) type BoxFut = Pin<Box<dyn Future<Output = ()> + Send>>;
+pub(crate) type Handler = Arc<dyn Fn(Conn, String) -> BoxFut + Send + Sync>;
+pub(crate) type Policy = Arc<dyn Fn(u32) -> Mode + Send + Sync>;
+pub(crate) type Welcome = Arc<dyn Fn(u32, Option<&Value>) -> String + Send + Sync>;
 
-pub fn handler<F, Fut>(f: F) -> Handler
+pub(crate) fn handler<F, Fut>(f: F) -> Handler
 where
     F: Fn(Conn, String) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
@@ -87,11 +92,11 @@ where
     Arc::new(move |c, id| Box::pin(f(c, id)))
 }
 
-pub fn policy(f: impl Fn(u32) -> Mode + Send + Sync + 'static) -> Policy {
+pub(crate) fn policy(f: impl Fn(u32) -> Mode + Send + Sync + 'static) -> Policy {
     Arc::new(f)
 }
 
-pub struct Options {
+pub(crate) struct Options {
     pub policy: Policy,
     pub on_resolve: Handler,
     pub on_connect: Option<Handler>,
@@ -104,7 +109,7 @@ pub struct Options {
 }
 
 impl Options {
-    pub fn new(policy: Policy) -> Options {
+    pub(crate) fn new(policy: Policy) -> Options {
         Options {
             policy,
             on_resolve: handler(|c: Conn, id: String| async move { c.resolved(&id) }),
@@ -118,18 +123,18 @@ impl Options {
         }
     }
 
-    pub fn on_resolve(mut self, h: Handler) -> Options {
+    pub(crate) fn on_resolve(mut self, h: Handler) -> Options {
         self.on_resolve = h;
         self
     }
 
-    pub fn silent_resolve(self) -> Options {
+    pub(crate) fn silent_resolve(self) -> Options {
         self.on_resolve(handler(|_c: Conn, _id: String| async {}))
     }
 }
 
 #[derive(Default)]
-pub struct Record {
+pub(crate) struct Record {
     pub paths: Vec<String>,
     pub user_agents: Vec<String>,
     pub resolves: Vec<(u32, String)>,
@@ -138,7 +143,7 @@ pub struct Record {
     pub texts: Vec<(u32, Value)>,
 }
 
-pub struct Server {
+pub(crate) struct Server {
     pub port: u16,
     attempts: Arc<AtomicU32>,
     connections: Arc<AtomicU32>,
@@ -160,11 +165,14 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl Server {
-    pub async fn start(opts: Options) -> Server {
+    pub(crate) async fn start(opts: Options) -> Server {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .unwrap_or_else(|e| panic!("{e}"));
-        let port = listener.local_addr().unwrap_or_else(|e| panic!("{e}")).port();
+        let port = listener
+            .local_addr()
+            .unwrap_or_else(|e| panic!("{e}"))
+            .port();
         let attempts = Arc::new(AtomicU32::new(0));
         let connections = Arc::new(AtomicU32::new(0));
         let record = Arc::new(Mutex::new(Record::default()));
@@ -195,31 +203,31 @@ impl Server {
         }
     }
 
-    pub fn url(&self) -> String {
+    pub(crate) fn url(&self) -> String {
         format!("ws://127.0.0.1:{}/mesh", self.port)
     }
 
-    pub fn attempts(&self) -> u32 {
+    pub(crate) fn attempts(&self) -> u32 {
         self.attempts.load(Ordering::SeqCst)
     }
 
-    pub fn connections(&self) -> u32 {
+    pub(crate) fn connections(&self) -> u32 {
         self.connections.load(Ordering::SeqCst)
     }
 
-    pub fn record<R>(&self, f: impl FnOnce(&Record) -> R) -> R {
+    pub(crate) fn record<R>(&self, f: impl FnOnce(&Record) -> R) -> R {
         f(&lock(&self.record))
     }
 
-    pub fn resolves(&self) -> Vec<(u32, String)> {
+    pub(crate) fn resolves(&self) -> Vec<(u32, String)> {
         self.record(|r| r.resolves.clone())
     }
 
-    pub fn open_gate(&self) {
+    pub(crate) fn open_gate(&self) {
         self.gate.send_replace(true);
     }
 
-    pub fn stop_accepting(&self) {
+    pub(crate) fn stop_accepting(&self) {
         if let Some(h) = lock(&self.accept_loop).take() {
             h.abort();
         }
@@ -263,7 +271,11 @@ impl Shared {
         match mode {
             Mode::Refuse | Mode::Hang => {
                 let head = read_head(&mut stream).await;
-                let path = head.split_whitespace().nth(1).unwrap_or_default().to_owned();
+                let path = head
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_owned();
                 self.note_request(&path, header(&head, "user-agent"));
                 if mode == Mode::Refuse {
                     let _ = stream
@@ -282,27 +294,7 @@ impl Shared {
             let mut gate = self.gate.clone();
             let _ = gate.wait_for(|g| *g).await;
         }
-        let v3 = self.opts.v3;
-        let me = Arc::clone(&self);
-        #[allow(clippy::result_large_err)]
-        let callback = move |req: &Request, mut resp: Response| {
-            let ua = req
-                .headers()
-                .get("user-agent")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or_default();
-            me.note_request(req.uri().path(), ua);
-            let asked_v3 = req
-                .headers()
-                .get("sec-websocket-protocol")
-                .and_then(|v| v.to_str().ok())
-                .is_some_and(|p| p.split(',').any(|x| x.trim() == SUBPROTOCOL_V3));
-            if v3 && asked_v3 {
-                resp.headers_mut()
-                    .insert("sec-websocket-protocol", HeaderValue::from_static(SUBPROTOCOL_V3));
-            }
-            Ok(resp)
-        };
+        let callback = Upgrade(Arc::clone(&self));
         let Ok(ws) = tokio_tungstenite::accept_hdr_async(stream, callback).await else {
             return;
         };
@@ -312,7 +304,8 @@ impl Shared {
         } else {
             (self.opts.close_after)(attempt)
         };
-        self.serve(index, ws, close_after, mode == Mode::Blackhole).await;
+        self.serve(index, ws, close_after, mode == Mode::Blackhole)
+            .await;
     }
 
     async fn serve(
@@ -357,7 +350,15 @@ impl Shared {
             });
         }
         for v in queued.drain(..) {
-            self.on_text(&conn, v, silent, false).await;
+            self.on_text(
+                &conn,
+                v,
+                TextMode {
+                    silent,
+                    record_text: false,
+                },
+            )
+            .await;
         }
         loop {
             tokio::select! {
@@ -382,20 +383,20 @@ impl Shared {
                         Some(Ok(_)) => continue,
                     };
                     let v: Value = serde_json::from_str(text.as_str()).unwrap_or(Value::Null);
-                    self.on_text(&conn, v, silent, true).await;
+                    self.on_text(&conn, v, TextMode { silent, record_text: true }).await;
                 }
             }
         }
     }
 
-    async fn on_text(&self, conn: &Conn, v: Value, silent: bool, record_text: bool) {
-        if record_text {
+    async fn on_text(&self, conn: &Conn, v: Value, mode: TextMode) {
+        if mode.record_text {
             lock(&self.record).texts.push((conn.index, v.clone()));
         }
         let name = v["action"].as_str().unwrap_or_default();
         if name == action::PING {
             lock(&self.record).pings.push(conn.index);
-            if !silent {
+            if !mode.silent {
                 conn.text(r#"{"action":"pong"}"#);
             }
             return;
@@ -409,14 +410,14 @@ impl Shared {
             r.resolves.push((conn.index, id.clone()));
             r.request_json.push(v.to_string());
         }
-        if !silent {
+        if !mode.silent {
             (self.opts.on_resolve)(conn.clone(), id).await;
         }
     }
 }
 
 #[derive(Clone, Default)]
-pub struct Capture(Arc<Mutex<Vec<u8>>>);
+pub(crate) struct Capture(Arc<Mutex<Vec<u8>>>);
 
 impl Write for Capture {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -430,12 +431,12 @@ impl Write for Capture {
 }
 
 impl Capture {
-    pub fn text(&self) -> String {
+    pub(crate) fn text(&self) -> String {
         String::from_utf8_lossy(&lock(&self.0)).into_owned()
     }
 }
 
-pub struct TestClient {
+pub(crate) struct TestClient {
     pub client: MeshClient,
     pub out: Capture,
     pub hosts: Arc<Mutex<Vec<String>>>,
@@ -443,17 +444,21 @@ pub struct TestClient {
 }
 
 impl TestClient {
-    pub fn log(&self) -> String {
+    pub(crate) fn log(&self) -> String {
         std::fs::read_to_string(self.dir.path().join("watchdog.log")).unwrap_or_default()
     }
 }
 
-pub fn client_for(server: &Server, tweak: impl FnOnce(&mut Config)) -> TestClient {
+pub(crate) fn client_for(server: &Server, tweak: impl FnOnce(&mut Config)) -> TestClient {
     let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
     client_in(dir, server, tweak)
 }
 
-pub fn client_in(dir: TempDir, server: &Server, tweak: impl FnOnce(&mut Config)) -> TestClient {
+pub(crate) fn client_in(
+    dir: TempDir,
+    server: &Server,
+    tweak: impl FnOnce(&mut Config),
+) -> TestClient {
     let out = Capture::default();
     let hosts = Arc::new(Mutex::new(Vec::new()));
     let mut cfg = Config::new(dir.path(), "test");
@@ -479,11 +484,11 @@ pub fn client_in(dir: TempDir, server: &Server, tweak: impl FnOnce(&mut Config))
     }
 }
 
-pub fn fixed_backoff(ms: u64) -> Arc<dyn Fn(u32) -> u64 + Send + Sync> {
+pub(crate) fn fixed_backoff(ms: u64) -> Arc<dyn Fn(u32) -> u64 + Send + Sync> {
     Arc::new(move |_| ms)
 }
 
-pub async fn wait_until(cond: impl Fn() -> bool, timeout_ms: u64, what: &str) {
+pub(crate) async fn wait_until(cond: impl Fn() -> bool, timeout_ms: u64, what: &str) {
     let started = std::time::Instant::now();
     while !cond() {
         assert!(
@@ -492,4 +497,35 @@ pub async fn wait_until(cond: impl Fn() -> bool, timeout_ms: u64, what: &str) {
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+struct Upgrade(Arc<Shared>);
+
+impl Callback for Upgrade {
+    fn on_request(self, req: &Request, mut resp: Response) -> Result<Response, ErrorResponse> {
+        let ua = req
+            .headers()
+            .get("user-agent")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        self.0.note_request(req.uri().path(), ua);
+        let asked_v3 = req
+            .headers()
+            .get("sec-websocket-protocol")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|p| p.split(',').any(|x| x.trim() == SUBPROTOCOL_V3));
+        if self.0.opts.v3 && asked_v3 {
+            resp.headers_mut().insert(
+                "sec-websocket-protocol",
+                HeaderValue::from_static(SUBPROTOCOL_V3),
+            );
+        }
+        Ok(resp)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TextMode {
+    silent: bool,
+    record_text: bool,
 }

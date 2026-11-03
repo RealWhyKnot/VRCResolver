@@ -35,7 +35,10 @@ fn versions_parse_like_system_version() {
 
 #[test]
 fn tags_drop_the_v_and_any_suffix() {
-    assert_eq!(Version::from_tag("v2026.10.14.0-C0A0"), Some(v("2026.10.14.0")));
+    assert_eq!(
+        Version::from_tag("v2026.10.14.0-C0A0"),
+        Some(v("2026.10.14.0"))
+    );
     assert_eq!(Version::from_tag("V1.2.3"), Some(v("1.2.3")));
     assert_eq!(Version::from_tag("1.2.3-beta"), Some(v("1.2.3")));
     assert_eq!(Version::from_tag("nightly"), None);
@@ -62,12 +65,18 @@ fn highest_entry_ignores_unparseable_tags_and_prefers_stable_on_a_tie() {
 
 #[test]
 fn bypass_entry_detection_is_token_precise() {
-    assert!(line_is_bypass_entry(&format!("{MARKER_IP}\t{GATEWAY_HOST}")));
+    assert!(line_is_bypass_entry(&format!(
+        "{MARKER_IP}\t{GATEWAY_HOST}"
+    )));
     assert!(line_is_bypass_entry(&format!(
         "  {MARKER_IP} other {GATEWAY_HOST} # note"
     )));
-    assert!(!line_is_bypass_entry(&format!("# {MARKER_IP} {GATEWAY_HOST}")));
-    assert!(!line_is_bypass_entry(&format!("{MARKER_IP} x{GATEWAY_HOST}")));
+    assert!(!line_is_bypass_entry(&format!(
+        "# {MARKER_IP} {GATEWAY_HOST}"
+    )));
+    assert!(!line_is_bypass_entry(&format!(
+        "{MARKER_IP} x{GATEWAY_HOST}"
+    )));
     assert!(contains_bypass_entry(&format!(
         "127.0.0.1 localhost\r\n{MARKER_IP} {GATEWAY_HOST}\r\n"
     )));
@@ -92,7 +101,11 @@ impl ProcessOps for FakeOps {
         self.calls
             .borrow_mut()
             .push(format!("wait {pid} {}", timeout.as_secs()));
-        let killed = self.calls.borrow().iter().any(|c| c.starts_with("terminate"));
+        let killed = self
+            .calls
+            .borrow()
+            .iter()
+            .any(|c| c.starts_with("terminate"));
         if killed {
             self.exits_after_kill
         } else {
@@ -168,7 +181,10 @@ fn process_matching_uses_exe_stems_and_skips_ourselves() {
         stop::pids_named(&procs, &["vrcresolver", "WKVRCProxy"], 4),
         vec![1, 2]
     );
-    assert!(stop::pids_named(&procs, &["other"], 0).is_empty());
+    assert_eq!(
+        stop::pids_named(&procs, &["other"], 0),
+        <[u32; 0]>::default()
+    );
 }
 
 #[test]
@@ -194,7 +210,10 @@ fn real_process_helpers_terminate_and_wait() {
     let pid = child.id();
     let image = win::process_image_path(pid).unwrap_or_default();
     assert!(
-        image.to_string_lossy().to_ascii_lowercase().ends_with("ping.exe"),
+        image
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .ends_with("ping.exe"),
         "{image:?}"
     );
     assert!(!win::wait_for_exit(pid, Duration::from_millis(100)));

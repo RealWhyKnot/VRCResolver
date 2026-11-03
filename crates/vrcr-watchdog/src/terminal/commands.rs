@@ -14,7 +14,14 @@ pub struct Context<'a> {
 }
 
 pub type Handler = fn(&Context<'_>, &str);
-pub type Completer = fn(&Registry, bool, &[&str], bool) -> Completion;
+#[derive(Clone, Copy)]
+pub struct CompletionInput<'a> {
+    pub slash: bool,
+    pub tokens: &'a [&'a str],
+    pub ends_with_space: bool,
+}
+
+pub type Completer = fn(&Registry, CompletionInput<'_>) -> Completion;
 
 pub struct Command {
     pub name: String,
@@ -96,8 +103,9 @@ impl Registry {
             "permissions",
             "Show what this terminal is allowed to do.",
             |ctx, _| {
-                ctx.renderer
-                    .info("permissions: local watchdog commands only; shell execution is not exposed.");
+                ctx.renderer.info(
+                    "permissions: local watchdog commands only; shell execution is not exposed.",
+                );
             },
             &[],
         );
@@ -192,9 +200,16 @@ impl Registry {
             return self.complete_command(slash, "");
         };
         match self.get(first) {
-            Some(c) => c
-                .completer
-                .map_or_else(Completion::default, |f| f(self, slash, &tokens, ends_with_space)),
+            Some(c) => c.completer.map_or_else(Completion::default, |f| {
+                f(
+                    self,
+                    CompletionInput {
+                        slash,
+                        tokens: &tokens,
+                        ends_with_space,
+                    },
+                )
+            }),
             None => Completion::default(),
         }
     }
@@ -208,7 +223,8 @@ impl Registry {
         if candidate.is_empty() && completion.suggestions.len() == 1 {
             candidate.clone_from(&completion.suggestions[0].text);
         }
-        if candidate.chars().count() <= input.chars().count() || !starts_with_ci(&candidate, input) {
+        if candidate.chars().count() <= input.chars().count() || !starts_with_ci(&candidate, input)
+        {
             return String::new();
         }
         candidate.chars().skip(input.chars().count()).collect()
@@ -248,7 +264,8 @@ impl Registry {
             .commands
             .iter()
             .filter(|c| {
-                starts_with_ci(&c.name, &prefix) || c.aliases.iter().any(|a| starts_with_ci(a, &prefix))
+                starts_with_ci(&c.name, &prefix)
+                    || c.aliases.iter().any(|a| starts_with_ci(a, &prefix))
             })
             .collect();
         matches.sort_by_key(|c| c.name.to_lowercase());
@@ -316,7 +333,12 @@ fn help(ctx: &Context<'_>, args: &str) {
     }
 }
 
-fn complete_help(registry: &Registry, slash: bool, tokens: &[&str], ends_with_space: bool) -> Completion {
+fn complete_help(registry: &Registry, input: CompletionInput<'_>) -> Completion {
+    let CompletionInput {
+        slash,
+        tokens,
+        ends_with_space,
+    } = input;
     let prefix = if tokens.len() > 1 && !ends_with_space {
         normalize_verb(tokens[tokens.len() - 1])
     } else {
@@ -351,7 +373,11 @@ fn update_command(ctx: &Context<'_>, _args: &str) {
 }
 
 fn settings_command(ctx: &Context<'_>, args: &str) {
-    let parts: Vec<&str> = args.split(' ').map(str::trim).filter(|p| !p.is_empty()).collect();
+    let parts: Vec<&str> = args
+        .split(' ')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
     let Some(first) = parts.first() else {
         ctx.renderer.render_settings();
         return;
@@ -370,8 +396,9 @@ fn settings_command(ctx: &Context<'_>, args: &str) {
 }
 
 fn unknown_setting(ctx: &Context<'_>, key: &str) {
-    ctx.renderer
-        .warn(&format!("unknown setting: {key} (use settings to list names)"));
+    ctx.renderer.warn(&format!(
+        "unknown setting: {key} (use settings to list names)"
+    ));
 }
 
 fn render_one(ctx: &Context<'_>, key: &str) {
@@ -412,7 +439,8 @@ fn reset(ctx: &Context<'_>, key: &str) {
                 setting.reset(s);
             }
         });
-        ctx.renderer.success("settings: all values reset to defaults.");
+        ctx.renderer
+            .success("settings: all values reset to defaults.");
         return;
     }
     let Some(setting) = settings::find(key) else {
@@ -424,12 +452,12 @@ fn reset(ctx: &Context<'_>, key: &str) {
         .success(&format!("settings: {key} reset to {}", setting.get(&next)));
 }
 
-fn complete_settings(
-    _registry: &Registry,
-    slash: bool,
-    tokens: &[&str],
-    ends_with_space: bool,
-) -> Completion {
+fn complete_settings(_registry: &Registry, input: CompletionInput<'_>) -> Completion {
+    let CompletionInput {
+        slash,
+        tokens,
+        ends_with_space,
+    } = input;
     let mut args: Vec<&str> = tokens.iter().skip(1).copied().collect();
     if ends_with_space || args.is_empty() {
         args.push("");

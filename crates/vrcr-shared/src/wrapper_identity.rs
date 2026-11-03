@@ -66,7 +66,7 @@ fn check_complete(path: &Path) -> Option<bool> {
 }
 
 fn read_at<const N: usize>(file: &mut File, length: u64, offset: u64) -> Option<[u8; N]> {
-    if offset.checked_add(N as u64)? > length {
+    if offset.checked_add(u64::try_from(N).ok()?)? > length {
         return None;
     }
     let mut buf = [0u8; N];
@@ -88,7 +88,10 @@ pub fn classify(path: &Path, known_hashes: Option<&Path>) -> WrapperKind {
     }
     if let Some(info) = version::query(path)
         && info.company.as_deref() == Some(COMPANY_NAME)
-        && matches!(info.product.as_deref(), Some(PRODUCT_NAME | legacy::PRODUCT_NAME))
+        && matches!(
+            info.product.as_deref(),
+            Some(PRODUCT_NAME | legacy::PRODUCT_NAME)
+        )
     {
         return WrapperKind::Ours;
     }
@@ -157,7 +160,6 @@ pub struct VersionInfo {
 }
 
 #[cfg(windows)]
-#[allow(unsafe_code)]
 pub mod version {
     use std::ffi::c_void;
     use std::os::windows::ffi::OsStrExt;
@@ -177,18 +179,21 @@ pub mod version {
         let sub = wide(sub);
         let mut ptr: *mut c_void = std::ptr::null_mut();
         let mut len: u32 = 0;
+        // SAFETY: block came from GetFileVersionInfoW, sub is NUL-terminated, and both outputs are writable.
         let ok = unsafe { VerQueryValueW(block.as_ptr().cast(), sub.as_ptr(), &mut ptr, &mut len) };
         if ok == 0 || ptr.is_null() {
             return None;
         }
-        let start = block.as_ptr() as usize;
-        let at = ptr as usize;
-        let end = start + block.len();
-        if at < start || at >= end {
-            return None;
+        returned_bytes(block, ptr.addr(), None)
+    }
+
+    fn returned_bytes(block: &[u8], address: usize, length: Option<usize>) -> Option<&[u8]> {
+        let offset = address.checked_sub(block.as_ptr().addr())?;
+        let tail = block.get(offset..)?;
+        match length {
+            Some(length) => tail.get(..length),
+            None => Some(tail),
         }
-        let avail = end - at;
-        Some(unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), avail) })
     }
 
     fn query_string(block: &[u8], lang: &str, key: &str) -> Option<String> {
@@ -209,18 +214,17 @@ pub mod version {
         let sub = wide("\\VarFileInfo\\Translation");
         let mut ptr: *mut c_void = std::ptr::null_mut();
         let mut len: u32 = 0;
+        // SAFETY: block came from GetFileVersionInfoW, sub is NUL-terminated, and both outputs are writable.
         let ok = unsafe { VerQueryValueW(block.as_ptr().cast(), sub.as_ptr(), &mut ptr, &mut len) };
-        if ok != 0 && !ptr.is_null() {
-            let start = block.as_ptr() as usize;
-            let at = ptr as usize;
-            let bytes = (len as usize).min((start + block.len()).saturating_sub(at));
-            if at >= start {
-                let raw = unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), bytes) };
-                for [a, b, c, d] in raw.as_chunks::<4>().0 {
-                    let lang = u16::from_le_bytes([*a, *b]);
-                    let cp = u16::from_le_bytes([*c, *d]);
-                    out.push(format!("{lang:04X}{cp:04X}"));
-                }
+        if ok != 0
+            && !ptr.is_null()
+            && let Ok(length) = usize::try_from(len)
+            && let Some(raw) = returned_bytes(block, ptr.addr(), Some(length))
+        {
+            for [a, b, c, d] in raw.as_chunks::<4>().0 {
+                let lang = u16::from_le_bytes([*a, *b]);
+                let cp = u16::from_le_bytes([*c, *d]);
+                out.push(format!("{lang:04X}{cp:04X}"));
             }
         }
         for fallback in ["040904B0", "040904E4", "04090000"] {
@@ -234,11 +238,13 @@ pub mod version {
     pub fn query(path: &Path) -> Option<VersionInfo> {
         let name = wide(path.as_os_str());
         let mut handle = 0u32;
+        // SAFETY: name is a live NUL-terminated path and handle is a writable output value.
         let size = unsafe { GetFileVersionInfoSizeW(name.as_ptr(), &mut handle) };
         if size == 0 {
             return None;
         }
-        let mut block = vec![0u8; size as usize];
+        let mut block = vec![0u8; usize::try_from(size).ok()?];
+        // SAFETY: name is NUL-terminated and block provides size writable bytes for the version resource.
         let ok = unsafe { GetFileVersionInfoW(name.as_ptr(), 0, size, block.as_mut_ptr().cast()) };
         if ok == 0 {
             return None;
@@ -250,6 +256,26 @@ pub mod version {
             product: pick("ProductName"),
             file_version: pick("FileVersion"),
         })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::returned_bytes;
+
+        #[test]
+        fn returned_version_ranges_must_fit_the_owned_resource() {
+            let block = [1, 2, 3, 4];
+            let start = block.as_ptr().addr();
+            assert_eq!(
+                returned_bytes(&block, start + 1, Some(2)),
+                Some(&block[1..3])
+            );
+            assert_eq!(returned_bytes(&block, start + 1, None), Some(&block[1..]));
+            assert_eq!(returned_bytes(&block, start - 1, Some(1)), None);
+            assert_eq!(returned_bytes(&block, start + 5, Some(0)), None);
+            assert_eq!(returned_bytes(&block, start + 1, Some(usize::MAX)), None);
+            assert_eq!(returned_bytes(&block, start + 3, Some(2)), None);
+        }
     }
 }
 

@@ -42,7 +42,8 @@ fn find_ignore_case(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
     if from >= hay.len() || needle.len() > hay.len() - from {
         return None;
     }
-    (from..=hay.len() - needle.len()).find(|&i| hay[i..i + needle.len()].eq_ignore_ascii_case(needle))
+    (from..=hay.len() - needle.len())
+        .find(|&i| hay[i..i + needle.len()].eq_ignore_ascii_case(needle))
 }
 
 pub fn height_cap(format_arg: Option<&str>) -> Option<i32> {

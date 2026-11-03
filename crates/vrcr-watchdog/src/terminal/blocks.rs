@@ -30,7 +30,12 @@ fn title_frame(glyphs: &Glyphs, title: &str) -> Frame {
     ])
 }
 
-pub fn key_value(title: &str, rows: &[(String, String)], width: usize, glyphs: &Glyphs) -> Vec<Frame> {
+pub fn key_value(
+    title: &str,
+    rows: &[(String, String)],
+    width: usize,
+    glyphs: &Glyphs,
+) -> Vec<Frame> {
     let width = width.max(24);
     let left_width = rows
         .iter()
@@ -52,7 +57,14 @@ pub fn key_value(title: &str, rows: &[(String, String)], width: usize, glyphs: &
             let right_text = wrapped.get(i).cloned().unwrap_or_default();
             frames.push(Frame::from_runs(vec![
                 Run::new(format!("  {} ", glyphs.detail), Color::DarkGray),
-                Run::new(left_text, if i == 0 { Color::White } else { Color::DarkGray }),
+                Run::new(
+                    left_text,
+                    if i == 0 {
+                        Color::White
+                    } else {
+                        Color::DarkGray
+                    },
+                ),
                 Run::new("  ", Color::DarkGray),
                 Run::new(right_text, Color::Gray),
             ]));
@@ -61,16 +73,22 @@ pub fn key_value(title: &str, rows: &[(String, String)], width: usize, glyphs: &
     frames
 }
 
-pub fn table(title: &str, rows: &[(String, String, String)], width: usize, glyphs: &Glyphs) -> Vec<Frame> {
+pub fn table(
+    title: &str,
+    rows: &[(String, String, String)],
+    width: usize,
+    glyphs: &Glyphs,
+) -> Vec<Frame> {
     if rows.is_empty() {
         return key_value(title, &[], width, glyphs);
     }
     let width = width.max(24);
-    let longest =
-        |f: fn(&(String, String, String)) -> &str| rows.iter().map(|r| clen(f(r))).max().unwrap_or(0);
+    let longest = |f: fn(&(String, String, String)) -> &str| {
+        rows.iter().map(|r| clen(f(r))).max().unwrap_or(0)
+    };
     let name_width = longest(|r| &r.0).min(22).min((width / 4).max(8));
     let value_width = longest(|r| &r.1).min(18).min((width / 5).max(8));
-    let description_width = width as i64 - name_width as i64 - value_width as i64 - 10;
+    let description_width = width.saturating_sub(name_width + value_width + 10);
     if description_width < 16 {
         let flat: Vec<(String, String)> = rows
             .iter()
@@ -78,12 +96,14 @@ pub fn table(title: &str, rows: &[(String, String, String)], width: usize, glyph
             .collect();
         return key_value(title, &flat, width, glyphs);
     }
-    let description_width = usize::try_from(description_width).unwrap_or(16);
 
     let mut frames = vec![
         title_frame(glyphs, title),
         Frame::from_runs(vec![
-            Run::new(format!("  {}", pad_right("setting", name_width)), Color::DarkGray),
+            Run::new(
+                format!("  {}", pad_right("setting", name_width)),
+                Color::DarkGray,
+            ),
             Run::new(
                 format!("  {}", pad_right("current", value_width)),
                 Color::DarkGray,
@@ -106,19 +126,31 @@ pub fn table(title: &str, rows: &[(String, String, String)], width: usize, glyph
             frames.push(Frame::from_runs(vec![
                 Run::new(
                     format!("  {n}"),
-                    if i == 0 { Color::White } else { Color::DarkGray },
+                    if i == 0 {
+                        Color::White
+                    } else {
+                        Color::DarkGray
+                    },
                 ),
                 Run::new("  ", Color::DarkGray),
                 Run::new(v, value_color(value)),
                 Run::new("  ", Color::DarkGray),
-                Run::new(descriptions.get(i).cloned().unwrap_or_default(), Color::Gray),
+                Run::new(
+                    descriptions.get(i).cloned().unwrap_or_default(),
+                    Color::Gray,
+                ),
             ]));
         }
     }
     frames
 }
 
-pub fn panel(title: &str, rows: &[(String, String, String)], width: usize, glyphs: &Glyphs) -> Vec<Frame> {
+pub fn panel(
+    title: &str,
+    rows: &[(String, String, String)],
+    width: usize,
+    glyphs: &Glyphs,
+) -> Vec<Frame> {
     let width = width.clamp(30, 120);
     if rows.is_empty() {
         return key_value(title, &[], width, glyphs);
@@ -131,11 +163,23 @@ pub fn panel(title: &str, rows: &[(String, String, String)], width: usize, glyph
         return key_value(title, &flat, width, glyphs);
     }
     let inner = width - 2;
-    let name_width = rows.iter().map(|r| clen(&r.0)).max().unwrap_or(0).clamp(8, 16);
-    let state_width = rows.iter().map(|r| clen(&r.1)).max().unwrap_or(0).clamp(8, 18);
+    let name_width = rows
+        .iter()
+        .map(|r| clen(&r.0))
+        .max()
+        .unwrap_or(0)
+        .clamp(8, 16);
+    let state_width = rows
+        .iter()
+        .map(|r| clen(&r.1))
+        .max()
+        .unwrap_or(0)
+        .clamp(8, 18);
     let detail_width = inner.saturating_sub(name_width + state_width + 6).max(8);
     let heading = format!(" {title} ");
-    let top_fill = glyphs.horizontal.repeat(inner.saturating_sub(clen(&heading)));
+    let top_fill = glyphs
+        .horizontal
+        .repeat(inner.saturating_sub(clen(&heading)));
 
     let mut frames = vec![Frame::from_runs(vec![
         Run::new(glyphs.top_left, Color::DarkGray),
@@ -146,7 +190,10 @@ pub fn panel(title: &str, rows: &[(String, String, String)], width: usize, glyph
     for (name, state, detail) in rows {
         frames.push(Frame::from_runs(vec![
             Run::new(format!("{} ", glyphs.vertical), Color::DarkGray),
-            Run::new(pad_right(&trim_right(name, name_width), name_width), Color::White),
+            Run::new(
+                pad_right(&trim_right(name, name_width), name_width),
+                Color::White,
+            ),
             Run::new("  ", Color::DarkGray),
             Run::new(
                 pad_right(&trim_right(state, state_width), state_width),
@@ -168,7 +215,11 @@ pub fn panel(title: &str, rows: &[(String, String, String)], width: usize, glyph
     frames
 }
 
-pub fn command_palette(commands: &[PaletteCommand<'_>], width: usize, glyphs: &Glyphs) -> Vec<Frame> {
+pub fn command_palette(
+    commands: &[PaletteCommand<'_>],
+    width: usize,
+    glyphs: &Glyphs,
+) -> Vec<Frame> {
     let width = width.max(24);
     let mut frames = vec![Frame::from_runs(vec![
         Run::new(format!("{} ", glyphs.bullet), Color::DarkGray),
@@ -191,7 +242,10 @@ pub fn command_palette(commands: &[PaletteCommand<'_>], width: usize, glyphs: &G
         };
         frames.push(Frame::from_runs(vec![
             Run::new(format!("  {} ", glyphs.detail), Color::DarkGray),
-            Run::new(pad_right(&format!("/{}", c.name), command_width), Color::White),
+            Run::new(
+                pad_right(&format!("/{}", c.name), command_width),
+                Color::White,
+            ),
             Run::new("  ", Color::DarkGray),
             Run::new(
                 trim_right(&format!("{}{alias}", c.description), description_width),
@@ -217,7 +271,10 @@ pub fn completion_palette(items: &[Item], width: usize, glyphs: &Glyphs) -> Vec<
             Run::new(format!("  {} ", glyphs.detail), Color::DarkGray),
             Run::new(pad_right(&item.text, item_width), Color::White),
             Run::new("  ", Color::DarkGray),
-            Run::new(trim_right(&item.description, description_width), Color::Gray),
+            Run::new(
+                trim_right(&item.description, description_width),
+                Color::Gray,
+            ),
         ]));
     }
     frames
@@ -267,9 +324,20 @@ fn value_color(value: &str) -> Color {
 pub fn state_color(value: &str) -> Color {
     let v = value.trim().to_lowercase();
     let has = |s: &str| v.contains(s);
-    if v == "on" || v == "ready" || v == "eligible" || has("online") || has("serving") || has("pulling") {
+    if v == "on"
+        || v == "ready"
+        || v == "eligible"
+        || has("online")
+        || has("serving")
+        || has("pulling")
+    {
         Color::Green
-    } else if has("reconnecting") || has("fallback") || has("paused") || has("setup") || has("timeout") {
+    } else if has("reconnecting")
+        || has("fallback")
+        || has("paused")
+        || has("setup")
+        || has("timeout")
+    {
         Color::Yellow
     } else if has("failed") || has("missing") || has("not eligible") || v == "off" {
         Color::Red

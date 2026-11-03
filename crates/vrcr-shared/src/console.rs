@@ -214,7 +214,11 @@ impl Ux {
         st.next_id += 1;
         st.overlay = Some((id, overlay));
         render_overlay(&mut st);
-        OverlayGuard { ux: self.clone(), id }
+        drop(st);
+        OverlayGuard {
+            ux: self.clone(),
+            id,
+        }
     }
 
     pub fn with_lock<R>(&self, f: impl FnOnce(&mut dyn Write) -> R) -> R {
@@ -232,6 +236,7 @@ impl Ux {
         let r = f(&mut *st.out);
         let _ = st.out.flush();
         render_overlay(&mut st);
+        drop(st);
         r
     }
 
@@ -241,7 +246,10 @@ impl Ux {
     }
 
     pub fn write(&self, c: Component, body: &str) {
-        self.stamped(c.color(), &format!("{} {} {body}", self.style.bullet(), c.tag()));
+        self.stamped(
+            c.color(),
+            &format!("{} {} {body}", self.style.bullet(), c.tag()),
+        );
     }
 
     pub fn success(&self, c: Component, body: &str) {
@@ -266,7 +274,10 @@ impl Ux {
     }
 
     pub fn fatal(&self, body: &str) {
-        self.stamped(Color::Red, &format!("{} [FATAL] {body}", self.style.bullet()));
+        self.stamped(
+            Color::Red,
+            &format!("{} [FATAL] {body}", self.style.bullet()),
+        );
     }
 
     pub fn resolve_outcome(&self, o: &Outcome<'_>) {
@@ -387,9 +398,15 @@ pub fn banner_lines(b: &Banner<'_>) -> Vec<(Color, String)> {
     let channel = b.channel.map(|c| format!(" ({c})")).unwrap_or_default();
     let mut lines = vec![
         (Color::DarkGray, DIVIDER.to_owned()),
-        (Color::White, format!("  VRCResolver {}{channel}", b.version)),
+        (
+            Color::White,
+            format!("  VRCResolver {}{channel}", b.version),
+        ),
         (Color::Gray, "  local video relay for VRChat".to_owned()),
-        (Color::Gray, format!("  sha {}  built {}", b.sha, b.build_time)),
+        (
+            Color::Gray,
+            format!("  sha {}  built {}", b.sha, b.build_time),
+        ),
     ];
     if b.dev {
         lines.push((
@@ -399,9 +416,18 @@ pub fn banner_lines(b: &Banner<'_>) -> Vec<(Color, String)> {
         ));
     }
     lines.push((Color::DarkGray, SUBDIVIDER.to_owned()));
-    let width = b.paths.iter().map(|(l, _)| l.chars().count()).max().unwrap_or(0) + 2;
+    let width = b
+        .paths
+        .iter()
+        .map(|(l, _)| l.chars().count())
+        .max()
+        .unwrap_or(0)
+        + 2;
     for (label, value) in b.paths {
-        lines.push((Color::Gray, format!("  {:<width$} {value}", format!("{label}:"))));
+        lines.push((
+            Color::Gray,
+            format!("  {:<width$} {value}", format!("{label}:")),
+        ));
     }
     lines.push((Color::DarkGray, DIVIDER.to_owned()));
     lines.push((Color::Gray, String::new()));

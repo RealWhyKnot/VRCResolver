@@ -53,7 +53,11 @@ impl SessionStore {
     }
 
     pub fn under_state_root(state_root: &Path) -> SessionStore {
-        SessionStore::new(&state_root.join("terminal"), SystemTime::now(), SystemTime::now)
+        SessionStore::new(
+            &state_root.join("terminal"),
+            SystemTime::now(),
+            SystemTime::now,
+        )
     }
 
     pub fn dir(&self) -> &Path {

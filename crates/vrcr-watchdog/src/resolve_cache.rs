@@ -204,6 +204,7 @@ impl ResolveCache {
         evict_past_cap(&mut g.file.entries);
         g.dirty = true;
         self.schedule(&mut g);
+        drop(g);
         Some(expires_at)
     }
 
@@ -214,13 +215,15 @@ impl ResolveCache {
         let mut g = self.shared.loaded();
         let before = g.file.entries.len();
         g.file.entries.retain(|_, e| {
-            e.url.as_deref() != Some(url) && e.response.as_ref().and_then(|r| r.url.as_deref()) != Some(url)
+            e.url.as_deref() != Some(url)
+                && e.response.as_ref().and_then(|r| r.url.as_deref()) != Some(url)
         });
         let removed = before - g.file.entries.len();
         if removed > 0 {
             g.dirty = true;
             self.schedule(&mut g);
         }
+        drop(g);
         removed
     }
 
@@ -251,7 +254,7 @@ impl ResolveCache {
             self.shared.wake.notify_all();
             return;
         }
-        let shared = self.shared.clone();
+        let shared = std::sync::Arc::clone(&self.shared);
         g.flusher = std::thread::Builder::new()
             .name("resolve-cache-flush".to_owned())
             .spawn(move || shared.flush_loop())
@@ -270,7 +273,8 @@ impl Shared {
             let mut file = self.load_file().unwrap_or_default();
             let now = (self.now)();
             let before = file.entries.len();
-            file.entries.retain(|_, e| is_live(e.expires_at.as_deref(), now));
+            file.entries
+                .retain(|_, e| is_live(e.expires_at.as_deref(), now));
             g.dirty |= file.entries.len() != before;
             g.file = file;
             g.loaded = true;
@@ -335,7 +339,9 @@ impl Shared {
             return None;
         }
         let bytes = fs::read(&self.path).ok()?;
-        serde_json::from_slice::<Option<CacheFile>>(&bytes).ok().flatten()
+        serde_json::from_slice::<Option<CacheFile>>(&bytes)
+            .ok()
+            .flatten()
     }
 
     fn save_file(&self, file: &CacheFile) {
@@ -346,7 +352,10 @@ impl Shared {
             if let Some(dir) = self.path.parent().filter(|d| !d.as_os_str().is_empty()) {
                 fs::create_dir_all(dir)?;
             }
-            fs::write(&tmp, serde_json::to_vec(file).map_err(std::io::Error::other)?)?;
+            fs::write(
+                &tmp,
+                serde_json::to_vec(file).map_err(std::io::Error::other)?,
+            )?;
             fs::rename(&tmp, &self.path)
         })();
         if let Err(e) = result {

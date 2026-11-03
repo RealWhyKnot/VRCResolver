@@ -97,7 +97,7 @@ impl Renderer {
 
     pub fn attach(&self) -> OverlayGuard {
         self.inner.services.ux.use_overlay(Box::new(StatusOverlay {
-            inner: self.inner.clone(),
+            inner: std::sync::Arc::clone(&self.inner),
             line: OverlayLine::default(),
             gate: FrameGate::default(),
         }))
@@ -460,8 +460,16 @@ pub fn status_rows(
         )
     };
     vec![
-        ("local video".to_owned(), video_state.to_owned(), video_detail),
-        ("resolver".to_owned(), upstream_state.to_owned(), upstream_detail),
+        (
+            "local video".to_owned(),
+            video_state.to_owned(),
+            video_detail,
+        ),
+        (
+            "resolver".to_owned(),
+            upstream_state.to_owned(),
+            upstream_detail,
+        ),
         (
             "resolves".to_owned(),
             format!("{} total", activity.resolves_total),

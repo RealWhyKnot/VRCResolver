@@ -6,8 +6,8 @@ const MIB: u64 = 1024 * 1024;
 
 pub fn extract_zip(zip: &Path, dest: &Path) -> Result<(), String> {
     let file = File::open(zip).map_err(|e| format!("could not open {}: {e}", zip.display()))?;
-    let mut archive =
-        zip::ZipArchive::new(BufReader::new(file)).map_err(|e| format!("release zip is unreadable: {e}"))?;
+    let mut archive = zip::ZipArchive::new(BufReader::new(file))
+        .map_err(|e| format!("release zip is unreadable: {e}"))?;
     archive
         .extract(dest)
         .map_err(|e| format!("could not extract release zip: {e}"))

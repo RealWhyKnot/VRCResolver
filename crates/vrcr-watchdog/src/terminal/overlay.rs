@@ -64,7 +64,12 @@ impl OverlayLine {
         Ok(())
     }
 
-    pub fn render_if_changed(&mut self, out: &mut dyn Write, frame: &Frame, color: bool) -> io::Result<bool> {
+    pub fn render_if_changed(
+        &mut self,
+        out: &mut dyn Write,
+        frame: &Frame,
+        color: bool,
+    ) -> io::Result<bool> {
         if self.visible && self.last == frame.plain && self.last_cursor == frame.cursor {
             return Ok(false);
         }

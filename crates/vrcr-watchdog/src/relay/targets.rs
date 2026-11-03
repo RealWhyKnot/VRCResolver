@@ -100,6 +100,7 @@ impl TargetResolver {
             }
             bases.by_prefix.remove(&old);
         }
+        drop(bases);
     }
 
     fn best_base(&self, path: &str) -> Option<(String, String)> {
@@ -126,7 +127,12 @@ pub fn local_prefix_for_path(path: &str) -> String {
     }
 }
 
-pub fn resolve_relative_target(local_path: &str, query: &str, prefix: &str, base: &str) -> Option<String> {
+pub fn resolve_relative_target(
+    local_path: &str,
+    query: &str,
+    prefix: &str,
+    base: &str,
+) -> Option<String> {
     if local_path.is_empty() || prefix.is_empty() || !starts_with_ignore_case(local_path, prefix) {
         return None;
     }

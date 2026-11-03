@@ -3,6 +3,12 @@ use std::time::{Duration, SystemTime};
 
 use crate::clock::{self, Now};
 
+#[derive(Clone, Copy)]
+pub struct ResolveOutcome {
+    pub healthy: bool,
+    pub resolved: bool,
+}
+
 pub const OPEN_THRESHOLD: u32 = 3;
 pub const DEFAULT_COOLDOWN: Duration = Duration::from_secs(30);
 pub const DEFAULT_VERDICT_TIMEOUT: Duration = Duration::from_secs(25);
@@ -92,10 +98,11 @@ impl HealthGate {
         }
     }
 
-    pub fn record_resolve_outcome(&self, healthy: bool, resolved: bool) -> Transition {
+    pub fn record_resolve_outcome(&self, outcome: ResolveOutcome) -> Transition {
+        let ResolveOutcome { healthy, resolved } = outcome;
         let now = (self.now)();
         let mut st = self.state();
-        match st.phase {
+        let transition = match st.phase {
             Phase::Closed if healthy => {
                 st.resolve_streak = 0;
                 Transition::None
@@ -123,7 +130,9 @@ impl HealthGate {
                 Transition::Closed
             }
             Phase::Open | Phase::HalfOpenVerdict => Transition::None,
-        }
+        };
+        drop(st);
+        transition
     }
 
     pub fn record_playback_failure(&self) -> Transition {
@@ -154,6 +163,7 @@ impl HealthGate {
             return Transition::None;
         }
         close(&mut st);
+        drop(st);
         Transition::Closed
     }
 

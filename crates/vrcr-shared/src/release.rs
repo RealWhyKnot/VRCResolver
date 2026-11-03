@@ -3,7 +3,8 @@ use std::cmp::Ordering;
 use serde_json::Value;
 
 pub const REPO: &str = "RealWhyKnot/VRCResolver";
-pub const STABLE_LATEST_URL: &str = "https://api.github.com/repos/RealWhyKnot/VRCResolver/releases/latest";
+pub const STABLE_LATEST_URL: &str =
+    "https://api.github.com/repos/RealWhyKnot/VRCResolver/releases/latest";
 pub const ANY_RELEASES_URL: &str =
     "https://api.github.com/repos/RealWhyKnot/VRCResolver/releases?per_page=10";
 

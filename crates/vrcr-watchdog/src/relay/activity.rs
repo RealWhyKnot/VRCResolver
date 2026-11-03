@@ -31,7 +31,8 @@ impl RelayActivity {
         let order = seen.order;
         seen.plays.insert(id.to_owned(), order);
         if seen.plays.len() > MAX_TRACKED {
-            let mut by_age: Vec<(u64, String)> = seen.plays.iter().map(|(k, v)| (*v, k.clone())).collect();
+            let mut by_age: Vec<(u64, String)> =
+                seen.plays.iter().map(|(k, v)| (*v, k.clone())).collect();
             by_age.sort_unstable();
             let drop = seen.plays.len() - MAX_TRACKED / 2;
             for (_, key) in by_age.into_iter().take(drop) {
@@ -52,7 +53,11 @@ impl RelayActivity {
     }
 
     pub fn tracked(&self) -> usize {
-        self.seen.lock().unwrap_or_else(|e| e.into_inner()).plays.len()
+        self.seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .plays
+            .len()
     }
 }
 

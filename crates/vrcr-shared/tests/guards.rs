@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use std::net::{IpAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -40,7 +38,10 @@ fn is_safe_to_emit_allows_only_public_http_shapes() {
             "https://rr3---sn-4g5e6nsz.googlevideo.com/videoplayback?expire=1",
             true,
         ),
-        ("https://proxy.whyknot.dev/api/proxy/manifest.m3u8?q=abc", true),
+        (
+            "https://proxy.whyknot.dev/api/proxy/manifest.m3u8?q=abc",
+            true,
+        ),
         ("https://vrcresolver.com/api/proxy/seg.ts?url=abc", true),
         (
             "http://localhost.youtube.com:41234/play/abc/manifest.m3u8?target=eA",
@@ -174,7 +175,10 @@ fn fallback_prefers_og_next_to_the_wrapper() {
 
 #[test]
 fn fallback_uses_vrc_tools_og_when_the_local_og_is_missing() {
-    assert_eq!(select(Some(VRC), |p| p == og(VRC), |_| false), Some(og(VRC)));
+    assert_eq!(
+        select(Some(VRC), |p| p == og(VRC), |_| false),
+        Some(og(VRC))
+    );
 }
 
 #[test]
@@ -187,7 +191,11 @@ fn fallback_uses_vrc_vanilla_ytdlp_when_no_og_exists() {
 
 #[test]
 fn fallback_skips_candidates_that_are_our_wrapper() {
-    let picked = select(Some(VRC), |p| p == og(EXE) || p == ytdlp(VRC), |p| p == og(EXE));
+    let picked = select(
+        Some(VRC),
+        |p| p == og(EXE) || p == ytdlp(VRC),
+        |p| p == og(EXE),
+    );
     assert_eq!(picked, Some(ytdlp(VRC)));
 }
 

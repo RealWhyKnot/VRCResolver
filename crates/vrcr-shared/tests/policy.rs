@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use std::time::Duration;
 
 use vrcr_shared::budget::{self, retry};
@@ -15,15 +13,30 @@ fn builtin() -> FirstPartyPolicy {
 #[test]
 fn playback_proxy_urls_accept_only_first_party_proxy_shapes() {
     let cases = [
-        ("https://vrcresolver.com/api/proxy/manifest.m3u8?q=abc", true),
-        ("https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=abc", true),
-        ("https://proxy.whyknot.dev/api/proxy/manifest.m3u8?q=abc", true),
+        (
+            "https://vrcresolver.com/api/proxy/manifest.m3u8?q=abc",
+            true,
+        ),
+        (
+            "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=abc",
+            true,
+        ),
+        (
+            "https://proxy.whyknot.dev/api/proxy/manifest.m3u8?q=abc",
+            true,
+        ),
         (
             "https://proxy.whyknot.dev/api/proxy/seg.ts?url=abc&wkedge=node1",
             true,
         ),
-        ("https://node1.whyknot.dev/api/proxy/manifest.m3u8?q=abc", true),
-        ("https://whyknot.dev/api/proxy/lazy-hls/wk_abc/index.m3u8", true),
+        (
+            "https://node1.whyknot.dev/api/proxy/manifest.m3u8?q=abc",
+            true,
+        ),
+        (
+            "https://whyknot.dev/api/proxy/lazy-hls/wk_abc/index.m3u8",
+            true,
+        ),
         (
             "https://node2.vrcresolver.com/api/stream/0123456789abcdef01234567.m3u8?rsedge=node2",
             true,
@@ -37,10 +50,19 @@ fn playback_proxy_urls_accept_only_first_party_proxy_shapes() {
             "https://example.com/api/stream/0123456789abcdef01234567.m3u8",
             false,
         ),
-        ("https://node1.whyknot.dev/api/restream/shared-status", false),
+        (
+            "https://node1.whyknot.dev/api/restream/shared-status",
+            false,
+        ),
         ("https://example.com/api/proxy/manifest.m3u8?q=abc", false),
-        ("https://notwhyknot.dev/api/proxy/manifest.m3u8?q=abc", false),
-        ("https://evil-whyknot.dev/api/proxy/manifest.m3u8?q=abc", false),
+        (
+            "https://notwhyknot.dev/api/proxy/manifest.m3u8?q=abc",
+            false,
+        ),
+        (
+            "https://evil-whyknot.dev/api/proxy/manifest.m3u8?q=abc",
+            false,
+        ),
         (
             "https://evil-vrcresolver.com/api/proxy/manifest.m3u8?q=abc",
             false,
@@ -77,8 +99,14 @@ fn first_party_hosts_cover_both_families() {
 #[test]
 fn trust_gateway_extension_keeps_the_avpro_dispatch_extension() {
     let cases = [
-        ("https://proxy.whyknot.dev/api/proxy/manifest.m3u8?q=abc", "m3u8"),
-        ("https://node1.whyknot.dev/api/proxy/manifest.mpd?q=abc", "mpd"),
+        (
+            "https://proxy.whyknot.dev/api/proxy/manifest.m3u8?q=abc",
+            "m3u8",
+        ),
+        (
+            "https://node1.whyknot.dev/api/proxy/manifest.mpd?q=abc",
+            "mpd",
+        ),
         ("https://node1.whyknot.dev/api/proxy?q=legacy", "m3u8"),
         (
             "https://vrcresolver.com/api/stream/0123456789abcdef01234567.m3u8?rsedge=node1",
@@ -104,8 +132,15 @@ fn trust_gateway_wraps_only_first_party_playback_targets() {
     let p = builtin();
     let target = "https://node1.whyknot.dev/api/proxy/manifest.m3u8?q=abc";
     let local = trust_gateway::build(&p, 51234, target, Some("test-session"), "http").unwrap();
-    assert!(local.starts_with("http://localhost.youtube.com:51234/play/testsession/manifest.m3u8?target="));
-    assert_eq!(trust_gateway::extract_target(&local).as_deref(), Some(target));
+    assert!(
+        local.starts_with(
+            "http://localhost.youtube.com:51234/play/testsession/manifest.m3u8?target="
+        )
+    );
+    assert_eq!(
+        trust_gateway::extract_target(&local).as_deref(),
+        Some(target)
+    );
     assert!(
         trust_gateway::build(
             &p,
@@ -143,8 +178,15 @@ fn trust_gateway_can_emit_https_urls() {
     let p = builtin();
     let target = "https://node1.whyknot.dev/api/proxy/manifest.m3u8?q=abc";
     let local = trust_gateway::build(&p, 51234, target, Some("test-session"), "https").unwrap();
-    assert!(local.starts_with("https://localhost.youtube.com:51234/play/testsession/manifest.m3u8?target="));
-    assert_eq!(trust_gateway::extract_target(&local).as_deref(), Some(target));
+    assert!(
+        local.starts_with(
+            "https://localhost.youtube.com:51234/play/testsession/manifest.m3u8?target="
+        )
+    );
+    assert_eq!(
+        trust_gateway::extract_target(&local).as_deref(),
+        Some(target)
+    );
 }
 
 #[test]
@@ -171,7 +213,11 @@ fn trust_gateway_allows_only_http_and_https_schemes() {
         ("ftp", false),
         ("", false),
     ] {
-        assert_eq!(trust_gateway::is_allowed_scheme(scheme), expected, "{scheme}");
+        assert_eq!(
+            trust_gateway::is_allowed_scheme(scheme),
+            expected,
+            "{scheme}"
+        );
     }
 }
 
@@ -187,14 +233,19 @@ fn trust_gateway_local_host_list_is_exact() {
         ("youtube.com", false),
     ];
     for (host, expected) in cases {
-        assert_eq!(trust_gateway::is_local_gateway_host(host), expected, "{host}");
+        assert_eq!(
+            trust_gateway::is_local_gateway_host(host),
+            expected,
+            "{host}"
+        );
     }
 }
 
 #[test]
 fn trust_gateway_extract_rejects_non_gateway_urls() {
     assert!(
-        trust_gateway::extract_target("https://node1.whyknot.dev/api/proxy/manifest.m3u8?q=abc").is_none()
+        trust_gateway::extract_target("https://node1.whyknot.dev/api/proxy/manifest.m3u8?q=abc")
+            .is_none()
     );
     assert!(
         trust_gateway::extract_target(
@@ -293,8 +344,14 @@ fn re_ask_is_redundant_only_after_a_hintless_validation_reject() {
         Some("validation_failed_http_403"),
         Some(5000)
     ));
-    assert!(!budget::re_ask_is_redundant(Some("discovery_in_progress"), None));
-    assert!(!budget::re_ask_is_redundant(Some("all_configs_failed"), None));
+    assert!(!budget::re_ask_is_redundant(
+        Some("discovery_in_progress"),
+        None
+    ));
+    assert!(!budget::re_ask_is_redundant(
+        Some("all_configs_failed"),
+        None
+    ));
     assert!(!budget::re_ask_is_redundant(None, None));
 }
 
@@ -304,12 +361,27 @@ fn ms(n: u64) -> Duration {
 
 #[test]
 fn og_window_follows_the_budget_rules() {
-    assert_eq!(budget::og_window(ms(26_500), true, None), budget::OG_RESERVE);
+    assert_eq!(
+        budget::og_window(ms(26_500), true, None),
+        budget::OG_RESERVE
+    );
     assert_eq!(budget::og_window(ms(100), true, None), ms(22_900));
-    assert_eq!(budget::og_window(ms(27_000), true, None), budget::OG_RESERVE);
-    assert_eq!(budget::og_window(ms(600_000), true, None), budget::OG_RESERVE);
-    assert_eq!(budget::og_window(ms(26_000), false, None), budget::OG_HARD_CAP);
-    assert_eq!(budget::og_window(ms(16_000), true, Some(41_500)), ms(12_000));
+    assert_eq!(
+        budget::og_window(ms(27_000), true, None),
+        budget::OG_RESERVE
+    );
+    assert_eq!(
+        budget::og_window(ms(600_000), true, None),
+        budget::OG_RESERVE
+    );
+    assert_eq!(
+        budget::og_window(ms(26_000), false, None),
+        budget::OG_HARD_CAP
+    );
+    assert_eq!(
+        budget::og_window(ms(16_000), true, Some(41_500)),
+        ms(12_000)
+    );
     assert_eq!(budget::og_window(ms(16_000), true, Some(20_000)), ms(7_000));
     assert_eq!(
         budget::og_window(ms(26_500), true, Some(41_500)),

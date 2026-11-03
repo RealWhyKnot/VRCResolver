@@ -1,0 +1,20 @@
+{
+  "typeCheckingMode": "strict",
+  "exclude": [
+    "**/firmware",
+    "**/vendor",
+    "**/third_party",
+    "**/node_modules",
+    "**/.yarn"
+  ],
+  "enableTypeIgnoreComments": false,
+  "deprecateTypingAliases": true,
+  "reportMissingModuleSource": "error",
+  "reportCallInDefaultInitializer": "error",
+  "reportImplicitOverride": "error",
+  "reportImplicitStringConcatenation": "error",
+  "reportImportCycles": "error",
+  "reportPropertyTypeMismatch": "error",
+  "reportUnnecessaryTypeIgnoreComment": "error",
+  "reportUnreachable": "error"
+}

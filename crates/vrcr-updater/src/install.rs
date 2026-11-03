@@ -15,9 +15,12 @@ const MOVE_RETRIES: u32 = 3;
 const MOVE_RETRY_DELAY: Duration = Duration::from_millis(200);
 
 pub fn safe_install_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
-    let rel = normalize_rel(relative).ok_or_else(|| format!("Unsafe release manifest path: {relative}"))?;
+    let rel = normalize_rel(relative)
+        .ok_or_else(|| format!("Unsafe release manifest path: {relative}"))?;
     if rel.components().any(|c| !matches!(c, Component::Normal(_))) {
-        return Err(format!("Release path escapes install directory: {relative}"));
+        return Err(format!(
+            "Release path escapes install directory: {relative}"
+        ));
     }
     Ok(root.join(rel))
 }
@@ -137,10 +140,12 @@ fn replace_error(dst: &Path, e: &io::Error) -> String {
 fn stage(from: &Path, to: &Path) -> Result<Vec<(PathBuf, PathBuf)>, String> {
     let mut staged: Vec<(PathBuf, PathBuf)> = Vec::new();
     let result = (|| {
-        for file in files_under(from).map_err(|e| format!("could not list {}: {e}", from.display()))? {
+        for file in
+            files_under(from).map_err(|e| format!("could not list {}: {e}", from.display()))?
+        {
             let rel = file
                 .strip_prefix(from)
-                .map_err(|e| e.to_string())?
+                .map_err(|e| format!("find payload relative path: {e}"))?
                 .to_string_lossy()
                 .into_owned();
             let target = safe_install_path(to, &rel)?;
@@ -152,7 +157,8 @@ fn stage(from: &Path, to: &Path) -> Result<Vec<(PathBuf, PathBuf)>, String> {
                 continue;
             }
             let temp = suffixed(&target, "new");
-            fs::copy(&file, &temp).map_err(|e| format!("could not stage {}: {e}", target.display()))?;
+            fs::copy(&file, &temp)
+                .map_err(|e| format!("could not stage {}: {e}", target.display()))?;
             staged.push((temp, target));
         }
         Ok(())
@@ -202,7 +208,11 @@ fn rollback(renamed: &[(PathBuf, PathBuf)]) -> Vec<String> {
             fs::rename(backup, dst)
         })();
         if let Err(e) = restored {
-            failures.push(format!("{} (backup at {}): {e}", dst.display(), backup.display()));
+            failures.push(format!(
+                "{} (backup at {}): {e}",
+                dst.display(),
+                backup.display()
+            ));
         }
     }
     failures

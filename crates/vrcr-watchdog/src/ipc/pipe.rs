@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 use std::ffi::c_void;
 use std::io;
 
@@ -14,13 +12,16 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 pub fn pipe_sddl(owner_sid: &str) -> String {
-    format!("O:{owner_sid}G:{owner_sid}D:(A;;0x1f019f;;;{owner_sid})(A;;0x1f019f;;;SY)S:(ML;;NW;;;LW)")
+    format!(
+        "O:{owner_sid}G:{owner_sid}D:(A;;0x1f019f;;;{owner_sid})(A;;0x1f019f;;;SY)S:(ML;;NW;;;LW)"
+    )
 }
 
 struct Token(HANDLE);
 
 impl Drop for Token {
     fn drop(&mut self) {
+        // SAFETY: Token owns the non-null handle returned by OpenProcessToken and closes it once.
         unsafe {
             CloseHandle(self.0);
         }
@@ -32,6 +33,7 @@ struct Local(*mut c_void);
 impl Drop for Local {
     fn drop(&mut self) {
         if !self.0.is_null() {
+            // SAFETY: Local owns memory allocated by the security APIs with LocalAlloc and frees it once.
             unsafe {
                 LocalFree(self.0);
             }
@@ -43,8 +45,9 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-fn from_wide(p: *const u16) -> String {
+unsafe fn from_wide(p: *const u16) -> String {
     let mut len = 0usize;
+    // SAFETY: The caller supplies a live NUL-terminated UTF-16 allocation for the entire scan and copy.
     unsafe {
         while *p.add(len) != 0 {
             len += 1;
@@ -54,6 +57,7 @@ fn from_wide(p: *const u16) -> String {
 }
 
 pub fn current_user_sid() -> io::Result<String> {
+    // SAFETY: Owned handles and aligned buffers stay live; successful SID conversion returns NUL-terminated text.
     unsafe {
         let mut raw: HANDLE = std::ptr::null_mut();
         if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw) == 0 {
@@ -65,8 +69,16 @@ pub fn current_user_sid() -> io::Result<String> {
         if needed == 0 {
             return Err(io::Error::last_os_error());
         }
-        let mut buf = vec![0u64; (needed as usize).div_ceil(8)];
-        if GetTokenInformation(token.0, TokenUser, buf.as_mut_ptr().cast(), needed, &mut needed) == 0 {
+        let size = usize::try_from(needed).map_err(io::Error::other)?;
+        let mut buf = vec![0u64; size.div_ceil(8)];
+        if GetTokenInformation(
+            token.0,
+            TokenUser,
+            buf.as_mut_ptr().cast(),
+            needed,
+            &mut needed,
+        ) == 0
+        {
             return Err(io::Error::last_os_error());
         }
         let user = &*(buf.as_ptr().cast::<TOKEN_USER>());
@@ -81,6 +93,7 @@ pub fn current_user_sid() -> io::Result<String> {
 
 pub fn create(path: &str, sddl: &str) -> io::Result<NamedPipeServer> {
     let sddl_w = wide(sddl);
+    // SAFETY: SDDL is NUL-terminated and the owned descriptor and attributes outlive synchronous pipe creation.
     unsafe {
         let mut descriptor: *mut c_void = std::ptr::null_mut();
         if ConvertStringSecurityDescriptorToSecurityDescriptorW(
@@ -94,7 +107,8 @@ pub fn create(path: &str, sddl: &str) -> io::Result<NamedPipeServer> {
         }
         let descriptor = Local(descriptor);
         let mut attrs = SECURITY_ATTRIBUTES {
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            nLength: u32::try_from(std::mem::size_of::<SECURITY_ATTRIBUTES>())
+                .map_err(io::Error::other)?,
             lpSecurityDescriptor: descriptor.0,
             bInheritHandle: 0,
         };

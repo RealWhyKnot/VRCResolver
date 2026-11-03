@@ -111,8 +111,10 @@ pub fn site_key(url: &str) -> String {
     if host == "?" || host.is_empty() {
         return String::new();
     }
-    if matches!(host.as_str(), "youtu.be" | "youtube.com" | "youtube-nocookie.com")
-        || host.ends_with(".youtube.com")
+    if matches!(
+        host.as_str(),
+        "youtu.be" | "youtube.com" | "youtube-nocookie.com"
+    ) || host.ends_with(".youtube.com")
     {
         return "youtube.com".to_owned();
     }

@@ -82,7 +82,10 @@ impl ShutdownCoordinator {
     }
 
     pub fn started(&self) -> bool {
-        self.done.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+        self.done
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
     }
 
     pub fn run(&self, trigger: &str, fast: bool) -> impl Future<Output = ()> + Send + 'static {
@@ -93,9 +96,9 @@ impl ShutdownCoordinator {
                 None => {
                     let (tx, rx) = watch::channel(false);
                     let core = Core {
-                        restore: self.restore.clone(),
-                        steps: self.steps.clone(),
-                        log: self.log.clone(),
+                        restore: std::sync::Arc::clone(&self.restore),
+                        steps: std::sync::Arc::clone(&self.steps),
+                        log: std::sync::Arc::clone(&self.log),
                         total_budget: self.total_budget,
                     };
                     let trigger = trigger.to_owned();
@@ -123,7 +126,7 @@ struct Core {
 
 impl Core {
     fn log(&self, line: &str) {
-        let log = self.log.clone();
+        let log = std::sync::Arc::clone(&self.log);
         let line = line.to_owned();
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || log(&line)));
     }
@@ -132,7 +135,7 @@ impl Core {
         let clock = Instant::now();
         self.log(&format!("shutdown trigger={trigger}"));
 
-        let restore = self.restore.clone();
+        let restore = std::sync::Arc::clone(&self.restore);
         let reason = trigger.to_owned();
         let restored = match tokio::task::spawn_blocking(move || restore(&reason)).await {
             Ok(Ok(r)) => r,
@@ -150,8 +153,9 @@ impl Core {
             return;
         }
 
-        let provider = self.steps.clone();
-        let steps = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || provider())) {
+        let provider = std::sync::Arc::clone(&self.steps);
+        let steps = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || provider()))
+        {
             Ok(s) => s,
             Err(_) => {
                 self.log("shutdown steps unavailable: panicked");

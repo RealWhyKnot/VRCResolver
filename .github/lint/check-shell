@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s inherit_errexit
+found=$(git -c core.quotepath=off ls-files | awk -f .github/lint/shell-files.awk .github/lint/vendored-paths.txt -)
+mapfile -t all <<<"${found}"
+files=()
+for file in "${all[@]}"; do
+  [[ -z ${file} ]] || files+=("${file}")
+done
+modes=$(git ls-files -s -- "${files[@]}")
+eols=$(git ls-files --eol -- "${files[@]}")
+shellcheck -f gcc "${files[@]}"
+shfmt -d "${files[@]}"
+awk -v modes="${modes}" -v eols="${eols}" -f .github/lint/shell-style.awk "${files[@]}"

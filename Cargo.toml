@@ -18,6 +18,7 @@ bytes = "1.12.1"
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
 hex = "0.4"
 memchr = "2"
+num-traits = "0.2.19"
 http = "1.5.0"
 http-body-util = "0.1.5"
 hyper = { version = "1.12.0", features = ["server", "http1"] }
@@ -48,13 +49,40 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 winresource = "0.1"
 
 [workspace.lints.rust]
-unsafe_code = "deny"
+unknown_lints = "deny"
+unreachable_pub = "deny"
 
 [workspace.lints.clippy]
-all = { level = "warn", priority = -1 }
-dbg_macro = "warn"
-todo = "warn"
-unwrap_used = "warn"
+all = { level = "deny", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+undocumented_unsafe_blocks = "deny"
+unnecessary_safety_comment = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+self_named_module_files = "deny"
+ref_option = "deny"
+needless_pass_by_value = "deny"
+fn_params_excessive_bools = "deny"
+clone_on_ref_ptr = "deny"
+redundant_clone = "deny"
+match_wildcard_for_single_variants = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_sign_loss = "deny"
+cast_lossless = "deny"
+cast_precision_loss = "deny"
+as_conversions = "deny"
+map_err_ignore = "deny"
+format_push_string = "deny"
+needless_collect = "deny"
+significant_drop_tightening = "deny"
+manual_assert_eq = "deny"
+assert_is_empty = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
 
 [profile.release]
 lto = "fat"

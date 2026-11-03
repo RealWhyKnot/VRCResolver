@@ -55,7 +55,9 @@ pub fn classify(open_result: u32) -> AudioState {
 
 pub fn from_probe(probe: DefaultOutput) -> AudioCheck {
     match probe {
-        DefaultOutput::NoDevices | DefaultOutput::NoPreferred => AudioCheck::new(AudioState::NoDevice, None),
+        DefaultOutput::NoDevices | DefaultOutput::NoPreferred => {
+            AudioCheck::new(AudioState::NoDevice, None)
+        }
         DefaultOutput::Unknown => AudioCheck::new(AudioState::Unknown, None),
         DefaultOutput::Opened { result, device } => AudioCheck {
             state: classify(result),

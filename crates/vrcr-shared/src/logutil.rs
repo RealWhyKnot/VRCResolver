@@ -1,17 +1,52 @@
 use url::Url;
 
 pub fn sanitize_for_console(value: &str, max_len: usize) -> String {
+    let redacted = redact_message_urls(value);
+    let value = redacted.as_ref();
     let max_len = max_len.max(1);
     let mut out = String::with_capacity(value.len().min(max_len) + 3);
     let mut chars = value.chars();
     for c in chars.by_ref().take(max_len) {
-        let control = (c as u32) < 0x20 || matches!(c, '\u{7F}' | '\u{2028}' | '\u{2029}');
+        let control = u32::from(c) < 0x20 || matches!(c, '\u{7F}' | '\u{2028}' | '\u{2029}');
         out.push(if control { '?' } else { c });
     }
     if chars.next().is_some() {
         out.push_str("...");
     }
     out
+}
+
+fn redact_message_urls(value: &str) -> std::borrow::Cow<'_, str> {
+    let mut remaining = value;
+    let mut output = String::new();
+    while let Some(start) = remaining
+        .char_indices()
+        .map(|(index, _)| index)
+        .find(|&index| {
+            ["https://", "http://", "wss://", "ws://"]
+                .iter()
+                .any(|prefix| {
+                    remaining
+                        .get(index..index + prefix.len())
+                        .is_some_and(|text| text.eq_ignore_ascii_case(prefix))
+                })
+        })
+    {
+        output.push_str(&remaining[..start]);
+        let url = &remaining[start..];
+        let end = url
+            .find(|character: char| {
+                character.is_whitespace() || matches!(character, '"' | '\'' | '<' | '>')
+            })
+            .unwrap_or(url.len());
+        output.push_str(&redact_url(&url[..end]));
+        remaining = &url[end..];
+    }
+    if output.is_empty() {
+        return std::borrow::Cow::Borrowed(value);
+    }
+    output.push_str(remaining);
+    std::borrow::Cow::Owned(output)
 }
 
 pub fn sanitize(value: &str) -> String {
@@ -22,17 +57,10 @@ pub fn redact_url(url: &str) -> String {
     if url.is_empty() {
         return String::new();
     }
-    match Url::parse(url) {
-        Ok(u) => {
-            let path = u.path();
-            let path = match path.char_indices().nth(60) {
-                Some((cut, _)) => format!("{}...", &path[..cut]),
-                None => path.to_owned(),
-            };
-            format!("{}://{}{}", u.scheme(), u.host_str().unwrap_or_default(), path)
-        }
-        Err(_) => sanitize(url),
-    }
+    Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "?".to_owned())
 }
 
 pub fn bare_host(url: &str) -> String {
@@ -46,14 +74,6 @@ pub fn bare_host(url: &str) -> String {
         }
         Err(_) => "?".to_owned(),
     }
-}
-
-pub fn payload_preview(payload: &[u8], max_bytes: usize) -> String {
-    if payload.is_empty() {
-        return String::new();
-    }
-    let head = &payload[..payload.len().min(max_bytes)];
-    sanitize_for_console(&String::from_utf8_lossy(head), max_bytes)
 }
 
 pub fn iso8601_utc(at: std::time::SystemTime) -> String {
@@ -141,11 +161,18 @@ pub fn parse_iso8601_utc(text: &str) -> Option<std::time::SystemTime> {
     }
     let num = |r: std::ops::Range<usize>| -> Option<i64> {
         let s = t.get(r)?;
-        s.bytes().all(|c| c.is_ascii_digit()).then(|| s.parse().ok())?
+        s.bytes()
+            .all(|c| c.is_ascii_digit())
+            .then(|| s.parse().ok())?
     };
     let (year, month, day) = (num(0..4)?, num(5..7)?, num(8..10)?);
     let (hour, minute, second) = (num(11..13)?, num(14..16)?, num(17..19)?);
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
         return None;
     }
     let mut rest = &t[19..];

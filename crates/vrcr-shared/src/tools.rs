@@ -16,7 +16,8 @@ const SIDECAR_PREFIXES: [&str; 4] = [
     "yt-dlp-og.exe.new-",
     "yt-dlp-og.exe.stale-",
 ];
-const LEGACY_INSTALL_TOOLS: [&str; 2] = ["yt-dlp-og-fallback.exe", "yt-dlp-og-fallback.version.txt"];
+const LEGACY_INSTALL_TOOLS: [&str; 2] =
+    ["yt-dlp-og-fallback.exe", "yt-dlp-og-fallback.version.txt"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RestoreOutcome {
@@ -108,7 +109,10 @@ pub fn restore(
                 RestoreOutcome::Restored,
                 "moved yt-dlp-og.exe into place".to_owned(),
             ),
-            Err(e) => (RestoreOutcome::Failed, format!("restore failed: {}", kind(&e))),
+            Err(e) => (
+                RestoreOutcome::Failed,
+                format!("restore failed: {}", kind(&e)),
+            ),
         };
     }
 
@@ -130,7 +134,10 @@ pub fn restore(
     if let Err(e) = move_file(&target, &stale, false) {
         return (
             RestoreOutcome::Failed,
-            format!("yt-dlp.exe is locked and could not be moved aside: {}", kind(&e)),
+            format!(
+                "yt-dlp.exe is locked and could not be moved aside: {}",
+                kind(&e)
+            ),
         );
     }
 
@@ -147,10 +154,17 @@ pub fn restore(
 }
 
 fn put_back(stale: &Path, target: &Path, cause: &io::Error) -> String {
-    let prefix = format!("could not move yt-dlp-og.exe into place ({}); ", kind(cause));
+    let prefix = format!(
+        "could not move yt-dlp-og.exe into place ({}); ",
+        kind(cause)
+    );
     match move_file(stale, target, false) {
         Ok(()) => prefix + "yt-dlp.exe put back",
-        Err(e) => format!("{prefix}yt-dlp.exe left as {} ({})", file_name(stale), kind(&e)),
+        Err(e) => format!(
+            "{prefix}yt-dlp.exe left as {} ({})",
+            file_name(stale),
+            kind(&e)
+        ),
     }
 }
 

@@ -1,0 +1,12 @@
+external-sources=true
+source-path=SCRIPTDIR
+enable=add-default-case
+enable=avoid-negated-conditions
+enable=avoid-nullary-conditions
+enable=check-extra-masked-returns
+enable=check-unassigned-uppercase
+enable=deprecate-which
+enable=quote-safe-variables
+enable=require-double-brackets
+enable=require-variable-braces
+enable=useless-use-of-cat

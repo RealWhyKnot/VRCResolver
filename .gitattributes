@@ -1,3 +1,8 @@
 * text=auto
 
 .githooks/* text eol=lf
+
+*.sh text eol=lf
+*.bash text eol=lf
+*.sh.tpl text eol=lf
+*.bash.tpl text eol=lf

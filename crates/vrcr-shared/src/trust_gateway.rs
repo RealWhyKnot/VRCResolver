@@ -57,8 +57,14 @@ pub fn wrap_for_relay(
     if !probe(port) {
         return url.to_owned();
     }
-    build(policy, u32::from(port), url, None, &read_relay_scheme(state_root))
-        .unwrap_or_else(|| url.to_owned())
+    build(
+        policy,
+        u32::from(port),
+        url,
+        None,
+        &read_relay_scheme(state_root),
+    )
+    .unwrap_or_else(|| url.to_owned())
 }
 
 pub fn read_relay_port(state_root: &Path) -> Option<u16> {
@@ -80,7 +86,10 @@ pub fn extract_target(local_url: &str) -> Option<String> {
         return None;
     }
     let path = uri.path();
-    if !path.get(..6).is_some_and(|p| p.eq_ignore_ascii_case("/play/")) {
+    if !path
+        .get(..6)
+        .is_some_and(|p| p.eq_ignore_ascii_case("/play/"))
+    {
         return None;
     }
     let encoded = find_query_value(uri.query()?, "target")?;

@@ -1921,6 +1921,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "num-traits",
  "rcgen",
  "regex-lite",
  "reqwest",

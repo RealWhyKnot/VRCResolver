@@ -49,7 +49,10 @@ impl Dir {
         out
     }
     fn stales(&self) -> usize {
-        self.files().iter().filter(|n| n.contains(".stale-")).count()
+        self.files()
+            .iter()
+            .filter(|n| n.contains(".stale-"))
+            .count()
     }
 }
 
@@ -100,7 +103,8 @@ fn restore(d: &Dir, ops: &dyn RestoreOps) -> (RestoreOutcome, String) {
 fn restore_moves_a_running_wrapper_aside() {
     let d = Dir::new();
     let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
-    fs::copy(Path::new(&system).join(r"System32\PING.EXE"), d.target()).unwrap_or_else(|e| panic!("{e}"));
+    fs::copy(Path::new(&system).join(r"System32\PING.EXE"), d.target())
+        .unwrap_or_else(|e| panic!("{e}"));
     let og = fixtures::bundled(1);
     d.put("yt-dlp-og.exe", &og);
     let mut child = std::process::Command::new(d.target())
@@ -115,7 +119,7 @@ fn restore_moves_a_running_wrapper_aside() {
     let _ = child.wait();
 
     assert_eq!(outcome, RestoreOutcome::Restored, "{detail}");
-    assert!(!detail.is_empty());
+    assert_ne!(detail, "");
     assert_eq!(read(&d.target()), og);
     assert!(!d.og().exists());
     assert_eq!(d.stales(), 1);
@@ -132,7 +136,7 @@ fn restore_keeps_a_newer_vrchat_binary() {
     let (outcome, detail) = restore(&d, &RealOps);
 
     assert_eq!(outcome, RestoreOutcome::KeptNewerVrchatBinary);
-    assert!(!detail.is_empty());
+    assert_ne!(detail, "");
     assert_eq!(read(&d.target()), newer);
     assert_eq!(d.files(), ["yt-dlp.exe"]);
 }
@@ -140,7 +144,10 @@ fn restore_keeps_a_newer_vrchat_binary() {
 #[test]
 fn restore_moves_the_og_over_a_vrchat_binary_that_is_not_complete() {
     let d = Dir::new();
-    d.put("yt-dlp.exe", &fixtures::cut(fixtures::complete_bundled(1), 100));
+    d.put(
+        "yt-dlp.exe",
+        &fixtures::cut(fixtures::complete_bundled(1), 100),
+    );
     let og = fixtures::complete_bundled(2);
     d.put("yt-dlp-og.exe", &og);
 
@@ -189,7 +196,7 @@ fn restore_never_destroys_the_target_when_the_og_vanishes() {
     let (outcome, detail) = restore(&d, &ops);
 
     assert_eq!(outcome, RestoreOutcome::Failed);
-    assert!(!detail.is_empty());
+    assert_ne!(detail, "");
     assert_eq!(read(&d.target()), original);
     assert_eq!(d.stales(), 0);
 }
@@ -239,8 +246,8 @@ fn restore_without_og_removes_our_wrapper() {
     let (outcome, detail) = restore(&d, &RealOps);
 
     assert_eq!(outcome, RestoreOutcome::RemovedOrphanWrapper);
-    assert!(!detail.is_empty());
-    assert!(d.files().is_empty());
+    assert_ne!(detail, "");
+    assert_eq!(d.files(), <[std::string::String; 0]>::default());
 }
 
 #[test]
@@ -259,7 +266,7 @@ fn restore_without_og_leaves_a_target_that_is_not_ours() {
 fn restore_with_nothing_in_tools_has_nothing_to_do() {
     let d = Dir::new();
     assert_eq!(restore(&d, &RealOps).0, RestoreOutcome::NothingToDo);
-    assert!(d.files().is_empty());
+    assert_eq!(d.files(), <[std::string::String; 0]>::default());
 }
 
 #[test]
@@ -271,7 +278,7 @@ fn restore_with_only_the_og_moves_it_into_place() {
     let (outcome, detail) = restore(&d, &RealOps);
 
     assert_eq!(outcome, RestoreOutcome::Restored);
-    assert!(!detail.is_empty());
+    assert_ne!(detail, "");
     assert_eq!(read(&d.target()), og);
     assert_eq!(d.files(), ["yt-dlp.exe"]);
 }
@@ -305,7 +312,7 @@ fn restore_fails_for_a_missing_directory() {
     let d = Dir::new();
     let (outcome, detail) = tools::restore(&d.path().join("does-not-exist"), None, &RealOps);
     assert_eq!(outcome, RestoreOutcome::Failed);
-    assert!(!detail.is_empty());
+    assert_ne!(detail, "");
 }
 
 #[test]
@@ -314,7 +321,8 @@ fn restore_details_never_carry_a_full_path() {
     d.put("yt-dlp.exe", &fixtures::wrapper());
     d.put("yt-dlp-og.exe", &fixtures::bundled(1));
     let dir = d.path().display().to_string();
-    let fail = |_: u32, _: &Path, _: &Path, _: bool| Err(io::Error::other(format!("simulated at {dir}")));
+    let fail =
+        |_: u32, _: &Path, _: &Path, _: bool| Err(io::Error::other(format!("simulated at {dir}")));
     let ops = FakeOps::moving(&fail);
 
     let (_, detail) = restore(&d, &ops);
@@ -382,7 +390,9 @@ fn sweep_deletes_known_sidecars_and_leaves_everything_else() {
 #[test]
 fn sweep_handles_missing_directory_silently() {
     let d = Dir::new();
-    tools::sweep(&d.path().join("does-not-exist"), &Log::disabled(), &|_| true);
+    tools::sweep(&d.path().join("does-not-exist"), &Log::disabled(), &|_| {
+        true
+    });
     tools::sweep(Path::new(""), &Log::disabled(), &|_| true);
 }
 
@@ -392,7 +402,7 @@ fn sweep_is_case_insensitive() {
     d.put("YT-DLP.EXE.NEW-ABCD1234", b"");
     d.put("yt-dlp.EXE.STALE-20260503", b"");
     sweep(&d);
-    assert!(d.files().is_empty());
+    assert_eq!(d.files(), <[std::string::String; 0]>::default());
 }
 
 #[test]
@@ -409,7 +419,13 @@ fn sweep_deletes_legacy_yt_dlp_wrapper_log() {
 fn sweep_deletes_pyinstaller_temp_dirs_whose_owning_process_is_gone() {
     let d = Dir::new();
     let mine = format!("_MEI{}", std::process::id());
-    for n in ["_MEI999999998", mine.as_str(), "_MEInotapid", "_MEI", "notes"] {
+    for n in [
+        "_MEI999999998",
+        mine.as_str(),
+        "_MEInotapid",
+        "_MEI",
+        "notes",
+    ] {
         fs::create_dir(d.path().join(n)).unwrap_or_else(|e| panic!("{e}"));
         fs::write(d.path().join(n).join("python313.dll"), b"").unwrap_or_else(|e| panic!("{e}"));
     }
@@ -456,9 +472,9 @@ fn sweep_restores_a_bundled_stale_when_target_and_og_are_missing() {
 
     assert_eq!(d.files(), ["yt-dlp.exe"]);
     assert_eq!(read(&d.target()), bundled);
-    assert!(
-        logged.contains("[patch] sweep: put VRChat's yt-dlp.exe back from yt-dlp.exe.stale-20261011120000")
-    );
+    assert!(logged.contains(
+        "[patch] sweep: put VRChat's yt-dlp.exe back from yt-dlp.exe.stale-20261011120000"
+    ));
 }
 
 #[test]
@@ -478,7 +494,7 @@ fn sweep_still_deletes_a_wrapper_stale() {
     let d = Dir::new();
     d.put("yt-dlp.exe.stale-20261011120000", &fixtures::wrapper());
     sweep(&d);
-    assert!(d.files().is_empty());
+    assert_eq!(d.files(), <[std::string::String; 0]>::default());
 }
 
 #[test]

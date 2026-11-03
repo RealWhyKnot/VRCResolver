@@ -94,7 +94,9 @@ fn join_values(src: &HeaderMap, name: &HeaderName) -> Vec<u8> {
 }
 
 pub fn first_header(src: &HeaderMap, name: &str) -> Option<String> {
-    src.get(name).and_then(|v| v.to_str().ok()).map(str::to_owned)
+    src.get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
 }
 
 pub fn long_header(src: &HeaderMap, name: &str) -> i64 {

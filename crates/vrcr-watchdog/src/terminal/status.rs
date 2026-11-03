@@ -9,6 +9,12 @@ use super::text::{
 use crate::display::{format_bytes, format_bytes_per_second};
 use crate::stats::{Activity, Bandwidth};
 
+#[derive(Clone, Copy)]
+struct StatusFields {
+    totals: bool,
+    spark: bool,
+}
+
 pub const PROMPT: &str = "vrcr> ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,17 +50,36 @@ impl Flags {
 }
 
 pub fn normalize_width(width: usize) -> usize {
-    if width == 0 { 119 } else { width.clamp(20, 180) }
+    if width == 0 {
+        119
+    } else {
+        width.clamp(20, 180)
+    }
 }
 
-pub fn format(activity: &Activity, bandwidth: &Bandwidth, now: SystemTime, line: &LineInput<'_>) -> Frame {
+pub fn format(
+    activity: &Activity,
+    bandwidth: &Bandwidth,
+    now: SystemTime,
+    line: &LineInput<'_>,
+) -> Frame {
     let width = normalize_width(line.width);
     if !line.status_line {
         return prompt_only(line.input, line.ghost, line.cursor, width);
     }
     let g = glyphs(line.unicode);
     let flags = Flags::of(activity, now);
-    let status = status_runs(activity, bandwidth, line, g, flags, width >= 100, width >= 116);
+    let status = status_runs(
+        activity,
+        bandwidth,
+        line,
+        g,
+        flags,
+        StatusFields {
+            totals: width >= 100,
+            spark: width >= 116,
+        },
+    );
     let status_len: usize = status.iter().map(|r| clen(&r.text)).sum();
 
     let mut runs = status;
@@ -72,7 +97,17 @@ pub fn format(activity: &Activity, bandwidth: &Bandwidth, now: SystemTime, line:
         return full;
     }
 
-    let narrow = status_runs(activity, bandwidth, line, g, flags, false, false);
+    let narrow = status_runs(
+        activity,
+        bandwidth,
+        line,
+        g,
+        flags,
+        StatusFields {
+            totals: false,
+            spark: false,
+        },
+    );
     let status_text: String = narrow.iter().map(|r| r.text.as_str()).collect();
     let fitted = fit(&status_text, line.input, width);
     let cursor = clen(&fitted);
@@ -89,16 +124,23 @@ fn status_runs(
     line: &LineInput<'_>,
     g: &Glyphs,
     f: Flags,
-    totals: bool,
-    spark: bool,
+    fields: StatusFields,
 ) -> Vec<Run> {
+    let StatusFields { totals, spark } = fields;
     let spin = line.spinner;
     let anim = line.animations;
     let mut runs = Vec::with_capacity(24);
     let gap = || Run::new(" ", Color::DarkGray);
 
     runs.push(Run::new("VRChat", Color::Gray));
-    let relay_glyph = activity_glyph(g, f.relay_animating, spin, anim);
+    let relay_glyph = activity_glyph(
+        g,
+        crate::terminal::text::AnimationState {
+            active: f.relay_animating,
+            animated: anim,
+        },
+        spin,
+    );
     if !relay_glyph.is_empty() {
         runs.push(gap());
         runs.push(Run::new(relay_glyph, pulse_color(spin, 0, anim)));
@@ -110,7 +152,10 @@ fn status_runs(
             pulse_color(spin, 1, f.relay_animating && anim),
         ));
         runs.push(gap());
-        runs.push(Run::new(format_bytes_per_second(bandwidth.current), Color::White));
+        runs.push(Run::new(
+            format_bytes_per_second(bandwidth.current),
+            Color::White,
+        ));
         runs.push(Run::new(" now", Color::DarkGray));
     } else {
         runs.push(Run::new("waiting", Color::DarkGray));
@@ -134,7 +179,14 @@ fn status_runs(
     }
 
     runs.push(Run::new("  resolver", Color::Gray));
-    let upstream_glyph = activity_glyph(g, f.upstream_animating, spin.wrapping_add(1), anim);
+    let upstream_glyph = activity_glyph(
+        g,
+        crate::terminal::text::AnimationState {
+            active: f.upstream_animating,
+            animated: anim,
+        },
+        spin.wrapping_add(1),
+    );
     if !upstream_glyph.is_empty() {
         runs.push(gap());
         runs.push(Run::new(upstream_glyph, pulse_color(spin, 2, anim)));

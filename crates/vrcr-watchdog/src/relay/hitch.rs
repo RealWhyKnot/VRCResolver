@@ -170,7 +170,13 @@ impl HitchDetector {
         })
     }
 
-    fn sequence(&self, stream: &str, segment: i64, now: SystemTime, reasons: &mut Vec<String>) -> (i64, i64) {
+    fn sequence(
+        &self,
+        stream: &str,
+        segment: i64,
+        now: SystemTime,
+        reasons: &mut Vec<String>,
+    ) -> (i64, i64) {
         if stream.trim().is_empty() || segment < 0 {
             return (-1, -1);
         }
@@ -208,6 +214,7 @@ impl HitchDetector {
         }
         state.last_segment = segment;
         state.last_seen = Some(now);
+        drop(streams);
         (previous, gap)
     }
 }
@@ -218,9 +225,14 @@ pub fn relay_kind(sample: &TimingSample) -> RelayKind {
 
 fn classify(sample: &TimingSample) -> (RelayKind, Option<(String, i64)>) {
     let parsed = Url::parse(&sample.target_url).ok();
-    let path = parsed.as_ref().map_or(sample.target_url.as_str(), |u| u.path());
+    let path = parsed
+        .as_ref()
+        .map_or(sample.target_url.as_str(), |u| u.path());
     let lazy = parsed.as_ref().and_then(|u| parse_lazy_path(u.path()));
-    let kind = if lazy.is_some() || ends_with_segment_ext(path) || ends_with_segment_ext(&sample.local_path) {
+    let kind = if lazy.is_some()
+        || ends_with_segment_ext(path)
+        || ends_with_segment_ext(&sample.local_path)
+    {
         RelayKind::Segment
     } else if ends_with_manifest_ext(path) || ends_with_manifest_ext(&sample.local_path) {
         RelayKind::Manifest
@@ -239,7 +251,11 @@ fn parse_lazy_path(path: &str) -> Option<(String, i64)> {
     if !path.to_ascii_lowercase().contains("lazy-hls") {
         return None;
     }
-    let parts: Vec<&str> = path.split('/').map(str::trim).filter(|p| !p.is_empty()).collect();
+    let parts: Vec<&str> = path
+        .split('/')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
     for i in 0..parts.len().saturating_sub(2) {
         if !parts[i].eq_ignore_ascii_case("lazy-hls") {
             continue;
@@ -270,7 +286,9 @@ fn ends_with_segment_ext(value: &str) -> bool {
 }
 
 fn ends_with_manifest_ext(value: &str) -> bool {
-    [".m3u8", ".mpd"].iter().any(|e| ends_with_ignore_case(value, e))
+    [".m3u8", ".mpd"]
+        .iter()
+        .any(|e| ends_with_ignore_case(value, e))
 }
 
 fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
@@ -280,10 +298,7 @@ fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
 }
 
 fn describe_url(url: &str) -> String {
-    match Url::parse(url) {
-        Ok(u) => safe(&format!("{}{}", u.host_str().unwrap_or_default(), u.path()), 140),
-        Err(_) => safe(url, 120),
-    }
+    super::short_url(url)
 }
 
 fn segment_part(segment: i64) -> String {

@@ -1,2 +1,11 @@
 allow-unwrap-in-tests = true
-allow-expect-in-tests = true
+avoid-breaking-exported-api = false
+max-fn-params-bools = 1
+disallowed-macros = [
+    { path = "log::trace", reason = "log through tracing" },
+    { path = "log::debug", reason = "log through tracing" },
+    { path = "log::info", reason = "log through tracing" },
+    { path = "log::warn", reason = "log through tracing" },
+    { path = "log::error", reason = "log through tracing" },
+    { path = "log::log", reason = "log through tracing" },
+]

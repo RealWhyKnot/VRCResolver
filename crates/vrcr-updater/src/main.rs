@@ -100,14 +100,17 @@ impl Host for RealHost {
             .get(url)
             .header("Accept", "application/vnd.github+json")
             .call()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("request release metadata: {e}"))?;
         let status = resp.status().as_u16();
         let content_type = resp
             .headers()
             .get("content-type")
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
-        let body = resp.into_body().read_to_string().map_err(|e| e.to_string())?;
+        let body = resp
+            .into_body()
+            .read_to_string()
+            .map_err(|e| format!("read release metadata: {e}"))?;
         Ok(HttpText {
             status,
             content_type,
@@ -117,8 +120,14 @@ impl Host for RealHost {
 
     fn download(&self, url: &str, dest: &Path) -> Result<(), String> {
         self.say("Downloading\u{2026}");
-        self.log(&format!("[updater] download GET {url} dest={}", dest.display()));
-        let resp = agent(DOWNLOAD_CAP).get(url).call().map_err(|e| e.to_string())?;
+        self.log(&format!(
+            "[updater] download GET {url} dest={}",
+            dest.display()
+        ));
+        let resp = agent(DOWNLOAD_CAP)
+            .get(url)
+            .call()
+            .map_err(|e| format!("download release asset: {e}"))?;
         let status = resp.status().as_u16();
         if !(200..300).contains(&status) {
             return Err(format!("download returned HTTP {status}"));
@@ -134,9 +143,12 @@ impl Host for RealHost {
             self.log(&format!("[updater] download size={} KiB", total / 1024));
         }
         let mut reader = resp.into_body().into_with_config().limit(u64::MAX).reader();
-        let mut file = File::create(dest).map_err(|e| format!("could not create {}: {e}", dest.display()))?;
-        let bytes = io::copy(&mut reader, &mut file).map_err(|e| format!("download failed: {e}"))?;
-        file.flush().map_err(|e| e.to_string())?;
+        let mut file =
+            File::create(dest).map_err(|e| format!("could not create {}: {e}", dest.display()))?;
+        let bytes =
+            io::copy(&mut reader, &mut file).map_err(|e| format!("download failed: {e}"))?;
+        file.flush()
+            .map_err(|e| format!("flush downloaded asset: {e}"))?;
         self.log(&format!("[updater] download complete bytes={bytes}"));
         Ok(())
     }
@@ -153,7 +165,9 @@ impl Host for RealHost {
                 true
             }
             PromptPolicy::Redirected => {
-                self.say("Update available \u{2014} stdin is redirected, declining update silently.");
+                self.say(
+                    "Update available \u{2014} stdin is redirected, declining update silently.",
+                );
                 false
             }
             PromptPolicy::Ask => {
@@ -172,8 +186,13 @@ impl Host for RealHost {
                 while let Some(left) = deadline.checked_duration_since(Instant::now()) {
                     match keys.read(left.min(std::time::Duration::from_millis(100))) {
                         Ok(Some(key)) => {
-                            let echo = char::from_u32(u32::from(key.ch)).filter(|c| !c.is_control());
-                            drop(writeln!(out, "{}", echo.map(String::from).unwrap_or_default()));
+                            let echo =
+                                char::from_u32(u32::from(key.ch)).filter(|c| !c.is_control());
+                            drop(writeln!(
+                                out,
+                                "{}",
+                                echo.map(String::from).unwrap_or_default()
+                            ));
                             return key.vk == KEY_Y;
                         }
                         Ok(None) => {}
@@ -199,9 +218,11 @@ impl Host for RealHost {
                 self.log(&format!("[updater] watchdog pid={pid} did not exit"));
             }
         }
-        let any_left = || !stop::pids_named(&win::list_processes(), &WATCHDOG_PROCESSES, own).is_empty();
+        let any_left =
+            || !stop::pids_named(&win::list_processes(), &WATCHDOG_PROCESSES, own).is_empty();
         let free = || mutex_free(wire::WATCHDOG_MUTEX) && mutex_free(legacy::WATCHDOG_MUTEX);
-        if let Err(waited) = wait_for_release(&any_left, &free, &std::thread::sleep, &Instant::now) {
+        if let Err(waited) = wait_for_release(&any_left, &free, &std::thread::sleep, &Instant::now)
+        {
             self.log(&format!(
                 "[updater] watchdog-release wait timed out after {} ms -- proceeding anyway",
                 waited.as_millis()
@@ -238,7 +259,9 @@ fn main() {
         std::process::exit(code);
     }
     let paths = AppPaths::from_env();
-    paths.migrate_from_legacy_product(&mut |line| println!("{line}"));
+    paths.migrate_from_legacy_product(&mut |line| {
+        let _ = writeln!(std::io::stdout(), "{line}");
+    });
     let log = Log::install(&paths.logs_dir(), "updater");
     let _crash = Crash::install(paths.crashes_dir(), "updater", VERSION);
     let swept = temp::sweep(&std::env::temp_dir(), SystemTime::now());
@@ -246,7 +269,9 @@ fn main() {
         log.line(&format!("[updater] swept {swept} stale temp artifacts"));
     }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("vrcresolver.Updater.exe"));
-    let install_dir = exe.parent().map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let install_dir = exe
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let host = RealHost {
         log,
         paths,

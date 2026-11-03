@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
 use std::panic::PanicHookInfo;
@@ -34,7 +35,7 @@ impl Crash {
         if fs::create_dir_all(&dir).is_err() {
             return crash;
         }
-        let snapshot = crash.snapshot.clone();
+        let snapshot = std::sync::Arc::clone(&crash.snapshot);
         let component = component.to_owned();
         let version = version.to_owned();
         let previous = std::panic::take_hook();
@@ -53,7 +54,13 @@ impl Crash {
     }
 }
 
-fn write(dir: &Path, component: &str, version: &str, info: &PanicHookInfo<'_>, snap: Option<&Snapshot>) {
+fn write(
+    dir: &Path,
+    component: &str,
+    version: &str,
+    info: &PanicHookInfo<'_>,
+    snap: Option<&Snapshot>,
+) {
     let now = SystemTime::now();
     let path = dir.join(format!(
         "crash-{component}-{}.log",
@@ -101,17 +108,18 @@ fn write(dir: &Path, component: &str, version: &str, info: &PanicHookInfo<'_>, s
 pub fn render(r: &Report<'_>, at: SystemTime) -> String {
     let mut s = String::new();
     s.push_str("=== vrcresolver crash log ===\n");
-    s.push_str(&format!("timestamp:    {}\n", iso8601_utc(at)));
-    s.push_str(&format!("component:    {}\n", r.component));
-    s.push_str(&format!("kind:         {}\n", r.kind));
-    s.push_str(&format!(
-        "terminating:  {}\n",
+    let _ = writeln!(s, "timestamp:    {}", iso8601_utc(at));
+    let _ = writeln!(s, "component:    {}", r.component);
+    let _ = writeln!(s, "kind:         {}", r.kind);
+    let _ = writeln!(
+        s,
+        "terminating:  {}",
         if r.terminating { "True" } else { "False" }
-    ));
-    s.push_str(&format!("pid:          {}\n", r.pid));
-    s.push_str(&format!("version:      {}\n", r.version));
-    s.push_str(&format!("basedir:      {}\n", r.basedir));
-    s.push_str(&format!("os:           {}\n", r.os));
+    );
+    let _ = writeln!(s, "pid:          {}", r.pid);
+    let _ = writeln!(s, "version:      {}", r.version);
+    let _ = writeln!(s, "basedir:      {}", r.basedir);
+    let _ = writeln!(s, "os:           {}", r.os);
     if let Some(snap) = &r.snapshot {
         s.push_str("\n--- state snapshot ---\n");
         s.push_str(snap);

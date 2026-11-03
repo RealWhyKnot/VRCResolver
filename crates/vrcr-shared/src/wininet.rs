@@ -21,7 +21,11 @@ pub fn decide_raise(current: Option<u32>) -> Option<u32> {
     }
 }
 
-pub fn ensure(store: &mut dyn DwordStore, marker: &Path, log: &mut dyn FnMut(String)) -> io::Result<()> {
+pub fn ensure(
+    store: &mut dyn DwordStore,
+    marker: &Path,
+    log: &mut dyn FnMut(String),
+) -> io::Result<()> {
     let current = store.get();
     let Some(target) = decide_raise(current) else {
         return Ok(());

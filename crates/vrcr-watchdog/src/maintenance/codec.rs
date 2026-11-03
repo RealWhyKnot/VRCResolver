@@ -119,7 +119,10 @@ impl CodecCapabilities {
     }
 
     pub fn verified(&self) -> Option<Vec<String>> {
-        self.verified.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.verified
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub fn refresh(&self) {
@@ -209,13 +212,16 @@ mod iso_time {
     use serde::{Deserialize, Deserializer, Serializer};
     use vrcr_shared::logutil::{iso8601_utc, parse_iso8601_utc};
 
-    pub fn serialize<S: Serializer>(t: &SystemTime, s: S) -> Result<S::Ok, S::Error> {
+    pub(super) fn serialize<S: Serializer>(t: &SystemTime, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&iso8601_utc(*t))
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<SystemTime, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<SystemTime, D::Error> {
         let raw = Option::<String>::deserialize(d)?;
-        Ok(raw.as_deref().and_then(parse_iso8601_utc).unwrap_or(UNIX_EPOCH))
+        Ok(raw
+            .as_deref()
+            .and_then(parse_iso8601_utc)
+            .unwrap_or(UNIX_EPOCH))
     }
 }
 
@@ -358,7 +364,8 @@ impl<E: CodecEnv> Installer<E> {
         match entry.status.as_str() {
             STATUS_INSTALLED => true,
             STATUS_FAILED => {
-                let window = if is_transient(entry.failure_class.as_deref().unwrap_or(FAIL_UNKNOWN)) {
+                let window = if is_transient(entry.failure_class.as_deref().unwrap_or(FAIL_UNKNOWN))
+                {
                     TRANSIENT_RETRY_WINDOW
                 } else {
                     PERMANENT_RETRY_WINDOW
@@ -387,7 +394,9 @@ fn hidden(program: &str) -> tokio::process::Command {
 async fn read_all(pipe: Option<impl tokio::io::AsyncRead + Unpin>) -> String {
     let mut buf = Vec::new();
     if let Some(mut p) = pipe {
-        let _ = p.read_to_end(&mut buf).await;
+        let cap = u64::try_from(WINGET_OUTPUT_CAP).unwrap_or(u64::MAX);
+        let _ = (&mut p).take(cap).read_to_end(&mut buf).await;
+        let _ = tokio::io::copy(&mut p, &mut tokio::io::sink()).await;
     }
     String::from_utf8_lossy(&buf).into_owned()
 }
@@ -451,7 +460,9 @@ impl CodecEnv for SystemEnv {
         ]);
         let mut child = match cmd.spawn() {
             Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return WingetResult::not_launched(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return WingetResult::not_launched();
+            }
             Err(e) => return WingetResult::exited(-1, &format!("{:?}", e.kind())),
         };
         let stdout = child.stdout.take();
@@ -540,4 +551,18 @@ pub fn start_background_check(
         let installer = Installer::new(SystemEnv { log });
         run_check(&installer, &path, &capabilities, &ux).await;
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WINGET_OUTPUT_CAP, read_all};
+
+    #[tokio::test]
+    async fn process_output_is_bounded_and_excess_bytes_are_drained() {
+        let bytes = vec![b'x'; WINGET_OUTPUT_CAP * 2];
+        let mut reader = bytes.as_slice();
+        let output = read_all(Some(&mut reader)).await;
+        assert_eq!(output.len(), WINGET_OUTPUT_CAP);
+        assert_eq!(reader.len(), 0);
+    }
 }

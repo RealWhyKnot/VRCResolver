@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use vrcr_shared::logutil::{bare_host, iso8601_utc};
+use vrcr_shared::logutil::{bare_host, iso8601_utc, sanitize_for_console};
 
 pub const LOG_FILE: &str = "yt-dlp-wrapper.log";
 pub const ROTATE_BYTES: u64 = 5 * 1024 * 1024;
@@ -30,7 +30,12 @@ impl ShimLog {
     }
 
     pub fn line(&mut self, message: &str) {
-        let line = format!("[{}] [{}] {message}\n", iso8601_utc(SystemTime::now()), self.rid);
+        let message = sanitize_for_console(message, usize::MAX);
+        let line = format!(
+            "[{}] [{}] {message}\n",
+            iso8601_utc(SystemTime::now()),
+            self.rid
+        );
         if let Some(w) = self.writer() {
             let _ = w.write_all(line.as_bytes());
             let _ = w.flush();
@@ -57,56 +62,23 @@ impl ShimLog {
     }
 }
 
-pub fn preview(s: &str, max_chars: usize) -> String {
-    let trimmed = match s.char_indices().nth(max_chars) {
-        Some((cut, _)) => format!("{}...(truncated)", &s[..cut]),
-        None => s.to_owned(),
-    };
-    trimmed.replace('\r', "").replace('\n', "\\n")
-}
-
-pub fn start_banner(
-    pid: u32,
-    version: &str,
-    args: &[String],
-    url: &str,
-    format_arg: Option<&str>,
-    player: &str,
-) -> String {
+pub fn start_banner(pid: u32, version: &str, args: &[String], url: &str, player: &str) -> String {
     let host = if url.is_empty() {
         "<none>".to_owned()
     } else {
         bare_host(url)
     };
-    let mut flags = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        let a = &args[i];
-        if is_http(a) {
-            i += 1;
-            continue;
-        }
-        if (a == "--exp-allow" || a == "--wild-allow") && i + 1 < args.len() {
-            flags.push(format!("{a}[~{} hosts]", args[i + 1].split(',').count()));
-            i += 2;
-            continue;
-        }
-        flags.push(match a.char_indices().nth(64) {
-            Some((cut, _)) => format!("{}...", &a[..cut]),
-            None => a.clone(),
-        });
-        i += 1;
-    }
     format!(
-        "START pid={pid} ver={version} argc={} url-host={host} player={player} -f={} flags=[{}]",
-        args.len(),
-        format_arg.unwrap_or("<none>"),
-        flags.join(",")
+        "START pid={pid} ver={version} argc={} url-host={host} player={player}",
+        args.len()
     )
 }
 
 pub fn is_http(arg: &str) -> bool {
-    let starts = |p: &str| arg.get(..p.len()).is_some_and(|h| h.eq_ignore_ascii_case(p));
+    let starts = |p: &str| {
+        arg.get(..p.len())
+            .is_some_and(|h| h.eq_ignore_ascii_case(p))
+    };
     starts("http://") || starts("https://")
 }
 

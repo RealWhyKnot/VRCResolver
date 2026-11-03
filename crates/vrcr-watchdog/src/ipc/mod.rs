@@ -46,5 +46,8 @@ pub fn caller_opted_into_v2(req: &ResolveRequest) -> bool {
         || req.accept_codecs.is_some()
         || req.max_audio_channels.is_some()
         || req.prefer_highest.is_some()
-        || req.vrchat_format_arg.as_deref().is_some_and(|f| !f.is_empty())
+        || req
+            .vrchat_format_arg
+            .as_deref()
+            .is_some_and(|f| !f.is_empty())
 }

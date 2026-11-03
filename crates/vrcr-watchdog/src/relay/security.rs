@@ -16,7 +16,10 @@ pub fn is_allowed_host_header(host_header: Option<&str>, port: u16) -> bool {
 }
 
 pub fn check_target_url(policy: &FirstPartyPolicy, target: &str) -> Result<Url, &'static str> {
-    let url = Url::parse(target).map_err(|_| "target_not_absolute")?;
+    let url = match Url::parse(target) {
+        Ok(url) => url,
+        Err(_) => return Err("target_not_absolute"),
+    };
     if url.scheme() != "http" && url.scheme() != "https" {
         return Err("target_scheme_not_http");
     }

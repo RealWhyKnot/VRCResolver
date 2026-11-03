@@ -95,7 +95,7 @@ where
             }
         }
         for raw in lines.drain(..) {
-            result.bytes_in += raw.len() as u64;
+            result.bytes_in += u64::try_from(raw.len()).expect("length fits the byte counter");
             let text = String::from_utf8_lossy(&raw);
             let localized = localize_line(policy, &text);
             if matches!(localized, Cow::Owned(_)) {
@@ -107,7 +107,8 @@ where
             }
             first = false;
             pending.extend_from_slice(localized.as_bytes());
-            result.bytes_out += localized.len() as u64;
+            result.bytes_out +=
+                u64::try_from(localized.len()).expect("length fits the byte counter");
             if pending.len() >= FLUSH_THRESHOLD {
                 out.write(pending.split().freeze()).await?;
             }
@@ -173,7 +174,9 @@ pub fn build_local_target(policy: &FirstPartyPolicy, original: &str) -> Option<S
         e => e,
     };
     let file = url.path().rsplit('/').next().unwrap_or_default();
-    let name = if file.is_empty() || !file.contains('.') {
+    let name = if allowed_extension_from_path(url.path()).is_empty()
+        && !file.to_ascii_lowercase().ends_with(".bin")
+    {
         format!("proxy.{ext}")
     } else {
         file.to_owned()

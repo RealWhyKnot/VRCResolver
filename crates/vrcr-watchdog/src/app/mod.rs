@@ -39,7 +39,9 @@ pub fn step_budget(name: &str) -> Duration {
     STEP_BUDGETS
         .iter()
         .find(|(n, _)| *n == name)
-        .map_or(Duration::from_millis(500), |(_, ms)| Duration::from_millis(*ms))
+        .map_or(Duration::from_millis(500), |(_, ms)| {
+            Duration::from_millis(*ms)
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,7 +161,9 @@ fn describe(e: CreateError) -> String {
     }
 }
 
-fn create_pair<M>(create: &impl Fn(&str) -> Result<M, CreateError>) -> Result<(M, M, bool), String> {
+fn create_pair<M>(
+    create: &impl Fn(&str) -> Result<M, CreateError>,
+) -> Result<(M, M, bool), String> {
     let primary = match create(wire::WATCHDOG_MUTEX) {
         Ok(m) => m,
         Err(CreateError::AccessDenied) => {
@@ -322,7 +326,11 @@ pub fn snapshot_state(s: &Snapshot) -> String {
     }
     match &s.patch {
         Some(dir) => {
-            let _ = writeln!(out, "patch:   vrcToolsDir={}", dir.as_deref().unwrap_or("<null>"));
+            let _ = writeln!(
+                out,
+                "patch:   vrcToolsDir={}",
+                dir.as_deref().unwrap_or("<null>")
+            );
         }
         None => out.push_str("patch:   <not constructed>\n"),
     }

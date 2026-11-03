@@ -24,8 +24,8 @@ impl AppPaths {
 
     pub fn from_env() -> Self {
         let get = |k: &str| std::env::var_os(k).map(PathBuf::from).unwrap_or_default();
-        let program_data =
-            std::env::var_os("ProgramData").map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from);
+        let program_data = std::env::var_os("ProgramData")
+            .map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from);
         Self::new(get("LOCALAPPDATA"), program_data)
     }
 
@@ -113,7 +113,11 @@ fn now_stamp() -> String {
     format!("unix:{secs}")
 }
 
-pub fn copy_legacy_root(legacy_root: &Path, new_root: &Path, log: &mut dyn FnMut(String)) -> io::Result<()> {
+pub fn copy_legacy_root(
+    legacy_root: &Path,
+    new_root: &Path,
+    log: &mut dyn FnMut(String),
+) -> io::Result<()> {
     fs::create_dir_all(new_root)?;
     let mut copied = 0usize;
     let mut stack = vec![PathBuf::new()];
@@ -182,7 +186,11 @@ pub fn migrate_program_data(
     Ok(())
 }
 
-pub fn migrate_legacy_local_app_state(source: &Path, legacy_low: &Path, log: &mut dyn FnMut(String)) {
+pub fn migrate_legacy_local_app_state(
+    source: &Path,
+    legacy_low: &Path,
+    log: &mut dyn FnMut(String),
+) {
     if let Err(e) = try_migrate_local_app_state(source, legacy_low, log) {
         log(format!("[migrate] failed: {e}"));
     }

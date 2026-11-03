@@ -1,3 +1,5 @@
+#!/usr/bin/env pwsh
+#Requires -Version 7.4
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
@@ -15,33 +17,38 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-if (-not $RepoRoot) {
-    $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-}
-
-$RootChangelog = Join-Path $RepoRoot 'CHANGELOG.md'
-
-if (-not (Test-Path $RootChangelog)) { throw "CHANGELOG.md not found at $RootChangelog" }
-
 function Read-TextUtf8 {
+    [CmdletBinding()]
+    [OutputType([string])]
+
     param([string]$Path)
     return [System.IO.File]::ReadAllText($Path, [System.Text.UTF8Encoding]::new($false))
 }
 
 function Write-TextUtf8 {
+    [CmdletBinding()]
+    [OutputType([void])]
+
     param([string]$Path, [string]$Content)
     [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
 }
 
 function Get-CentralTimeZone {
+    [CmdletBinding()]
+    [OutputType([TimeZoneInfo])]
+    param()
+
     foreach ($id in @('Central Standard Time', 'America/Chicago')) {
         try { return [System.TimeZoneInfo]::FindSystemTimeZoneById($id) }
-        catch { }
+        catch [TimeZoneNotFoundException], [InvalidTimeZoneException] { continue }
     }
     throw 'Could not resolve the America/Chicago release time zone.'
 }
 
 function Get-ReleaseDateStamp {
+    [CmdletBinding()]
+    [OutputType([string])]
+
     param([datetime]$NowUtc, [string]$Format)
 
     $utc = $NowUtc
@@ -52,22 +59,29 @@ function Get-ReleaseDateStamp {
     return $central.ToString($Format, [System.Globalization.CultureInfo]::InvariantCulture)
 }
 
-function Strip-BuildStamp {
+function Remove-BuildStamp {
+    [CmdletBinding()]
+    [OutputType([string])]
+
     param([string]$Subject)
     return ($Subject -replace ' \(\d{4}\.\d+\.\d+\.\d+(-([A-Fa-f0-9]{4,8}|beta))?\)$', '').Trim()
 }
 
-function Parse-CommitSubject {
+function ConvertFrom-CommitSubject {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+
     param([string]$Sha, [string]$Subject)
 
-    $stripped = Strip-BuildStamp -Subject $Subject
+    $stripped = Remove-BuildStamp -Subject $Subject
     if ([string]::IsNullOrWhiteSpace($stripped)) { return $null }
 
     if ($stripped -match '\[skip changelog\]') { return $null }
 
     if ($stripped -match '^Merge ') { return $null }
 
-    $pattern = '^(?<type>feat|fix|perf|refactor|docs|build|ci|chore|test|revert)(?:\((?<scope>[^)]+)\))?(?<bang>!)?:\s+(?<desc>.+)$'
+    $pattern = '^(?<type>feat|fix|perf|refactor|docs|build|ci|chore|test|revert)' +
+    '(?:\((?<scope>[^)]+)\))?(?<bang>!)?:\s+(?<desc>.+)$'
     $m = [regex]::Match($stripped, $pattern)
     if (-not $m.Success) {
         return @{
@@ -107,9 +121,10 @@ function Parse-CommitSubject {
     return @{ Bucket = $bucket; Bullet = $bullet }
 }
 
-$BucketOrder = @('Breaking', 'Added', 'Changed', 'Fixed')
-
 function Find-UnreleasedSection {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+
     param([string]$Content)
 
     $lines = $Content -split "`n"
@@ -141,7 +156,10 @@ function Find-UnreleasedSection {
     }
 }
 
-function Parse-UnreleasedBody {
+function ConvertFrom-UnreleasedBody {
+    [CmdletBinding()]
+    [OutputType([System.Collections.Specialized.OrderedDictionary])]
+
     param([string[]]$BodyLines)
 
     $buckets = [ordered]@{}
@@ -149,44 +167,51 @@ function Parse-UnreleasedBody {
     foreach ($line in $BodyLines) {
         if ($line -match '^###\s+(?<name>.+?)\s*$') {
             $current = $matches['name']
-            if (-not $buckets.Contains($current)) { $buckets[$current] = @() }
+            if (-not $buckets.Contains($current)) { $buckets[$current] = [Collections.Generic.List[string]]::new() }
             continue
         }
         if ($line -match '^\s*- ' -and $current) {
-            $buckets[$current] += $line
+            $buckets[$current].Add($line)
         }
     }
     return $buckets
 }
 
-function Render-UnreleasedBody {
+function ConvertTo-UnreleasedBody {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+
     param([hashtable]$Buckets)
 
     if ($Buckets.Count -eq 0) {
         return @('', '_No notable changes since the last release._', '')
     }
 
-    $out = @('')
+    $out = [Collections.Generic.List[string]]::new()
+    $out.Add('')
     $emitted = @{}
     foreach ($name in $BucketOrder) {
         if ($Buckets.Contains($name) -and $Buckets[$name].Count -gt 0) {
-            $out += "### $name"
-            $out += $Buckets[$name]
-            $out += ''
+            $out.Add("### $name")
+            $out.AddRange([string[]]$Buckets[$name])
+            $out.Add('')
             $emitted[$name] = $true
         }
     }
     foreach ($name in $Buckets.Keys) {
         if (-not $emitted.ContainsKey($name) -and $Buckets[$name].Count -gt 0) {
-            $out += "### $name"
-            $out += $Buckets[$name]
-            $out += ''
+            $out.Add("### $name")
+            $out.AddRange([string[]]$Buckets[$name])
+            $out.Add('')
         }
     }
-    return $out
+    return $out.ToArray()
 }
 
 function Update-OneFile {
+    [CmdletBinding()]
+    [OutputType([void])]
+
     param(
         [string]$Path,
         [hashtable]$NewBullets
@@ -202,10 +227,10 @@ function Update-OneFile {
     $bodyEnd = $section.EndIdx - 1
     $bodyLines = if ($bodyEnd -ge $bodyStart) { $section.Lines[$bodyStart..$bodyEnd] } else { @() }
 
-    $existing = Parse-UnreleasedBody -BodyLines $bodyLines
+    $existing = ConvertFrom-UnreleasedBody -BodyLines $bodyLines
 
     foreach ($bucket in $NewBullets.Keys) {
-        if (-not $existing.Contains($bucket)) { $existing[$bucket] = @() }
+        if (-not $existing.Contains($bucket)) { $existing[$bucket] = [Collections.Generic.List[string]]::new() }
         foreach ($bullet in $NewBullets[$bucket]) {
             $sha = if ($bullet -match '\(([a-f0-9]{7})\)\s*$') { $matches[1] } else { $null }
             if ($sha) {
@@ -215,25 +240,37 @@ function Update-OneFile {
                 }
                 if ($alreadyHas) { continue }
             }
-            $existing[$bucket] += $bullet
+            $existing[$bucket].Add($bullet)
         }
     }
 
-    $rendered = Render-UnreleasedBody -Buckets $existing
+    $rendered = ConvertTo-UnreleasedBody -Buckets $existing
     $before = if ($section.StartIdx -gt 0) { $section.Lines[0..($section.StartIdx)] } else { @($section.Lines[0]) }
-    $after = if ($section.EndIdx -lt $section.Lines.Length) { $section.Lines[$section.EndIdx..($section.Lines.Length - 1)] } else { @() }
+    $after = if ($section.EndIdx -lt $section.Lines.Length) {
+        $section.Lines[$section.EndIdx..($section.Lines.Length - 1)]
+    } else { @() }
 
-    $newLines = @()
-    $newLines += $before
-    $newLines += $rendered
-    $newLines += $after
+    $newLines = [Collections.Generic.List[string]]::new()
+    $newLines.AddRange([string[]]@($before))
+    $newLines.AddRange([string[]]@($rendered))
+    $newLines.AddRange([string[]]@($after))
 
     $newContent = ($newLines -join "`n")
     Write-TextUtf8 -Path $Path -Content $newContent
 }
 
+if (-not $RepoRoot) {
+    $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+}
+
+$RootChangelog = Join-Path $RepoRoot 'CHANGELOG.md'
+
+if (-not (Test-Path $RootChangelog)) { throw "CHANGELOG.md not found at $RootChangelog" }
+
+$BucketOrder = @('Breaking', 'Added', 'Changed', 'Fixed')
+
 if ($Mode -eq 'Append') {
-    if (-not $Range) { throw "Append mode requires -Range (e.g. abc..def)." }
+    if (-not $Range) { throw 'Append mode requires -Range (e.g. abc..def).' }
 
     Push-Location $RepoRoot
     try {
@@ -242,8 +279,7 @@ if ($Mode -eq 'Append') {
             Write-Host "git log returned non-zero for range '$Range' -- treating as no commits."
             return
         }
-    }
-    finally {
+    } finally {
         Pop-Location
     }
 
@@ -264,19 +300,19 @@ if ($Mode -eq 'Append') {
 
         if ($email -match 'github-actions\[bot\]' -or $email -match 'noreply@github.com') { continue }
 
-        $parsed = Parse-CommitSubject -Sha $sha -Subject $subject
+        $parsed = ConvertFrom-CommitSubject -Sha $sha -Subject $subject
         if (-not $parsed) { continue }
 
         $bucket = $parsed.Bucket
-        if (-not $newBullets.ContainsKey($bucket)) { $newBullets[$bucket] = @() }
-        $newBullets[$bucket] += $parsed.Bullet
+        if (-not $newBullets.ContainsKey($bucket)) { $newBullets[$bucket] = [Collections.Generic.List[string]]::new() }
+        $newBullets[$bucket].Add($parsed.Bullet)
         $included++
     }
 
     Write-Host "Considered $considered commit(s), included $included in changelog."
 
     if ($included -eq 0) {
-        Write-Host "Nothing user-visible in this push; CHANGELOG unchanged."
+        Write-Host 'Nothing user-visible in this push; CHANGELOG unchanged.'
         return
     }
 
@@ -287,7 +323,7 @@ if ($Mode -eq 'Append') {
 }
 
 if ($Mode -eq 'Promote') {
-    if (-not $Version) { throw "Promote mode requires -Version (e.g. v2026.4.27.3)." }
+    if (-not $Version) { throw 'Promote mode requires -Version (e.g. v2026.4.27.3).' }
     if (-not $Repo) { throw "Promote mode requires -Repo or `$env:GITHUB_REPOSITORY (e.g. owner/repo)." }
 
     $today = Get-ReleaseDateStamp -NowUtc $NowUtc -Format 'yyyy-MM-dd'
@@ -315,17 +351,17 @@ if ($Mode -eq 'Promote') {
     $before = if ($section.StartIdx -gt 0) { $lines[0..($section.StartIdx - 1)] } else { @() }
     $after = if ($section.EndIdx -lt $lines.Length) { $lines[$section.EndIdx..($lines.Length - 1)] } else { @() }
 
-    $newLines = @()
-    $newLines += $before
-    $newLines += '## Unreleased'
-    $newLines += ''
-    $newLines += '_No notable changes since the last release._'
-    $newLines += ''
-    $newLines += '---'
-    $newLines += ''
-    $newLines += $heading
-    $newLines += $bodyLines
-    $newLines += $after
+    $newLines = [Collections.Generic.List[string]]::new()
+    $newLines.AddRange([string[]]@($before))
+    $newLines.Add('## Unreleased')
+    $newLines.Add('')
+    $newLines.Add('_No notable changes since the last release._')
+    $newLines.Add('')
+    $newLines.Add('---')
+    $newLines.Add('')
+    $newLines.AddRange([string[]]@($heading))
+    $newLines.AddRange([string[]]@($bodyLines))
+    $newLines.AddRange([string[]]@($after))
 
     Write-TextUtf8 -Path $RootChangelog -Content (($newLines -join "`n"))
 
@@ -337,12 +373,12 @@ if ($Mode -eq 'Notes') {
     $content = Read-TextUtf8 -Path $RootChangelog
 
     if ($ForVersion) {
-        if (-not $Version) { throw "Notes -ForVersion requires -Version." }
+        if (-not $Version) { throw 'Notes -ForVersion requires -Version.' }
         $escaped = [regex]::Escape($Version)
-        $pattern = "(?ms)^##\s+\[" + $escaped + "\][^\n]*\n(.*?)(?=^---\s*$|^##\s+|\z)"
+        $pattern = '(?ms)^##\s+\[' + $escaped + '\][^\n]*\n(.*?)(?=^---\s*$|^##\s+|\z)'
         $m = [regex]::Match($content, $pattern)
         if (-not $m.Success) {
-            Write-Error "No section found for $Version in CHANGELOG.md."
+            [Console]::Error.WriteLine("No section found for $Version in CHANGELOG.md.")
             exit 1
         }
         Write-Output $m.Groups[1].Value.Trim()
@@ -350,10 +386,12 @@ if ($Mode -eq 'Notes') {
     }
 
     $section = Find-UnreleasedSection -Content $content
-    if (-not $section) { Write-Error "No '## Unreleased' section found."; exit 1 }
+    if (-not $section) { [Console]::Error.WriteLine("No '## Unreleased' section found."); exit 1 }
     $bodyStart = $section.StartIdx + 1
     $bodyEnd = $section.EndIdx - 1
     $bodyLines = if ($bodyEnd -ge $bodyStart) { $section.Lines[$bodyStart..$bodyEnd] } else { @() }
     Write-Output (($bodyLines -join "`n").Trim())
     return
 }
+
+exit 0

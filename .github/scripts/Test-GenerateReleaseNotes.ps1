@@ -1,21 +1,27 @@
 #!/usr/bin/env pwsh
+#Requires -Version 7.4
+
+[CmdletBinding()]
+param()
 
 $ErrorActionPreference = 'Stop'
-
-$ScriptRoot = Split-Path -Parent $PSCommandPath
-$Generator = Join-Path $ScriptRoot 'Generate-ReleaseNotes.ps1'
-$TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("vrcresolver.ReleaseNotes." + [Guid]::NewGuid().ToString('N'))
-$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-$PushedLocation = $false
+Set-StrictMode -Version Latest
 
 function Invoke-Git {
-    & git @args
+    [CmdletBinding()]
+    [OutputType([object[]])]
+
+    param([string[]] $Arguments)
+    & git @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "git $($args -join ' ') failed with exit code $LASTEXITCODE"
+        throw "git $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
     }
 }
 
 function Write-TestFile {
+    [CmdletBinding()]
+    [OutputType([void])]
+
     param(
         [string]$Path,
         [string]$Content
@@ -24,12 +30,15 @@ function Write-TestFile {
     $FullPath = Join-Path (Get-Location) $Path
     $Dir = Split-Path -Parent $FullPath
     if ($Dir -and -not (Test-Path -LiteralPath $Dir)) {
-        New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+        $null = New-Item -ItemType Directory -Force -Path $Dir
     }
     [System.IO.File]::WriteAllText($FullPath, $Content, $Utf8NoBom)
 }
 
-function Commit-TestChange {
+function Save-TestChange {
+    [CmdletBinding()]
+    [OutputType([void])]
+
     param(
         [string]$Path,
         [string]$Content,
@@ -37,11 +46,14 @@ function Commit-TestChange {
     )
 
     Write-TestFile -Path $Path -Content $Content
-    Invoke-Git add -- $Path
-    Invoke-Git commit -q -m $Subject
+    Invoke-Git -Arguments @('add', '--', $Path)
+    Invoke-Git -Arguments @('commit', '-q', '-m', $Subject)
 }
 
-function Assert-Contains {
+function Assert-IncludedText {
+    [CmdletBinding()]
+    [OutputType([void])]
+
     param(
         [string]$Text,
         [string]$Expected
@@ -52,7 +64,10 @@ function Assert-Contains {
     }
 }
 
-function Assert-NotContains {
+function Assert-ExcludedText {
+    [CmdletBinding()]
+    [OutputType([void])]
+
     param(
         [string]$Text,
         [string]$Unexpected
@@ -63,109 +78,134 @@ function Assert-NotContains {
     }
 }
 
+$ScriptRoot = Split-Path -Parent $PSCommandPath
+$Generator = Join-Path $ScriptRoot 'Generate-ReleaseNotes.ps1'
+$TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('vrcresolver.ReleaseNotes.' + [Guid]::NewGuid().ToString('N'))
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$PushedLocation = $false
+
 try {
-    New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
+    $null = New-Item -ItemType Directory -Force -Path $TempRoot
     Push-Location $TempRoot
     $PushedLocation = $true
 
-    Invoke-Git init -q
-    Invoke-Git config core.autocrlf false
-    Invoke-Git config user.name WhyKnot
-    Invoke-Git config user.email whyknot@example.invalid
+    Invoke-Git -Arguments @('init', '-q')
+    Invoke-Git -Arguments @('config', 'core.autocrlf', 'false')
+    Invoke-Git -Arguments @('config', 'user.name', 'WhyKnot')
+    Invoke-Git -Arguments @('config', 'user.email', 'whyknot@example.invalid')
 
-    New-Item -ItemType Directory -Force -Path '.github/release-template' | Out-Null
+    $null = New-Item -ItemType Directory -Force -Path '.github/release-template'
     foreach ($TemplateName in @('links', 'install', 'uninstall', 'what-you-need-to-do')) {
         Write-TestFile -Path ".github/release-template/$TemplateName.md" -Content ''
     }
 
-    Commit-TestChange `
-        -Path 'CHANGELOG.md' `
-        -Content "# Changelog`n`n## Unreleased`n`n_No notable changes since the last release._`n" `
-        -Subject 'chore: initial changelog'
-    Invoke-Git tag -a v2026.5.1.0 -m 'vrcresolver 2026.5.1.0'
+    $callOptions1 = @{
+        Path    = 'CHANGELOG.md'
+        Content = "# Changelog`n`n## Unreleased`n`n_No notable changes since the last release._`n"
+        Subject = 'chore: initial changelog'
+    }
+    Save-TestChange @callOptions1
+    Invoke-Git -Arguments @('tag', '-a', 'v2026.5.1.0', '-m', 'vrcresolver 2026.5.1.0')
 
-    Commit-TestChange `
-        -Path 'src.txt' `
-        -Content "plain-prerelease`n" `
-        -Subject 'fix(helper): plain prerelease fallback'
-    Invoke-Git tag -a v2026.5.2.0 -m 'vrcresolver 2026.5.2.0'
+    $callOptions2 = @{
+        Path    = 'src.txt'
+        Content = "plain-prerelease`n"
+        Subject = 'fix(helper): plain prerelease fallback'
+    }
+    Save-TestChange @callOptions2
+    Invoke-Git -Arguments @('tag', '-a', 'v2026.5.2.0', '-m', 'vrcresolver 2026.5.2.0')
 
-    Commit-TestChange `
-        -Path 'src.txt' `
-        -Content "beta`n" `
-        -Subject 'fix(relay): beta port fallback'
-    Invoke-Git tag -a v2026.5.2.1-beta -m 'vrcresolver 2026.5.2.1-beta'
+    $callOptions3 = @{
+        Path    = 'src.txt'
+        Content = "beta`n"
+        Subject = 'fix(relay): beta port fallback'
+    }
+    Save-TestChange @callOptions3
+    Invoke-Git -Arguments @('tag', '-a', 'v2026.5.2.1-beta', '-m', 'vrcresolver 2026.5.2.1-beta')
 
-    Commit-TestChange `
-        -Path 'src.txt' `
-        -Content "stable`n" `
-        -Subject 'fix(vrclog): stable startup tail'
-    Invoke-Git tag -a v2026.5.3.0 -m 'vrcresolver 2026.5.3.0'
+    $callOptions4 = @{
+        Path    = 'src.txt'
+        Content = "stable`n"
+        Subject = 'fix(vrclog): stable startup tail'
+    }
+    Save-TestChange @callOptions4
+    Invoke-Git -Arguments @('tag', '-a', 'v2026.5.3.0', '-m', 'vrcresolver 2026.5.3.0')
 
     $TemplateDir = Join-Path $TempRoot '.github/release-template'
-    $StableNotes = (& $Generator `
-            -Tag v2026.5.3.0 `
-            -Repo RealWhyKnot/VRCResolver `
-            -TemplateDir $TemplateDir `
-            -PrereleaseTags v2026.5.2.0 `
-            -SkipScrub) -join "`n"
+    $callOptions5 = @{
+        Tag            = 'v2026.5.3.0'
+        Repo           = 'RealWhyKnot/VRCResolver'
+        TemplateDir    = $TemplateDir
+        PrereleaseTags = 'v2026.5.2.0'
+        SkipScrub      = $true
+    }
+    $StableNotes = (& $Generator @callOptions5) -join "`n"
 
-    Assert-Contains -Text $StableNotes -Expected 'fix(helper): plain prerelease fallback'
-    Assert-Contains -Text $StableNotes -Expected 'fix(relay): beta port fallback'
-    Assert-Contains -Text $StableNotes -Expected 'fix(vrclog): stable startup tail'
-    Assert-Contains -Text $StableNotes -Expected 'compare/v2026.5.1.0...v2026.5.3.0'
-    Assert-NotContains -Text $StableNotes -Unexpected 'compare/v2026.5.2.0...v2026.5.3.0'
-    Assert-NotContains -Text $StableNotes -Unexpected 'compare/v2026.5.2.1-beta...v2026.5.3.0'
+    Assert-IncludedText -Text $StableNotes -Expected 'fix(helper): plain prerelease fallback'
+    Assert-IncludedText -Text $StableNotes -Expected 'fix(relay): beta port fallback'
+    Assert-IncludedText -Text $StableNotes -Expected 'fix(vrclog): stable startup tail'
+    Assert-IncludedText -Text $StableNotes -Expected 'compare/v2026.5.1.0...v2026.5.3.0'
+    Assert-ExcludedText -Text $StableNotes -Unexpected 'compare/v2026.5.2.0...v2026.5.3.0'
+    Assert-ExcludedText -Text $StableNotes -Unexpected 'compare/v2026.5.2.1-beta...v2026.5.3.0'
 
-    $BetaNotes = (& $Generator `
-            -Tag v2026.5.2.1-beta `
-            -Repo RealWhyKnot/VRCResolver `
-            -TemplateDir $TemplateDir `
-            -PrereleaseTags v2026.5.2.0 `
-            -SkipScrub) -join "`n"
+    $callOptions6 = @{
+        Tag            = 'v2026.5.2.1-beta'
+        Repo           = 'RealWhyKnot/VRCResolver'
+        TemplateDir    = $TemplateDir
+        PrereleaseTags = 'v2026.5.2.0'
+        SkipScrub      = $true
+    }
+    $BetaNotes = (& $Generator @callOptions6) -join "`n"
 
-    Assert-Contains -Text $BetaNotes -Expected 'fix(relay): beta port fallback'
-    Assert-Contains -Text $BetaNotes -Expected 'compare/v2026.5.2.0...v2026.5.2.1-beta'
-    Assert-NotContains -Text $BetaNotes -Unexpected 'fix(helper): plain prerelease fallback'
-    Assert-NotContains -Text $BetaNotes -Unexpected 'fix(vrclog): stable startup tail'
+    Assert-IncludedText -Text $BetaNotes -Expected 'fix(relay): beta port fallback'
+    Assert-IncludedText -Text $BetaNotes -Expected 'compare/v2026.5.2.0...v2026.5.2.1-beta'
+    Assert-ExcludedText -Text $BetaNotes -Unexpected 'fix(helper): plain prerelease fallback'
+    Assert-ExcludedText -Text $BetaNotes -Unexpected 'fix(vrclog): stable startup tail'
 
-    $PlainPrereleaseNotes = (& $Generator `
-            -Tag v2026.5.2.0 `
-            -Repo RealWhyKnot/VRCResolver `
-            -TemplateDir $TemplateDir `
-            -PrereleaseTags v2026.5.2.0 `
-            -SkipScrub) -join "`n"
+    $callOptions7 = @{
+        Tag            = 'v2026.5.2.0'
+        Repo           = 'RealWhyKnot/VRCResolver'
+        TemplateDir    = $TemplateDir
+        PrereleaseTags = 'v2026.5.2.0'
+        SkipScrub      = $true
+    }
+    $PlainPrereleaseNotes = (& $Generator @callOptions7) -join "`n"
 
-    Assert-Contains -Text $PlainPrereleaseNotes -Expected 'fix(helper): plain prerelease fallback'
-    Assert-Contains -Text $PlainPrereleaseNotes -Expected 'compare/v2026.5.1.0...v2026.5.2.0'
-    Assert-NotContains -Text $PlainPrereleaseNotes -Unexpected 'fix(relay): beta port fallback'
+    Assert-IncludedText -Text $PlainPrereleaseNotes -Expected 'fix(helper): plain prerelease fallback'
+    Assert-IncludedText -Text $PlainPrereleaseNotes -Expected 'compare/v2026.5.1.0...v2026.5.2.0'
+    Assert-ExcludedText -Text $PlainPrereleaseNotes -Unexpected 'fix(relay): beta port fallback'
 
-    New-Item -ItemType Directory -Force -Path 'artifacts' | Out-Null
+    $null = New-Item -ItemType Directory -Force -Path 'artifacts'
     $zipPath = Join-Path $TempRoot 'artifacts/vrcresolver-v2026.5.3.0.zip'
     $manifestPath = Join-Path $TempRoot 'artifacts/vrcresolver-v2026.5.3.0.manifest.tsv'
     $zipSha = 'E8966F33BE8246922756E3E8234CF8309FB6D3151665594203F53BBF5725164B'
     Write-TestFile -Path 'artifacts/vrcresolver-v2026.5.3.0.zip' -Content 'zip'
-    Write-TestFile -Path 'artifacts/vrcresolver-v2026.5.3.0.manifest.tsv' -Content "A24EA7D3DF2B0718AFF60B5B9EBEBDF590ED4938D81A6B08CDEC7A880B326B0C`t123`tvrcresolver.exe`n"
+    $callOptions8 = @{
+        Path    = 'artifacts/vrcresolver-v2026.5.3.0.manifest.tsv'
+        Content = "A24EA7D3DF2B0718AFF60B5B9EBEBDF590ED4938D81A6B08CDEC7A880B326B0C`t123`tvrcresolver.exe`n"
+    }
+    Write-TestFile @callOptions8
 
-    $IntegrityNotes = (& $Generator `
-            -Tag v2026.5.3.0 `
-            -Repo RealWhyKnot/VRCResolver `
-            -TemplateDir $TemplateDir `
-            -PrereleaseTags v2026.5.2.0 `
-            -ZipPath $zipPath `
-            -ZipName 'vrcresolver-v2026.5.3.0.zip' `
-            -ZipSize 157017922 `
-            -ZipSha256 $zipSha `
-            -Manifest $manifestPath `
-            -SkipScrub) -join "`n"
+    $callOptions9 = @{
+        Tag            = 'v2026.5.3.0'
+        Repo           = 'RealWhyKnot/VRCResolver'
+        TemplateDir    = $TemplateDir
+        PrereleaseTags = 'v2026.5.2.0'
+        ZipPath        = $zipPath
+        ZipName        = 'vrcresolver-v2026.5.3.0.zip'
+        ZipSize        = 157017922
+        ZipSha256      = $zipSha
+        Manifest       = $manifestPath
+        SkipScrub      = $true
+    }
+    $IntegrityNotes = (& $Generator @callOptions9) -join "`n"
 
-    Assert-Contains -Text $IntegrityNotes -Expected 'vrcresolver-v2026.5.3.0.integrity.tsv'
-    Assert-NotContains -Text $IntegrityNotes -Unexpected "SHA256: $zipSha"
-    Assert-NotContains -Text $IntegrityNotes -Unexpected 'vrcresolver.exe                        '
+    Assert-IncludedText -Text $IntegrityNotes -Expected 'vrcresolver-v2026.5.3.0.integrity.tsv'
+    Assert-ExcludedText -Text $IntegrityNotes -Unexpected "SHA256: $zipSha"
+    Assert-ExcludedText -Text $IntegrityNotes -Unexpected 'vrcresolver.exe                        '
 
     Write-Host 'Generate-ReleaseNotes tests passed.'
-}
-finally {
+} finally {
     if ($PushedLocation) {
         Pop-Location
     }
@@ -173,3 +213,5 @@ finally {
         Remove-Item -LiteralPath $TempRoot -Recurse -Force
     }
 }
+
+exit 0

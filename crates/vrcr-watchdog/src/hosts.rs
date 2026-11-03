@@ -154,7 +154,8 @@ impl HostsManager {
                 false
             }
             Elevated::Failed(e) => {
-                self.ux.warn(Component::Hosts, &format!("elevation error: {e}"));
+                self.ux
+                    .warn(Component::Hosts, &format!("elevation error: {e}"));
                 false
             }
         }
@@ -186,8 +187,10 @@ impl HostsManager {
         let launched = self.reexec(ADD_ARG);
         if self.is_active() {
             if launched {
-                self.ux
-                    .write(Component::Hosts, &format!("added {MARKER_IP} {GATEWAY_HOST}"));
+                self.ux.write(
+                    Component::Hosts,
+                    &format!("added {MARKER_IP} {GATEWAY_HOST}"),
+                );
             }
             return;
         }
@@ -280,8 +283,10 @@ impl HostsTicker {
         };
         if present {
             if st.last_present != Some(true) {
-                self.ux
-                    .write(Component::Hosts, &format!("tick: {GATEWAY_HOST} entry present"));
+                self.ux.write(
+                    Component::Hosts,
+                    &format!("tick: {GATEWAY_HOST} entry present"),
+                );
                 st.last_present = Some(true);
             }
             return;
@@ -316,8 +321,10 @@ impl HostsTicker {
                 .duration_since(started)
                 .unwrap_or_default()
                 .as_millis();
-            self.ux
-                .write(Component::Hosts, &format!("tick: re-add succeeded in {ms} ms"));
+            self.ux.write(
+                Component::Hosts,
+                &format!("tick: re-add succeeded in {ms} ms"),
+            );
             st.last_present = Some(true);
             return;
         }
@@ -325,6 +332,7 @@ impl HostsTicker {
             return;
         }
         self.give_up(&mut st, DECLINED_REASON);
+        drop(st);
     }
 
     fn give_up(&self, st: &mut TickState, reason: &str) {

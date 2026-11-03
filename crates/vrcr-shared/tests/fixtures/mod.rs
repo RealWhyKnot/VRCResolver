@@ -1,18 +1,20 @@
-#![allow(dead_code)]
-
 use vrcr_shared::wrapper_identity;
 
 const PE_OFFSET: usize = 0x80;
 const DIRECTORIES: usize = PE_OFFSET + 24 + 112;
 
-pub fn bundled(seed: usize) -> Vec<u8> {
+pub(crate) fn bundled(seed: usize) -> Vec<u8> {
     let len = usize::try_from(wrapper_identity::OURS_SIZE_CEILING).unwrap_or(0) + 4096;
-    (0..len).map(|i| ((i * 7 + seed) & 0xFF) as u8).collect()
+    (0..len)
+        .map(|i| u8::try_from((i * 7 + seed) & 0xFF).expect("masked fixture value fits one byte"))
+        .collect()
 }
 
-pub fn complete_bundled(seed: usize) -> Vec<u8> {
+pub(crate) fn complete_bundled(seed: usize) -> Vec<u8> {
     let len = usize::try_from(wrapper_identity::OURS_SIZE_CEILING).unwrap_or(0) + 4096;
-    let mut d: Vec<u8> = (0..len).map(|i| ((i * 7 + 1) & 0xFF) as u8).collect();
+    let mut d: Vec<u8> = (0..len)
+        .map(|i| u8::try_from((i * 7 + 1) & 0xFF).expect("masked fixture value fits one byte"))
+        .collect();
     d[PE_OFFSET..DIRECTORIES + 16 * 8].fill(0);
     d[0] = b'M';
     d[1] = b'Z';
@@ -26,13 +28,15 @@ pub fn complete_bundled(seed: usize) -> Vec<u8> {
     d
 }
 
-pub fn cut(mut d: Vec<u8>, n: usize) -> Vec<u8> {
+pub(crate) fn cut(mut d: Vec<u8>, n: usize) -> Vec<u8> {
     d.truncate(d.len() - n);
     d
 }
 
-pub fn wrapper() -> Vec<u8> {
-    let mut d: Vec<u8> = (0..8192).map(|i| ((i * 31) & 0xFF) as u8).collect();
+pub(crate) fn wrapper() -> Vec<u8> {
+    let mut d: Vec<u8> = (0..8192)
+        .map(|i| u8::try_from((i * 31) & 0xFF).expect("masked fixture value fits one byte"))
+        .collect();
     let marker = wrapper_identity::marker();
     d[256..256 + marker.len()].copy_from_slice(&marker);
     d

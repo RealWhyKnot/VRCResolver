@@ -7,8 +7,8 @@ use crate::url_guard::ends_with_ignore_case;
 pub const MAX_SERVER_PROVIDED_ENTRIES: usize = 8;
 
 pub const ALLOWED_PATH_EXTENSIONS: [&str; 18] = [
-    "mp4", "m4s", "m4v", "ts", "m3u8", "mpd", "webm", "mkv", "mov", "mp3", "m4a", "aac", "ogg", "opus",
-    "wav", "flac", "vtt", "srt",
+    "mp4", "m4s", "m4v", "ts", "m3u8", "mpd", "webm", "mkv", "mov", "mp3", "m4a", "aac", "ogg",
+    "opus", "wav", "flac", "vtt", "srt",
 ];
 
 const BUILT_IN_HOSTS: [&str; 2] = ["vrcresolver.com", "whyknot.dev"];
@@ -21,7 +21,10 @@ pub struct FirstPartyPolicy {
 }
 
 impl FirstPartyPolicy {
-    pub fn with_server_provided<H, P>(host_families: Option<&[H]>, proxy_paths: Option<&[P]>) -> Self
+    pub fn with_server_provided<H, P>(
+        host_families: Option<&[H]>,
+        proxy_paths: Option<&[P]>,
+    ) -> Self
     where
         H: AsRef<str>,
         P: AsRef<str>,
@@ -53,7 +56,8 @@ impl FirstPartyPolicy {
     }
 
     pub fn is_playback_proxy(&self, url: &Url) -> bool {
-        url.host_str().is_some_and(|h| self.is_first_party_host(h)) && self.is_playback_proxy_path(url.path())
+        url.host_str().is_some_and(|h| self.is_first_party_host(h))
+            && self.is_playback_proxy_path(url.path())
     }
 
     pub fn trust_gateway_extension(&self, url: &str) -> &'static str {
@@ -106,7 +110,10 @@ pub fn allowed_extension_from_path(path: &str) -> &'static str {
         .unwrap_or("")
 }
 
-fn sanitize<S: AsRef<str>>(entries: Option<&[S]>, accept: fn(&str) -> Option<String>) -> Vec<String> {
+fn sanitize<S: AsRef<str>>(
+    entries: Option<&[S]>,
+    accept: fn(&str) -> Option<String>,
+) -> Vec<String> {
     entries
         .unwrap_or_default()
         .iter()
@@ -157,5 +164,6 @@ fn path_is_or_under(path: &str, prefix: &str) -> bool {
 }
 
 pub(crate) fn contains_ignore_case(hay: &str, needle: &str) -> bool {
-    hay.to_ascii_lowercase().contains(&needle.to_ascii_lowercase())
+    hay.to_ascii_lowercase()
+        .contains(&needle.to_ascii_lowercase())
 }

@@ -1,12 +1,16 @@
+use std::future::Future;
+use std::io;
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
 pub const TIMEOUT_EXIT_CODE: i32 = 1;
 const DRAIN_AFTER_EXIT: Duration = Duration::from_secs(5);
+const MAX_STDOUT_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_STDERR_BYTES: u64 = 1024 * 1024;
 
 const CONTENT_GONE: [&str; 9] = [
     "Video unavailable",
@@ -62,29 +66,59 @@ pub async fn run(
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000);
     let mut child = cmd.spawn()?;
-    let mut out = child.stdout.take();
-    let mut err = child.stderr.take();
-    let read_out = async move {
-        let mut buf = Vec::new();
-        if let Some(s) = out.as_mut() {
-            let _ = s.read_to_end(&mut buf).await;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let result = collect_output(stdout, stderr, child.wait(), budget).await;
+    if result.as_ref().map_or(true, |output| output.timed_out) {
+        kill_tree(&mut child).await;
+    }
+    result
+}
+
+async fn read_output(reader: Option<impl AsyncRead + Unpin>, limit: u64) -> io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    if let Some(reader) = reader {
+        reader.take(limit + 1).read_to_end(&mut output).await?;
+        if u64::try_from(output.len()).unwrap_or(u64::MAX) > limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "yt-dlp output exceeds the size limit",
+            ));
         }
-        buf
+    }
+    Ok(output)
+}
+
+async fn collect_output(
+    stdout: Option<impl AsyncRead + Unpin>,
+    stderr: Option<impl AsyncRead + Unpin>,
+    wait: impl Future<Output = io::Result<ExitStatus>>,
+    budget: Duration,
+) -> io::Result<OgRun> {
+    let readers = async {
+        tokio::try_join!(
+            read_output(stdout, MAX_STDOUT_BYTES),
+            read_output(stderr, MAX_STDERR_BYTES)
+        )
     };
-    let read_err = async move {
-        let mut buf = Vec::new();
-        if let Some(s) = err.as_mut() {
-            let _ = s.read_to_end(&mut buf).await;
+    let wait = tokio::time::timeout(budget, wait);
+    tokio::pin!(readers, wait);
+    let mut captured = None;
+    let status = tokio::select! {
+        status = &mut wait => status,
+        output = &mut readers => {
+            captured = Some(output?);
+            wait.await
         }
-        buf
     };
-    let readers = tokio::spawn(async move { tokio::join!(read_out, read_err) });
-    match tokio::time::timeout(budget, child.wait()).await {
+    match status {
         Ok(status) => {
             let status = status?;
-            let (stdout, stderr) = match tokio::time::timeout(DRAIN_AFTER_EXIT, readers).await {
-                Ok(joined) => joined.unwrap_or_default(),
-                Err(_) => (Vec::new(), Vec::new()),
+            let (stdout, stderr) = match captured {
+                Some(output) => output,
+                None => tokio::time::timeout(DRAIN_AFTER_EXIT, readers)
+                    .await
+                    .unwrap_or_else(|_| Ok((Vec::new(), Vec::new())))?,
             };
             Ok(OgRun {
                 exit: status.code().unwrap_or(-1),
@@ -93,16 +127,12 @@ pub async fn run(
                 stderr,
             })
         }
-        Err(_) => {
-            kill_tree(&mut child).await;
-            readers.abort();
-            Ok(OgRun {
-                exit: TIMEOUT_EXIT_CODE,
-                timed_out: true,
-                stdout: Vec::new(),
-                stderr: Vec::new(),
-            })
-        }
+        Err(_) => Ok(OgRun {
+            exit: TIMEOUT_EXIT_CODE,
+            timed_out: true,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }),
     }
 }
 
@@ -115,9 +145,115 @@ async fn kill_tree(child: &mut tokio::process::Child) {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .kill_on_drop(true)
             .creation_flags(0x0800_0000);
         let _ = tokio::time::timeout(Duration::from_secs(5), taskkill.status()).await;
     }
     let _ = child.start_kill();
     let _ = child.wait().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::{pending, ready};
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll};
+    use tokio::io::ReadBuf;
+
+    use super::*;
+
+    struct HeldReader(Arc<AtomicUsize>);
+
+    impl AsyncRead for HeldReader {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            _: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            Poll::Pending
+        }
+    }
+
+    impl Drop for HeldReader {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn success() -> ExitStatus {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
+        ExitStatus::from_raw(0)
+    }
+
+    #[tokio::test]
+    async fn oversized_output_is_rejected_without_reading_the_rest() {
+        let mut source: &[u8] = b"123456789";
+        let result = read_output(Some(&mut source), 4).await;
+        assert_eq!(
+            result.expect_err("oversized output must fail").kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(source, b"6789");
+        assert_eq!(
+            read_output(Some(&b"1234"[..]), 4)
+                .await
+                .expect("exact limit is allowed"),
+            b"1234"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn drain_timeout_drops_both_pipe_readers() {
+        let closed = Arc::new(AtomicUsize::new(0));
+        let output = collect_output(
+            Some(HeldReader(Arc::clone(&closed))),
+            Some(HeldReader(Arc::clone(&closed))),
+            ready(Ok(success())),
+            Duration::from_secs(30),
+        )
+        .await
+        .expect("the child exited successfully");
+        assert_eq!(output.exit, 0);
+        assert_eq!(closed.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn process_timeout_drops_both_pipe_readers() {
+        let closed = Arc::new(AtomicUsize::new(0));
+        let output = collect_output(
+            Some(HeldReader(Arc::clone(&closed))),
+            Some(HeldReader(Arc::clone(&closed))),
+            pending(),
+            Duration::from_secs(30),
+        )
+        .await
+        .expect("timeout is reported in the result");
+        assert!(output.timed_out);
+        assert_eq!(closed.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelling_capture_drops_both_pipe_readers() {
+        let closed = Arc::new(AtomicUsize::new(0));
+        let capture = collect_output(
+            Some(HeldReader(Arc::clone(&closed))),
+            Some(HeldReader(Arc::clone(&closed))),
+            pending(),
+            Duration::from_secs(30),
+        );
+        {
+            tokio::pin!(capture);
+            tokio::select! {
+                biased;
+                _ = &mut capture => panic!("capture must remain pending"),
+                () = ready(()) => {}
+            }
+        }
+        assert_eq!(closed.load(Ordering::SeqCst), 2);
+    }
 }

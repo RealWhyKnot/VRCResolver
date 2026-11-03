@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,19 +37,19 @@ pub fn line(up: Duration, mesh_connected: bool, a: &Activity, cache_size: usize)
         }
     );
     if a.resolves_total > 0 {
-        s.push_str(&format!(" resolves={}", a.resolves_total));
+        let _ = write!(s, " resolves={}", a.resolves_total);
         if a.resolves_via_lh_yt > 0 {
-            s.push_str(&format!(" ({} local video)", a.resolves_via_lh_yt));
+            let _ = write!(s, " ({} local video)", a.resolves_via_lh_yt);
         }
     }
     if a.bytes_estimate_total > 0 {
-        s.push_str(&format!(" video={}", format_bytes(a.bytes_estimate_total)));
+        let _ = write!(s, " video={}", format_bytes(a.bytes_estimate_total));
     }
     if cache_size > 0 || a.resolves_cache_hits > 0 {
-        s.push_str(&format!(" cache={cache_size}({}hits)", a.resolves_cache_hits));
+        let _ = write!(s, " cache={cache_size}({}hits)", a.resolves_cache_hits);
     }
     if a.reconnects > 0 {
-        s.push_str(&format!(" reconnects={}", a.reconnects));
+        let _ = write!(s, " reconnects={}", a.reconnects);
     }
     s
 }

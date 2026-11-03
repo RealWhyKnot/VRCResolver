@@ -10,7 +10,10 @@ pub fn hosts_path() -> PathBuf {
     let root = std::env::var_os("SystemRoot")
         .or_else(|| std::env::var_os("windir"))
         .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
-    root.join("System32").join("drivers").join("etc").join("hosts")
+    root.join("System32")
+        .join("drivers")
+        .join("etc")
+        .join("hosts")
 }
 
 pub fn line_is_bypass_entry(raw: &str) -> bool {

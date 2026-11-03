@@ -149,7 +149,11 @@ pub fn install_files(manifest: Option<&str>) -> Vec<PathBuf> {
 pub fn install_subdirs(files: &[PathBuf]) -> Vec<PathBuf> {
     let mut dirs = BTreeSet::new();
     for file in files {
-        for dir in file.ancestors().skip(1).filter(|d| !d.as_os_str().is_empty()) {
+        for dir in file
+            .ancestors()
+            .skip(1)
+            .filter(|d| !d.as_os_str().is_empty())
+        {
             dirs.insert(dir.to_path_buf());
         }
     }
@@ -161,7 +165,9 @@ pub fn install_subdirs(files: &[PathBuf]) -> Vec<PathBuf> {
 fn cmd_safe(path: &Path, what: &str) -> Result<String, String> {
     let text = path.to_string_lossy().into_owned();
     if text.contains('"') || text.contains('%') {
-        return Err(format!("{what} contains a quote or percent character: {text}"));
+        return Err(format!(
+            "{what} contains a quote or percent character: {text}"
+        ));
     }
     Ok(text)
 }

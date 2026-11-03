@@ -14,7 +14,8 @@ pub fn fresh_id() -> String {
 }
 
 pub fn parse_simple_guid(text: &str) -> Option<String> {
-    (text.len() == 32 && text.bytes().all(|b| b.is_ascii_hexdigit())).then(|| text.to_ascii_lowercase())
+    (text.len() == 32 && text.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| text.to_ascii_lowercase())
 }
 
 pub fn load_or_create(path: &Path) -> String {

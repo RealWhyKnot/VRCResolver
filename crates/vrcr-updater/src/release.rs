@@ -66,12 +66,17 @@ pub fn select_release(
         let url = text(asset, "browser_download_url");
         if ends_with_ignore_case(&name, ".zip") {
             log(format!("[updater] selected asset: {name} url={url}"));
-            let digest = asset.get("digest").and_then(Value::as_str).map(str::to_owned);
+            let digest = asset
+                .get("digest")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
             zip = Some((url, name, digest));
             continue;
         }
         if ends_with_ignore_case(&name, ".integrity.tsv") {
-            log(format!("[updater] selected integrity asset: {name} url={url}"));
+            log(format!(
+                "[updater] selected integrity asset: {name} url={url}"
+            ));
             integrity_url = Some(url);
         }
     }

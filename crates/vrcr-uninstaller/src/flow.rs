@@ -7,8 +7,8 @@ use vrcr_shared::win::Elevated;
 use vrcr_shared::{hosts, relay_tls};
 
 use crate::{
-    CloseReport, HOSTS_TIMEOUT, TLS_TIMEOUT, WATCHDOG_EXE, close_watchdogs, comparable, install_files,
-    install_subdirs, rmdir_log_name, self_delete_args,
+    CloseReport, HOSTS_TIMEOUT, TLS_TIMEOUT, WATCHDOG_EXE, close_watchdogs, comparable,
+    install_files, install_subdirs, rmdir_log_name, self_delete_args,
 };
 
 pub const EXIT_OK: i32 = 0;
@@ -84,7 +84,9 @@ pub fn restore_ytdlp(host: &dyn Host, tools: Option<&Path>) -> Result<(), String
             host.err(&format!(
                 "[uninstall] WARNING: yt-dlp.exe was not restored ({detail}) -- check Tools/yt-dlp.exe by hand; deleting it makes VRChat re-download its own on next launch."
             ));
-            Err(format!("Tools/yt-dlp.exe could not be restored -- {detail}"))
+            Err(format!(
+                "Tools/yt-dlp.exe could not be restored -- {detail}"
+            ))
         }
         RestoreOutcome::RemovedOrphanWrapper => {
             host.say(
@@ -145,11 +147,15 @@ pub fn remove_hosts(host: &dyn Host, watchdog: &Path) -> Result<(), String> {
 
 pub fn remove_relay_tls(host: &dyn Host, watchdog: &Path) -> Result<(), String> {
     if !watchdog.is_file() {
-        host.say("[uninstall] remove-relay-tls skipped: watchdog exe missing (can't re-exec elevated)");
+        host.say(
+            "[uninstall] remove-relay-tls skipped: watchdog exe missing (can't re-exec elevated)",
+        );
         return Ok(());
     }
     if host.run_check(watchdog, relay_tls::CHECK_ARG) == Some(relay_tls::CHECK_CLEAN) {
-        host.say("[uninstall] remove-relay-tls skipped: no relay certificate or legacy binding left");
+        host.say(
+            "[uninstall] remove-relay-tls skipped: no relay certificate or legacy binding left",
+        );
         return Ok(());
     }
     let result = host.elevate(watchdog, relay_tls::REMOVE_ARG, TLS_TIMEOUT);
@@ -169,7 +175,10 @@ pub fn wipe_state(host: &dyn Host, roots: &[PathBuf]) -> Result<(), String> {
         match host.remove_dir(root) {
             Ok(true) => wiped += 1,
             Ok(false) => {}
-            Err(e) => host.err(&format!("[uninstall] could not wipe {}: {e}", root.display())),
+            Err(e) => host.err(&format!(
+                "[uninstall] could not wipe {}: {e}",
+                root.display()
+            )),
         }
     }
     host.say(&format!("[uninstall] wipe-state directories_wiped={wiped}"));
@@ -192,7 +201,10 @@ pub fn remove_install_files(host: &dyn Host, install_dir: &Path, exe: &Path) -> 
             Ok(false) => {}
             Err(e) => {
                 failed += 1;
-                host.err(&format!("[uninstall] could not remove {}: {e}", path.display()));
+                host.err(&format!(
+                    "[uninstall] could not remove {}: {e}",
+                    path.display()
+                ));
             }
         }
     }
@@ -230,7 +242,10 @@ pub fn schedule_self_delete(host: &dyn Host, install_dir: &Path, exe: &Path) -> 
 pub fn run(host: &dyn Host, exe: &Path, roots: &[PathBuf]) -> i32 {
     let install_dir = exe.parent().unwrap_or_else(|| Path::new("."));
     let watchdog = install_dir.join(WATCHDOG_EXE);
-    host.say(&format!("[uninstall] start installDir={}", install_dir.display()));
+    host.say(&format!(
+        "[uninstall] start installDir={}",
+        install_dir.display()
+    ));
 
     if run_step(host, "close-watchdog", || {
         close_watchdog(host, install_dir).map(drop)
@@ -241,9 +256,13 @@ pub fn run(host: &dyn Host, exe: &Path, roots: &[PathBuf]) -> i32 {
     }
     let tools = host.tools_dir();
     let mut errors = 0;
-    errors += run_step(host, "restore-yt-dlp", || restore_ytdlp(host, tools.as_deref()));
+    errors += run_step(host, "restore-yt-dlp", || {
+        restore_ytdlp(host, tools.as_deref())
+    });
     errors += run_step(host, "remove-hosts", || remove_hosts(host, &watchdog));
-    errors += run_step(host, "remove-relay-tls", || remove_relay_tls(host, &watchdog));
+    errors += run_step(host, "remove-relay-tls", || {
+        remove_relay_tls(host, &watchdog)
+    });
     errors += run_step(host, "restore-wininet-limit", || host.restore_wininet());
     errors += run_step(host, "wipe-state", || wipe_state(host, roots));
     errors += run_step(host, "remove-files", || {

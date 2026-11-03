@@ -1,6 +1,12 @@
+use std::io::Write as _;
 use std::process::Command;
 
-pub const BUILD_VARS: [&str; 4] = ["VRCR_VERSION", "VRCR_GIT_SHA", "VRCR_BUILD_TIME", "VRCR_CHANNEL"];
+pub const BUILD_VARS: [&str; 4] = [
+    "VRCR_VERSION",
+    "VRCR_GIT_SHA",
+    "VRCR_BUILD_TIME",
+    "VRCR_CHANNEL",
+];
 
 pub struct Exe<'a> {
     pub description: &'a str,
@@ -49,13 +55,20 @@ pub fn rustc_version() -> String {
 }
 
 pub fn export_rustc_version() {
-    println!("cargo::rustc-env=VRCR_RUSTC={}", rustc_version());
+    writeln!(
+        std::io::stdout(),
+        "cargo::rustc-env=VRCR_RUSTC={}",
+        rustc_version()
+    )
+    .expect("build-script output must remain writable");
 }
 
 pub fn stamp(exe: &Exe<'_>) {
-    println!("cargo::rerun-if-changed=app.manifest");
+    writeln!(std::io::stdout(), "cargo::rerun-if-changed=app.manifest")
+        .expect("build-script output must remain writable");
     for var in BUILD_VARS {
-        println!("cargo::rerun-if-env-changed={var}");
+        writeln!(std::io::stdout(), "cargo::rerun-if-env-changed={var}")
+            .expect("build-script output must remain writable");
     }
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
@@ -75,7 +88,8 @@ pub fn stamp(exe: &Exe<'_>) {
         .set_version_info(winresource::VersionInfo::PRODUCTVERSION, packed)
         .set_manifest_file("app.manifest");
     if let Err(e) = res.compile() {
-        eprintln!("version resource failed: {e}");
+        writeln!(std::io::stderr(), "version resource failed: {e}")
+            .expect("build-script output must remain writable");
         std::process::exit(1);
     }
 }

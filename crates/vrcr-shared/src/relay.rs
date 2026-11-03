@@ -4,7 +4,9 @@ use std::time::Duration;
 pub const DEFAULT_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 
 pub fn is_listening(port: u16, timeout: Duration) -> bool {
-    port != 0 && TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), timeout).is_ok()
+    port != 0
+        && TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), timeout)
+            .is_ok()
 }
 
 pub fn terminal_failure_line(

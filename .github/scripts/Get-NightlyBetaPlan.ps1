@@ -1,39 +1,45 @@
 #!/usr/bin/env pwsh
+#Requires -Version 7.4
 [CmdletBinding()]
 param(
-    [string] $RepoRoot = "",
-    [string] $BaseTag = "",
-    [string] $Tag = "",
-    [string] $Today = "",
+    [string] $RepoRoot = '',
+    [string] $BaseTag = '',
+    [string] $Tag = '',
+    [string] $Today = '',
     [datetime] $NowUtc = ([datetime]::UtcNow),
-    [string] $OutputJsonPath = ""
+    [string] $OutputJsonPath = ''
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 function Resolve-RepoRoot {
+    [CmdletBinding()]
+    [OutputType([string])]
+
     param([string] $Value)
 
     if (-not [string]::IsNullOrWhiteSpace($Value)) {
         return (Resolve-Path -LiteralPath $Value).Path
     }
-    return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+    return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 }
 
 function Invoke-Git {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+
     param(
         [string[]] $Arguments,
         [switch] $AllowFailure
     )
 
     $previousPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
+    $ErrorActionPreference = 'Continue'
     try {
         $output = & git @Arguments 2>$null
         $exitCode = $LASTEXITCODE
-    }
-    finally {
+    } finally {
         $ErrorActionPreference = $previousPreference
     }
 
@@ -47,7 +53,10 @@ function Invoke-Git {
 }
 
 function Get-FirstOutput {
-    param($Value)
+    [CmdletBinding()]
+    [OutputType([string])]
+
+    param([object] $Value)
 
     $items = @($Value)
     if ($items.Count -eq 0) {
@@ -56,7 +65,10 @@ function Get-FirstOutput {
     return [string]$items[0]
 }
 
-function Test-GitTagExists {
+function Test-GitTag {
+    [CmdletBinding()]
+    [OutputType([bool])]
+
     param([string] $Name)
 
     if ([string]::IsNullOrWhiteSpace($Name)) {
@@ -67,17 +79,22 @@ function Test-GitTagExists {
 }
 
 function Get-CentralTimeZone {
-    foreach ($id in @("Central Standard Time", "America/Chicago")) {
+    [CmdletBinding()]
+    [OutputType([TimeZoneInfo])]
+    param()
+
+    foreach ($id in @('Central Standard Time', 'America/Chicago')) {
         try {
             return [System.TimeZoneInfo]::FindSystemTimeZoneById($id)
-        }
-        catch {
-        }
+        } catch [TimeZoneNotFoundException], [InvalidTimeZoneException] { continue }
     }
-    throw "Could not resolve the America/Chicago release time zone."
+    throw 'Could not resolve the America/Chicago release time zone.'
 }
 
 function Get-ReleaseDateStamp {
+    [CmdletBinding()]
+    [OutputType([string])]
+
     param(
         [datetime] $CurrentUtc,
         [string] $Format
@@ -92,38 +109,49 @@ function Get-ReleaseDateStamp {
 }
 
 function Get-LatestReleaseTag {
+    [CmdletBinding()]
+    [OutputType([string])]
+
     param([string] $Override)
 
     if (-not [string]::IsNullOrWhiteSpace($Override)) {
         return $Override
     }
 
-    $latestTag = Get-FirstOutput -Value (Invoke-Git -Arguments @("describe", "--tags", "--abbrev=0", "--match", "v*", "HEAD") -AllowFailure)
+    $arguments = @('describe', '--tags', '--abbrev=0', '--match', 'v*', 'HEAD')
+    $latestTag = Get-FirstOutput -Value (Invoke-Git -Arguments $arguments -AllowFailure)
     if ([string]::IsNullOrWhiteSpace($latestTag)) {
-        return ""
+        return ''
     }
     return $latestTag.Trim()
 }
 
-function Get-ReleaseDiffPathspecs {
+function Get-ReleaseDiffPathspec {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param()
+
     return @(
-        ".",
-        ":(top,exclude)CHANGELOG.md",
-        ":(top,exclude)data/wrapper_hashes.txt"
+        '.',
+        ':(top,exclude)CHANGELOG.md',
+        ':(top,exclude)data/wrapper_hashes.txt'
     )
 }
 
 function Test-HasChangesSinceTag {
+    [CmdletBinding()]
+    [OutputType([bool])]
+
     param([string] $Name)
 
     if ([string]::IsNullOrWhiteSpace($Name)) {
         return $true
     }
-    if (-not (Test-GitTagExists -Name $Name)) {
+    if (-not (Test-GitTag -Name $Name)) {
         return $true
     }
 
-    $arguments = @("diff", "--quiet", "$Name..HEAD", "--") + (Get-ReleaseDiffPathspecs)
+    $arguments = @('diff', '--quiet', "$Name..HEAD", '--') + (Get-ReleaseDiffPathspec)
     & git @arguments
     $code = $LASTEXITCODE
     if ($code -eq 0) {
@@ -136,31 +164,37 @@ function Test-HasChangesSinceTag {
 }
 
 function Get-ChangedPathCountSinceTag {
+    [CmdletBinding()]
+    [OutputType([int])]
+
     param([string] $Name)
 
-    if ([string]::IsNullOrWhiteSpace($Name) -or -not (Test-GitTagExists -Name $Name)) {
+    if ([string]::IsNullOrWhiteSpace($Name) -or -not (Test-GitTag -Name $Name)) {
         return 0
     }
 
-    $arguments = @("diff", "--name-only", "$Name..HEAD", "--") + (Get-ReleaseDiffPathspecs)
+    $arguments = @('diff', '--name-only', "$Name..HEAD", '--') + (Get-ReleaseDiffPathspec)
     $paths = @(Invoke-Git -Arguments $arguments)
     return $paths.Count
 }
 
 function Get-NextBetaTag {
+    [CmdletBinding()]
+    [OutputType([string])]
+
     param(
         [string] $DateStamp,
         [datetime] $CurrentUtc
     )
 
     if ([string]::IsNullOrWhiteSpace($DateStamp)) {
-        $DateStamp = Get-ReleaseDateStamp -CurrentUtc $CurrentUtc -Format "yyyy.M.d"
+        $DateStamp = Get-ReleaseDateStamp -CurrentUtc $CurrentUtc -Format 'yyyy.M.d'
     }
 
     $escaped = [regex]::Escape($DateStamp)
     $pattern = "^v$escaped\.(\d+)(-[A-Za-z0-9]{4})?$"
     $highest = -1
-    foreach ($existing in @(Invoke-Git -Arguments @("tag", "--list", "v$DateStamp.*"))) {
+    foreach ($existing in @(Invoke-Git -Arguments @('tag', '--list', "v$DateStamp.*"))) {
         if ($existing -match $pattern) {
             $value = [int]$Matches[1]
             if ($value -gt $highest) {
@@ -173,6 +207,9 @@ function Get-NextBetaTag {
 }
 
 function Write-GitHubOutput {
+    [CmdletBinding()]
+    [OutputType([void])]
+
     param(
         [string] $Name,
         [string] $Value
@@ -188,53 +225,53 @@ function Write-GitHubOutput {
 $repoRootPath = Resolve-RepoRoot -Value $RepoRoot
 Push-Location $repoRootPath
 try {
-    if (-not [string]::IsNullOrWhiteSpace($Tag) -and $Tag -notmatch "^v\d{4}\.\d+\.\d+\.\d+-beta$") {
-        throw "Nightly beta tags must match vYYYY.M.D.N-beta."
+    if (-not [string]::IsNullOrWhiteSpace($Tag) -and $Tag -notmatch '^v\d{4}\.\d+\.\d+\.\d+-beta$') {
+        throw 'Nightly beta tags must match vYYYY.M.D.N-beta.'
     }
 
-    $head = (Get-FirstOutput -Value (Invoke-Git -Arguments @("rev-parse", "HEAD"))).Trim()
+    $head = (Get-FirstOutput -Value (Invoke-Git -Arguments @('rev-parse', 'HEAD'))).Trim()
     $base = Get-LatestReleaseTag -Override $BaseTag
     $hasChanges = Test-HasChangesSinceTag -Name $base
     $changedPathCount = Get-ChangedPathCountSinceTag -Name $base
     if ([string]::IsNullOrWhiteSpace($Tag)) {
         $nextTag = Get-NextBetaTag -DateStamp $Today -CurrentUtc $NowUtc
-    }
-    else {
+    } else {
         $nextTag = $Tag
     }
 
     $plan = [pscustomobject]@{
-        has_changes = $hasChanges
+        has_changes        = $hasChanges
         changed_path_count = $changedPathCount
-        base_tag = $base
-        head_sha = $head
-        next_tag = $nextTag
+        base_tag           = $base
+        head_sha           = $head
+        next_tag           = $nextTag
     }
 
     if (-not [string]::IsNullOrWhiteSpace($OutputJsonPath)) {
         $resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputJsonPath)
         $parent = Split-Path -Parent $resolvedOutputPath
         if (-not (Test-Path -LiteralPath $parent)) {
-            New-Item -ItemType Directory -Path $parent | Out-Null
+            $null = New-Item -ItemType Directory -Path $parent
         }
         $json = $plan | ConvertTo-Json -Depth 4 -Compress
         $encoding = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($resolvedOutputPath, $json, $encoding)
     }
 
-    Write-GitHubOutput -Name "has_changes" -Value ([string]$hasChanges).ToLowerInvariant()
-    Write-GitHubOutput -Name "changed_path_count" -Value ([string]$changedPathCount)
-    Write-GitHubOutput -Name "base_tag" -Value $base
-    Write-GitHubOutput -Name "head_sha" -Value $head
-    Write-GitHubOutput -Name "next_tag" -Value $nextTag
+    Write-GitHubOutput -Name 'has_changes' -Value ([string]$hasChanges).ToLowerInvariant()
+    Write-GitHubOutput -Name 'changed_path_count' -Value ([string]$changedPathCount)
+    Write-GitHubOutput -Name 'base_tag' -Value $base
+    Write-GitHubOutput -Name 'head_sha' -Value $head
+    Write-GitHubOutput -Name 'next_tag' -Value $nextTag
 
-    Write-Host "Nightly beta release plan:"
+    Write-Host 'Nightly beta release plan:'
     Write-Host "  Base tag: $base"
     Write-Host "  Head: $head"
     Write-Host "  Changed path count: $changedPathCount"
     Write-Host "  Next tag: $nextTag"
     Write-Host "  Has changes: $hasChanges"
-}
-finally {
+} finally {
     Pop-Location
 }
+
+exit 0

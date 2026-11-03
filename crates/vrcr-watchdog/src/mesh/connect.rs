@@ -97,9 +97,9 @@ pub fn platform_tls() -> Result<Arc<ClientConfig>, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let config = ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
-        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("select TLS protocol versions: {e}"))?
         .with_platform_verifier()
-        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("configure platform certificate verifier: {e}"))?
         .with_no_client_auth();
     Ok(Arc::new(config))
 }
@@ -173,12 +173,17 @@ pub async fn open(
         Some(p) => format!("{}:{p}", parsed.host_str().unwrap_or_default()),
         None => parsed.host_str().unwrap_or_default().to_owned(),
     };
-    let (stream, leftover, subprotocol) = handshake(stream, &target, &host_header, user_agent).await?;
+    let (stream, leftover, subprotocol) =
+        handshake(stream, &target, &host_header, user_agent).await?;
     let config = WebSocketConfig::default()
         .max_message_size(Some(MAX_MESSAGE_BYTES))
         .max_frame_size(Some(MAX_MESSAGE_BYTES));
-    let socket = WebSocketStream::from_partially_read(stream, leftover, Role::Client, Some(config)).await;
-    Ok(Opened { socket, subprotocol })
+    let socket =
+        WebSocketStream::from_partially_read(stream, leftover, Role::Client, Some(config)).await;
+    Ok(Opened {
+        socket,
+        subprotocol,
+    })
 }
 
 async fn connect_any(addrs: &[SocketAddr]) -> io::Result<TcpStream> {
@@ -268,7 +273,10 @@ pub fn check_upgrade_response(head: &str, key: &str) -> Result<Option<String>, S
     if !upgrade.is_some_and(|u| u.eq_ignore_ascii_case("websocket")) {
         return Err("upgrade response is missing Upgrade: websocket".to_owned());
     }
-    if !connection.is_some_and(|c| c.split(',').any(|t| t.trim().eq_ignore_ascii_case("upgrade"))) {
+    if !connection.is_some_and(|c| {
+        c.split(',')
+            .any(|t| t.trim().eq_ignore_ascii_case("upgrade"))
+    }) {
         return Err("upgrade response is missing Connection: Upgrade".to_owned());
     }
     if accept.as_deref() != Some(derive_accept_key(key.as_bytes()).as_str()) {
@@ -280,6 +288,8 @@ pub fn check_upgrade_response(head: &str, key: &str) -> Result<Option<String>, S
     match protocol.filter(|p| !p.is_empty()) {
         None => Ok(None),
         Some(p) if p == SUBPROTOCOL_V3 => Ok(Some(p)),
-        Some(p) => Err(format!("server picked a subprotocol that was not offered: {p}")),
+        Some(p) => Err(format!(
+            "server picked a subprotocol that was not offered: {p}"
+        )),
     }
 }

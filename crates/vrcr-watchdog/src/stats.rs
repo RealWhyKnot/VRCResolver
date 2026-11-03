@@ -126,7 +126,8 @@ impl Stats {
         }
         self.relay_bytes.fetch_add(bytes, Ordering::Relaxed);
         if upstream {
-            self.upstream_relay_bytes.fetch_add(bytes, Ordering::Relaxed);
+            self.upstream_relay_bytes
+                .fetch_add(bytes, Ordering::Relaxed);
         }
         let since = now.duration_since(UNIX_EPOCH).unwrap_or_default();
         let second = since.as_secs();
@@ -137,6 +138,7 @@ impl Stats {
                 *slot = (second, 0);
             }
             slot.1 = slot.1.saturating_add(bytes);
+            drop(b);
         }
         let ms = u64::try_from(since.as_millis()).unwrap_or(u64::MAX).max(1);
         self.last_relay_ms.store(ms, Ordering::Relaxed);
@@ -168,7 +170,8 @@ impl Stats {
         let b = self.bandwidth.lock().unwrap_or_else(|e| e.into_inner());
         let history: Vec<u64> = (0..seconds)
             .map(|i| {
-                let second = now_second.saturating_sub((seconds - 1 - i) as u64);
+                let second = now_second
+                    .saturating_sub(u64::try_from(seconds - 1 - i).expect("bucket age fits u64"));
                 let (s, bytes) = b[bucket(second)];
                 if s == second { bytes } else { 0 }
             })
@@ -182,7 +185,8 @@ impl Stats {
 }
 
 fn bucket(second: u64) -> usize {
-    (second % BANDWIDTH_BUCKETS as u64) as usize
+    usize::try_from(second % u64::try_from(BANDWIDTH_BUCKETS).expect("bucket count fits u64"))
+        .expect("bucket index is below the bucket count")
 }
 
 fn from_ms(ms: u64) -> Option<SystemTime> {
@@ -276,7 +280,14 @@ impl PerfWindow {
         self.enabled.load(Ordering::Relaxed)
     }
 
-    pub fn record_relay(&self, kind: RelayKind, failed: bool, header_ms: i64, total_ms: i64, bytes: u64) {
+    pub fn record_relay(
+        &self,
+        kind: RelayKind,
+        failed: bool,
+        header_ms: i64,
+        total_ms: i64,
+        bytes: u64,
+    ) {
         if !self.enabled() {
             return;
         }

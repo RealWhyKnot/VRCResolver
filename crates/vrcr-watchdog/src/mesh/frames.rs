@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::time::SystemTime;
 
 use rmpv::Value as Mp;
@@ -41,7 +42,12 @@ pub fn fallback_result(id: &str, reason: &str) -> MeshResult {
     }
 }
 
-pub fn describe_connect_failure(host: &str, elapsed_ms: u128, probe: &Probe, cause: Option<&str>) -> String {
+pub fn describe_connect_failure(
+    host: &str,
+    elapsed_ms: u128,
+    probe: &Probe,
+    cause: Option<&str>,
+) -> String {
     let place = format!(
         " after {elapsed_ms} ms during {}{}",
         probe.phase.as_str(),
@@ -87,10 +93,10 @@ pub fn playback_quality_line(root: &Value) -> String {
         line.push_str(&sanitize_for_console(cid, 32));
     }
     if let Some(h) = i32_field(root, "delivered_height") {
-        line.push_str(&format!(" delivered={h}p"));
+        let _ = write!(line, " delivered={h}p");
     }
     if let Some(h) = i32_field(root, "resolved_height") {
-        line.push_str(&format!(" resolved={h}p"));
+        let _ = write!(line, " resolved={h}p");
     }
     line
 }
@@ -103,18 +109,29 @@ pub fn resolve_log_line(root: &Value) -> String {
         sanitize_for_console(str_field(root, "message").unwrap_or_default(), 240)
     )
 }
+#[derive(Clone, Copy)]
+pub struct PlaybackFeedback<'a> {
+    pub url: &'a str,
+    pub kind: &'a str,
+    pub ms_since_open: i32,
+    pub client_id: &'a str,
+    pub correlation_id: Option<&'a str>,
+    pub timestamp: SystemTime,
+    pub delivered_height: Option<i32>,
+    pub detail: Option<&'a str>,
+}
 
-#[allow(clippy::too_many_arguments)]
-pub fn playback_feedback_payload(
-    url: &str,
-    kind: &str,
-    ms_since_open: i32,
-    client_id: &str,
-    correlation_id: Option<&str>,
-    timestamp: SystemTime,
-    delivered_height: Option<i32>,
-    detail: Option<&str>,
-) -> String {
+pub fn playback_feedback_payload(input: PlaybackFeedback<'_>) -> String {
+    let PlaybackFeedback {
+        url,
+        kind,
+        ms_since_open,
+        client_id,
+        correlation_id,
+        timestamp,
+        delivered_height,
+        detail,
+    } = input;
     let frame = PlaybackFeedbackFrame {
         action: action::PLAYBACK_FEEDBACK.to_owned(),
         url: url.to_owned(),
@@ -222,7 +239,10 @@ impl Fields<'_> {
                 .as_str()
                 .map(|s| Some(s.to_owned()))
                 .ok_or_else(|| format!("{} deserialize: field {i} is not valid utf-8", self.what)),
-            Some(_) => Err(format!("{} deserialize: field {i} is not a string", self.what)),
+            Some(_) => Err(format!(
+                "{} deserialize: field {i} is not a string",
+                self.what
+            )),
         }
     }
 
@@ -233,16 +253,22 @@ impl Fields<'_> {
                 .as_i64()
                 .map(Some)
                 .ok_or_else(|| format!("{} deserialize: field {i} is out of range", self.what)),
-            Some(_) => Err(format!("{} deserialize: field {i} is not an integer", self.what)),
+            Some(_) => Err(format!(
+                "{} deserialize: field {i} is not an integer",
+                self.what
+            )),
         }
     }
 
     fn int32(&self, i: usize) -> Result<Option<i32>, String> {
         match self.int64(i)? {
             None => Ok(None),
-            Some(n) => i32::try_from(n)
-                .map(Some)
-                .map_err(|_| format!("{} deserialize: field {i} is out of range", self.what)),
+            Some(n) => i32::try_from(n).map(Some).map_err(|error| {
+                format!(
+                    "{} deserialize: field {i} is out of range: {error}",
+                    self.what
+                )
+            }),
         }
     }
 }

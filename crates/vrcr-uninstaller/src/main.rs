@@ -63,7 +63,11 @@ impl Host for RealHost {
     }
 
     fn watchdog_pids(&self) -> Vec<u32> {
-        stop::pids_named(&win::list_processes(), &WATCHDOG_PROCESSES, std::process::id())
+        stop::pids_named(
+            &win::list_processes(),
+            &WATCHDOG_PROCESSES,
+            std::process::id(),
+        )
     }
 
     fn image_path(&self, pid: u32) -> Option<PathBuf> {
@@ -124,12 +128,14 @@ impl Host for RealHost {
         if !marker.is_file() {
             return Ok(());
         }
-        let key = win::HkcuKey::create(wininet::KEY_PATH).map_err(|e| e.to_string())?;
+        let key = win::HkcuKey::create(wininet::KEY_PATH)
+            .map_err(|e| format!("open WinINet registry key: {e}"))?;
         let mut store = win::RegDword {
             key: &key,
             name: wininet::VALUE_NAME,
         };
-        wininet::restore(Some(&mut store), &marker, &mut |line| self.say(&line)).map_err(|e| e.to_string())
+        wininet::restore(Some(&mut store), &marker, &mut |line| self.say(&line))
+            .map_err(|e| format!("restore WinINet settings: {e}"))
     }
 
     fn close_log(&self) {
@@ -142,7 +148,7 @@ impl Host for RealHost {
         }
         std::fs::remove_dir_all(dir)
             .map(|()| true)
-            .map_err(|e| e.to_string())
+            .map_err(|e| format!("remove installation directory: {e}"))
     }
 
     fn remove_file(&self, path: &Path) -> Result<bool, String> {
@@ -151,7 +157,7 @@ impl Host for RealHost {
         }
         std::fs::remove_file(path)
             .map(|()| true)
-            .map_err(|e| e.to_string())
+            .map_err(|e| format!("remove installation file: {e}"))
     }
 
     fn remove_empty_dir(&self, dir: &Path) -> bool {
@@ -190,10 +196,13 @@ fn main() {
     }
     win::ignore_ctrl_c(true);
     let paths = AppPaths::from_env();
-    paths.migrate_from_legacy_product(&mut |line| println!("{line}"));
+    paths.migrate_from_legacy_product(&mut |line| {
+        let _ = writeln!(std::io::stdout(), "{line}");
+    });
     let log = Log::install(&paths.logs_dir(), "uninstaller");
     let _crash = Crash::install(paths.crashes_dir(), "uninstaller", VERSION);
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("vrcresolver.Uninstaller.exe"));
+    let exe =
+        std::env::current_exe().unwrap_or_else(|_| PathBuf::from("vrcresolver.Uninstaller.exe"));
     let roots = state_roots(&paths);
     let host = RealHost {
         log,

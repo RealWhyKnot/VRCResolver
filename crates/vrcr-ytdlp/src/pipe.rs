@@ -41,7 +41,9 @@ pub async fn connect(pipe_name: &str, timeout: Duration) -> Result<PipeStream, C
     loop {
         match ClientOptions::new().open(&name) {
             Ok(client) => return Ok(client),
-            Err(e) if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {}
+            Err(e)
+                if e.kind() == io::ErrorKind::NotFound
+                    || e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {}
             Err(e) => return Err(ConnectError::Other(e)),
         }
         let now = Instant::now();

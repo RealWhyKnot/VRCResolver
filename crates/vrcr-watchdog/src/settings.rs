@@ -179,7 +179,10 @@ impl Store {
             }
             let mut tmp = self.path.as_os_str().to_owned();
             tmp.push(".new");
-            fs::write(&tmp, serde_json::to_vec(settings).map_err(std::io::Error::other)?)?;
+            fs::write(
+                &tmp,
+                serde_json::to_vec(settings).map_err(std::io::Error::other)?,
+            )?;
             fs::rename(&tmp, &self.path)
         })();
         if let Err(e) = result {
@@ -297,7 +300,11 @@ pub static ALL: [Setting; 7] = [
         key: "video-support-updates",
         description: "Keep playback support files current.",
         restart_required: true,
-        aliases: &["video-updates", "codec-install", "maintenance.codec-install"],
+        aliases: &[
+            "video-updates",
+            "codec-install",
+            "maintenance.codec-install",
+        ],
         get: |s| s.maintenance.codec_auto_install,
         put: |s, v| s.maintenance.codec_auto_install = v,
     },
@@ -313,6 +320,7 @@ pub static ALL: [Setting; 7] = [
 
 pub fn find(key: &str) -> Option<&'static Setting> {
     let key = key.trim();
-    ALL.iter()
-        .find(|s| s.key.eq_ignore_ascii_case(key) || s.aliases.iter().any(|a| a.eq_ignore_ascii_case(key)))
+    ALL.iter().find(|s| {
+        s.key.eq_ignore_ascii_case(key) || s.aliases.iter().any(|a| a.eq_ignore_ascii_case(key))
+    })
 }

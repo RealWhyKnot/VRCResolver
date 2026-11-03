@@ -10,6 +10,13 @@ use serde_json::Value;
 use vrcr_shared::console::{Component, Ux};
 use vrcr_shared::log::Log;
 use vrcr_shared::release::pick_highest_entry;
+
+#[derive(Clone, Copy)]
+pub struct CheckPolicy {
+    pub enabled: bool,
+    pub include_prereleases: bool,
+}
+
 pub use vrcr_shared::release::{ANY_RELEASES_URL, REPO, STABLE_LATEST_URL, Version};
 
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
@@ -111,12 +118,15 @@ async fn github_get(url: &'static str, local: String) -> Option<String> {
 }
 
 pub fn start_background_check(
-    enabled: bool,
-    include_prereleases: bool,
+    policy: CheckPolicy,
     local: &str,
     ux: Ux,
     log: &Log,
 ) -> Option<tokio::task::JoinHandle<()>> {
+    let CheckPolicy {
+        enabled,
+        include_prereleases,
+    } = policy;
     if !enabled {
         log.line("[update] startup update check disabled by settings");
         return None;
@@ -124,7 +134,11 @@ pub fn start_background_check(
     let local = local.to_owned();
     Some(tokio::spawn(async move {
         let fetch_version = local.clone();
-        if let Some(text) = check(include_prereleases, &local, |url| github_get(url, fetch_version)).await {
+        if let Some(text) = check(include_prereleases, &local, |url| {
+            github_get(url, fetch_version)
+        })
+        .await
+        {
             ux.success(Component::Update, &text);
         }
     }))
@@ -146,7 +160,9 @@ pub enum UpdateStart {
 impl UpdateStart {
     pub fn message(&self) -> String {
         match self {
-            UpdateStart::UpdaterMissing(p) => format!("updater not found in install folder: {}", p.display()),
+            UpdateStart::UpdaterMissing(p) => {
+                format!("updater not found in install folder: {}", p.display())
+            }
             UpdateStart::Failed => "update could not start.".to_owned(),
             UpdateStart::Started => {
                 "update started; this window may close while files are replaced.".to_owned()
@@ -155,7 +171,10 @@ impl UpdateStart {
     }
 }
 
-pub fn start_update(install_dir: &Path, spawn: impl FnOnce(Command) -> io::Result<()>) -> UpdateStart {
+pub fn start_update(
+    install_dir: &Path,
+    spawn: impl FnOnce(Command) -> io::Result<()>,
+) -> UpdateStart {
     let updater = install_dir.join(UPDATER_EXE);
     if !updater.is_file() {
         return UpdateStart::UpdaterMissing(updater);
@@ -184,7 +203,13 @@ fn move_with_retry(src: &Path, dst: &Path) -> io::Result<()> {
     }
 }
 
-fn apply_pair(install_dir: &Path, staged_name: &str, target_name: &str, ux: &Ux, log: &Log) -> bool {
+fn apply_pair(
+    install_dir: &Path,
+    staged_name: &str,
+    target_name: &str,
+    ux: &Ux,
+    log: &Log,
+) -> bool {
     let staged = install_dir.join(staged_name);
     if !staged.is_file() {
         return false;

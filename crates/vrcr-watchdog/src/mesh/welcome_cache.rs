@@ -123,7 +123,9 @@ impl WelcomeCache {
             return None;
         }
         let bytes = fs::read(&self.path).ok()?;
-        serde_json::from_slice::<Option<CacheFile>>(&bytes).ok().flatten()
+        serde_json::from_slice::<Option<CacheFile>>(&bytes)
+            .ok()
+            .flatten()
     }
 
     fn save_file(&self, file: &CacheFile) {

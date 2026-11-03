@@ -7,14 +7,17 @@ pub fn is_blocked(addr: IpAddr) -> bool {
         IpAddr::V4(v4) => {
             let [a, b, ..] = v4.octets();
             a == 0
+                || v4.is_multicast()
+                || v4.is_broadcast()
                 || a == 10
+                || (a == 100 && (64..=127).contains(&b))
                 || a == 127
                 || (a == 169 && b == 254)
                 || (a == 172 && (16..=31).contains(&b))
                 || (a == 192 && b == 168)
         }
         IpAddr::V6(v6) => {
-            if v6.is_loopback() {
+            if v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() {
                 return true;
             }
             if let Some(mapped) = v6.to_ipv4_mapped() {
@@ -41,7 +44,9 @@ pub fn is_safe_to_emit(url: Option<&str>) -> bool {
         Some(Host::Ipv4(v4)) => !is_blocked(IpAddr::V4(v4)),
         Some(Host::Ipv6(v6)) => !is_blocked(IpAddr::V6(v6)),
         Some(Host::Domain(d)) => {
-            !d.is_empty() && !d.eq_ignore_ascii_case("localhost") && !ends_with_ignore_case(d, ".localhost")
+            !d.is_empty()
+                && !d.eq_ignore_ascii_case("localhost")
+                && !ends_with_ignore_case(d, ".localhost")
         }
     }
 }

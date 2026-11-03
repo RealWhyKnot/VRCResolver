@@ -14,6 +14,7 @@ name = "vrcresolver"
 path = "src/main.rs"
 
 [dependencies]
+num-traits.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
 hex.workspace = true

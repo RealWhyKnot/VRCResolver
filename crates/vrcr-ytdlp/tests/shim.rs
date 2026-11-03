@@ -1,5 +1,4 @@
 #![cfg(windows)]
-#![allow(clippy::unwrap_used)]
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -23,13 +22,22 @@ struct Capture(Arc<Mutex<Vec<u8>>>);
 
 impl Capture {
     fn text(&self) -> String {
-        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        String::from_utf8(
+            self.0
+                .lock()
+                .expect("local test fixture operation must succeed")
+                .clone(),
+        )
+        .expect("local test fixture operation must succeed")
     }
 }
 
 impl Write for Capture {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
+        self.0
+            .lock()
+            .expect("local test fixture operation must succeed")
+            .extend_from_slice(buf);
         Ok(buf.len())
     }
 
@@ -47,7 +55,7 @@ struct Rig {
 impl Rig {
     fn new() -> Self {
         Self {
-            dir: tempfile::tempdir().unwrap(),
+            dir: tempfile::tempdir().expect("local test fixture operation must succeed"),
             pipe_name: format!("vrcresolver.test.{}", uuid::Uuid::new_v4().simple()),
             stdout: Capture::default(),
         }
@@ -62,7 +70,11 @@ impl Rig {
             log_path: Some(self.log_path()),
             version: "test".to_owned(),
         };
-        Shim::new(cfg, Box::new(self.stdout.clone()), Box::new(Capture::default()))
+        Shim::new(
+            cfg,
+            Box::new(self.stdout.clone()),
+            Box::new(Capture::default()),
+        )
     }
 
     fn log_path(&self) -> PathBuf {
@@ -84,19 +96,27 @@ impl StubPipe {
         let full = pipe::full_name(name);
         let reply = reply.map(|r| format!("{r}\n"));
         let (tx, lines) = mpsc::unbounded_channel();
-        let first = delay
-            .is_zero()
-            .then(|| ServerOptions::new().create(&full).unwrap());
+        let first = delay.is_zero().then(|| {
+            ServerOptions::new()
+                .create(&full)
+                .expect("local test fixture operation must succeed")
+        });
         let task = tokio::spawn(async move {
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
-            let mut server = first.unwrap_or_else(|| ServerOptions::new().create(&full).unwrap());
+            let mut server = first.unwrap_or_else(|| {
+                ServerOptions::new()
+                    .create(&full)
+                    .expect("local test fixture operation must succeed")
+            });
             loop {
                 if server.connect().await.is_err() {
                     return;
                 }
-                let next = ServerOptions::new().create(&full).unwrap();
+                let next = ServerOptions::new()
+                    .create(&full)
+                    .expect("local test fixture operation must succeed");
                 let mut conn = std::mem::replace(&mut server, next);
                 let reply = reply.clone();
                 let tx = tx.clone();
@@ -122,9 +142,9 @@ impl StubPipe {
     async fn next_line(&mut self) -> serde_json::Value {
         let line = tokio::time::timeout(Duration::from_secs(10), self.lines.recv())
             .await
-            .unwrap()
-            .unwrap();
-        serde_json::from_str(&line).unwrap()
+            .expect("local test fixture operation must succeed")
+            .expect("local test fixture operation must succeed");
+        serde_json::from_str(&line).expect("local test fixture operation must succeed")
     }
 }
 
@@ -141,7 +161,11 @@ fn resolved_line(url: &str) -> String {
 #[tokio::test]
 async fn resolve_over_pipe_returns_the_resolved_url() {
     let rig = Rig::new();
-    let _server = StubPipe::start(&rig.pipe_name, Some(&resolved_line(RESOLVED)), Duration::ZERO);
+    let _server = StubPipe::start(
+        &rig.pipe_name,
+        Some(&resolved_line(RESOLVED)),
+        Duration::ZERO,
+    );
     let out = rig
         .shim()
         .resolve_over_pipe(URL, Player::AvPro, None, None, false)
@@ -162,7 +186,10 @@ async fn resolve_over_pipe_returns_the_server_fallback_reason() {
         .await;
     assert_eq!(out.url, None);
     assert_eq!(out.fallback_reason, Some(og_reason::SERVER_FALLBACK_NATIVE));
-    assert_eq!(out.public_message.as_deref(), Some("Could not resolve this link"));
+    assert_eq!(
+        out.public_message.as_deref(),
+        Some("Could not resolve this link")
+    );
 }
 
 #[tokio::test]
@@ -181,7 +208,11 @@ async fn resolve_over_pipe_rejects_avpro_incompatible_urls() {
 #[tokio::test]
 async fn resolve_over_pipe_sends_a_wrapper_deadline_below_its_budget() {
     let rig = Rig::new();
-    let mut server = StubPipe::start(&rig.pipe_name, Some(&resolved_line(RESOLVED)), Duration::ZERO);
+    let mut server = StubPipe::start(
+        &rig.pipe_name,
+        Some(&resolved_line(RESOLVED)),
+        Duration::ZERO,
+    );
     let fmt = "(mp4/best)[height<=?720]";
     rig.shim()
         .resolve_over_pipe(
@@ -206,14 +237,19 @@ async fn notifies_return_at_once_after_the_pipe_connect_failed() {
     let rig = Rig::new();
     let mut shim = rig.shim();
     let out = shim
-        .resolve_over_pipe(URL, Player::AvPro, None, Some(Duration::from_secs(2)), false)
+        .resolve_over_pipe(
+            URL,
+            Player::AvPro,
+            None,
+            Some(Duration::from_secs(2)),
+            false,
+        )
         .await;
     assert_eq!(out.fallback_reason, Some(og_reason::PIPE_CONNECT_FAILED));
     let started = Instant::now();
     shim.notify_og_fallback(Some(URL), og_reason::PIPE_CONNECT_FAILED, 2000, None)
         .await;
-    shim.notify_og_failed(URL, "timeout", 1, String::new(), 2000)
-        .await;
+    shim.notify_og_failed(URL, "timeout", 1, 2000).await;
     assert!(
         started.elapsed() < Duration::from_millis(100),
         "{:?}",
@@ -329,6 +365,67 @@ fn cmd() -> &'static Path {
 
 fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| (*s).to_owned()).collect()
+}
+
+#[tokio::test]
+async fn startup_logs_omit_credentials_and_argument_values() {
+    let rig = Rig::new();
+    let code = rig
+        .shim()
+        .run(&strings(&[
+            "--password",
+            "secret-password",
+            "--add-headers=Authorization:Bearer secret-token",
+            "--cookies",
+            "C:/Users/private-name/cookies.txt",
+            "-f",
+            "secret-selector",
+            "https://vrcresolver.com/api/proxy/video.m3u8?token=private-token",
+        ]))
+        .await;
+    assert_eq!(code, 0);
+    let text = rig.log();
+    for secret in ["secret-", "private-name", "cookies.txt", "private-token"] {
+        assert!(!text.contains(secret), "{text}");
+    }
+    assert!(text.contains("argc=8"), "{text}");
+}
+
+#[tokio::test]
+async fn fallback_logs_omit_child_payloads_and_preserve_stdout() {
+    let rig = Rig::new();
+    let mut server = StubPipe::start(
+        &rig.pipe_name,
+        Some(r#"{"action":"fallback_native","id":"srv1","reason":"resolve_failed"}"#),
+        Duration::ZERO,
+    );
+    let executable_directory = rig.dir.path().join("exe");
+    std::fs::create_dir_all(&executable_directory).expect("executable directory");
+    let system_root = std::env::var_os("SystemRoot").expect("Windows directory");
+    std::fs::copy(
+        PathBuf::from(system_root).join("System32/cmd.exe"),
+        executable_directory.join("yt-dlp-og.exe"),
+    )
+    .expect("local fake extractor");
+    let code = rig
+        .shim()
+        .run(&strings(&[
+            "/c",
+            "echo private-stdout& echo HTTP Error 404 private-stderr 1>&2& exit 3",
+            URL,
+        ]))
+        .await;
+    assert_eq!(code, 3);
+    assert!(rig.stdout.text().contains("private-stdout"));
+    let text = rig.log();
+    assert!(text.contains("stdout_bytes="));
+    assert!(!text.contains("private-stdout"), "{text}");
+    assert!(!text.contains("private-stderr"), "{text}");
+    assert_eq!(server.next_line().await["action"], "resolve");
+    assert_eq!(server.next_line().await["action"], "og_fallback_notify");
+    let failed = server.next_line().await;
+    assert_eq!(failed["action"], "wrapper_og_failed");
+    assert!(failed["error_preview"].is_null(), "{failed}");
 }
 
 #[tokio::test]

@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use std::fs;
 use std::path::PathBuf;
 
@@ -11,12 +9,12 @@ struct Scratch(TempDir);
 
 impl Scratch {
     fn new() -> Self {
-        Self(tempfile::tempdir().unwrap())
+        Self(tempfile::tempdir().expect("local test fixture operation must succeed"))
     }
 
     fn file(&self, name: &str, content: &[u8]) -> PathBuf {
         let p = self.0.path().join(name);
-        fs::write(&p, content).unwrap();
+        fs::write(&p, content).expect("local test fixture operation must succeed");
         p
     }
 
@@ -26,13 +24,15 @@ impl Scratch {
 
     fn dir(&self, name: &str) -> PathBuf {
         let p = self.path(name);
-        fs::create_dir_all(&p).unwrap();
+        fs::create_dir_all(&p).expect("local test fixture operation must succeed");
         p
     }
 }
 
 fn pattern(len: usize, mul: usize) -> Vec<u8> {
-    (0..len).map(|i| ((i * mul) & 0xFF) as u8).collect()
+    (0..len)
+        .map(|i| u8::try_from((i * mul) & 0xFF).expect("masked fixture value fits one byte"))
+        .collect()
 }
 
 fn with_marker_at(len: usize, at: usize, marker: &[u8]) -> Vec<u8> {
@@ -59,7 +59,10 @@ fn contains_marker_finds_an_embedded_marker_only() {
 fn contains_marker_skips_files_over_the_scan_cap() {
     let s = Scratch::new();
     let len = usize::try_from(wrapper_identity::MAX_SCAN_BYTES).unwrap() + (1 << 20);
-    let p = s.file("big.bin", &with_marker_at(len, 256, &wrapper_identity::marker()));
+    let p = s.file(
+        "big.bin",
+        &with_marker_at(len, 256, &wrapper_identity::marker()),
+    );
     assert!(!wrapper_identity::contains_marker(&p));
 }
 
@@ -111,7 +114,8 @@ fn classify_trusts_the_known_hash_list() {
     let sha = wrapper_identity::sha256_hex(&candidate).unwrap();
     let list = s.file(
         "wrapper_hashes.txt",
-        format!("# old prior-release wrappers\n{sha}  2026.5.10.4  2026-05-10T00:00:00Z\n").as_bytes(),
+        format!("# old prior-release wrappers\n{sha}  2026.5.10.4  2026-05-10T00:00:00Z\n")
+            .as_bytes(),
     );
     assert_eq!(
         wrapper_identity::classify(&candidate, Some(&list)),
@@ -133,7 +137,9 @@ fn known_hash_list_ignores_comments_and_case() {
     );
     assert!(wrapper_identity::known_hash_list_contains(&list, "abc123"));
     assert!(wrapper_identity::known_hash_list_contains(&list, "ABC123"));
-    assert!(!wrapper_identity::known_hash_list_contains(&list, "deadbeef"));
+    assert!(!wrapper_identity::known_hash_list_contains(
+        &list, "deadbeef"
+    ));
 }
 
 #[test]
@@ -154,12 +160,18 @@ fn directories(pe32_plus: bool) -> usize {
 }
 
 fn skeleton(len: usize, pe32_plus: bool) -> Vec<u8> {
-    let mut d: Vec<u8> = (0..len).map(|i| ((i * 7 + 1) & 0xFF) as u8).collect();
+    let mut d: Vec<u8> = (0..len)
+        .map(|i| u8::try_from((i * 7 + 1) & 0xFF).expect("masked fixture value fits one byte"))
+        .collect();
     let dirs = directories(pe32_plus);
     d[PE_OFFSET..dirs + 16 * 8].fill(0);
     d[0] = b'M';
     d[1] = b'Z';
-    d[0x3C..0x40].copy_from_slice(&u32::try_from(PE_OFFSET).unwrap().to_le_bytes());
+    d[0x3C..0x40].copy_from_slice(
+        &u32::try_from(PE_OFFSET)
+            .expect("local test fixture operation must succeed")
+            .to_le_bytes(),
+    );
     d[PE_OFFSET..PE_OFFSET + 4].copy_from_slice(b"PE\0\0");
     let magic: u16 = if pe32_plus { 0x20B } else { 0x10B };
     d[PE_OFFSET + 24..PE_OFFSET + 26].copy_from_slice(&magic.to_le_bytes());
@@ -170,13 +182,22 @@ fn signed(len: usize, pe32_plus: bool) -> Vec<u8> {
     let mut d = skeleton(len, pe32_plus);
     let cert = 2048u32;
     let dirs = directories(pe32_plus);
-    d[dirs + 32..dirs + 36].copy_from_slice(&(u32::try_from(len).unwrap() - cert).to_le_bytes());
+    d[dirs + 32..dirs + 36].copy_from_slice(
+        &(u32::try_from(len).expect("local test fixture operation must succeed") - cert)
+            .to_le_bytes(),
+    );
     d[dirs + 36..dirs + 40].copy_from_slice(&cert.to_le_bytes());
     d
 }
 
-fn unsigned(len: usize, cookie: bool, pe32_plus: bool) -> Vec<u8> {
-    let mut d = skeleton(len, pe32_plus);
+#[derive(Clone, Copy)]
+enum FixtureFormat {
+    Pe32,
+    Pe32Plus,
+}
+
+fn unsigned(len: usize, cookie: bool, format: FixtureFormat) -> Vec<u8> {
+    let mut d = skeleton(len, matches!(format, FixtureFormat::Pe32Plus));
     if cookie {
         let at = len - wrapper_identity::PYINSTALLER_COOKIE.len() - COOKIE_TRAILER;
         d[at..at + wrapper_identity::PYINSTALLER_COOKIE.len()]
@@ -198,32 +219,51 @@ fn looks_complete_follows_the_certificate_table_or_the_cookie() {
     trailing.extend_from_slice(&[0u8; 16]);
     let cases: Vec<(&str, Vec<u8>, bool)> = vec![
         ("signed-complete", signed(FIXTURE_LEN, true), true),
-        ("signed-cut-short", cut(signed(FIXTURE_LEN, true), 100), false),
+        (
+            "signed-cut-short",
+            cut(signed(FIXTURE_LEN, true), 100),
+            false,
+        ),
         ("signed-pe32-complete", signed(FIXTURE_LEN, false), true),
         ("signed-with-trailing-bytes", trailing, false),
-        ("unsigned-with-cookie", unsigned(FIXTURE_LEN, true, true), true),
+        (
+            "unsigned-with-cookie",
+            unsigned(FIXTURE_LEN, true, FixtureFormat::Pe32Plus),
+            true,
+        ),
         (
             "unsigned-pe32-with-cookie",
-            unsigned(FIXTURE_LEN, true, false),
+            unsigned(FIXTURE_LEN, true, FixtureFormat::Pe32),
             true,
         ),
         (
             "unsigned-without-cookie",
-            unsigned(FIXTURE_LEN, false, true),
+            unsigned(FIXTURE_LEN, false, FixtureFormat::Pe32Plus),
             false,
         ),
         (
             "unsigned-cookie-cut-off",
-            cut(unsigned(FIXTURE_LEN, true, true), COOKIE_TRAILER + 4),
+            cut(
+                unsigned(FIXTURE_LEN, true, FixtureFormat::Pe32Plus),
+                COOKIE_TRAILER + 4,
+            ),
             false,
         ),
         (
             "non-pe",
-            (0..FIXTURE_LEN).map(|i| ((i * 7 + 1) & 0xFF) as u8).collect(),
+            (0..FIXTURE_LEN)
+                .map(|i| {
+                    u8::try_from((i * 7 + 1) & 0xFF).expect("masked fixture value fits one byte")
+                })
+                .collect(),
             false,
         ),
         ("empty", Vec::new(), false),
-        ("header-only", signed(FIXTURE_LEN, true)[..0x90].to_vec(), false),
+        (
+            "header-only",
+            signed(FIXTURE_LEN, true)[..0x90].to_vec(),
+            false,
+        ),
     ];
     for (name, content, expected) in cases {
         let p = s.file(&format!("{name}.exe"), &content);
@@ -244,7 +284,9 @@ fn looks_complete_rejects_wild_offsets() {
     let dirs = directories(true);
     cert[dirs + 32..dirs + 36].copy_from_slice(&u32::MAX.to_le_bytes());
     cert[dirs + 36..dirs + 40].copy_from_slice(&u32::MAX.to_le_bytes());
-    assert!(!wrapper_identity::looks_complete(&s.file("wild-cert.exe", &cert)));
+    assert!(!wrapper_identity::looks_complete(
+        &s.file("wild-cert.exe", &cert)
+    ));
 }
 
 #[test]
@@ -273,7 +315,10 @@ fn copy_legacy_root_copies_state_skips_logs_and_leaves_the_source() {
     fs::write(legacy.join("logs").join("watchdog-1.log"), "noise").unwrap();
     let new_root = s.path("renamed");
     paths::copy_legacy_root(&legacy, &new_root, &mut quiet()).unwrap();
-    assert_eq!(fs::read_to_string(new_root.join("settings.json")).unwrap(), "{}");
+    assert_eq!(
+        fs::read_to_string(new_root.join("settings.json")).unwrap(),
+        "{}"
+    );
     assert_eq!(
         fs::read_to_string(new_root.join("crashes").join("crash-1.log")).unwrap(),
         "boom"
@@ -293,7 +338,10 @@ fn copy_legacy_root_never_overwrites_and_is_idempotent() {
     let new_root = s.dir("renamed");
     fs::write(new_root.join("settings.json"), "NEW").unwrap();
     paths::copy_legacy_root(&legacy, &new_root, &mut quiet()).unwrap();
-    assert_eq!(fs::read_to_string(new_root.join("settings.json")).unwrap(), "NEW");
+    assert_eq!(
+        fs::read_to_string(new_root.join("settings.json")).unwrap(),
+        "NEW"
+    );
     assert!(paths::renamed_root_already_populated(&new_root));
     fs::write(new_root.join("client_id.txt"), "id-2").unwrap();
     paths::copy_legacy_root(&legacy, &new_root, &mut quiet()).unwrap();
@@ -361,7 +409,10 @@ fn env_fallback_prefers_the_new_prefix() {
         "WKVRCPROXY_X" => Some("old".to_owned()),
         _ => None,
     };
-    assert_eq!(legacy::env_with_fallback_in("X", both).as_deref(), Some("new"));
+    assert_eq!(
+        legacy::env_with_fallback_in("X", both).as_deref(),
+        Some("new")
+    );
     let old_only = |k: &str| (k == "WKVRCPROXY_X").then(|| "old-opt-out".to_owned());
     assert_eq!(
         legacy::env_with_fallback_in("X", old_only).as_deref(),

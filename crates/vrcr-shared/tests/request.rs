@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use std::borrow::Cow;
 
 use vrcr_shared::budget::retry;
@@ -12,8 +10,14 @@ fn args(items: &[&str]) -> Vec<String> {
 
 #[test]
 fn height_cap_parses_vrchat_selector_caps() {
-    assert_eq!(profile::height_cap(Some("(mp4/best)[height<=?720]")), Some(720));
-    assert_eq!(profile::height_cap(Some("best[height<=1080]/best")), Some(1080));
+    assert_eq!(
+        profile::height_cap(Some("(mp4/best)[height<=?720]")),
+        Some(720)
+    );
+    assert_eq!(
+        profile::height_cap(Some("best[height<=1080]/best")),
+        Some(1080)
+    );
     assert_eq!(
         profile::height_cap(Some("bv*[protocol^=m3u8_native][height<=?480]+ba")),
         Some(480)
@@ -107,7 +111,13 @@ fn wrapper_request_carries_everything_the_server_needs() {
             wire::AVPRO_MAX_AUDIO_CHANNELS
         };
         assert_eq!(req.max_audio_channels, Some(channels));
-        let plain = profile::wrapper_request("x".into(), "https://youtu.be/x", player, Some(format), false);
+        let plain = profile::wrapper_request(
+            "x".into(),
+            "https://youtu.be/x",
+            player,
+            Some(format),
+            false,
+        );
         assert_eq!(plain.skip_native_hint, None);
     }
 }
@@ -168,7 +178,10 @@ fn default_quality_cap_and_high_quality_leave_unity_alone() {
     assert!(!profile::apply_default_quality_cap(&mut req));
     assert!(!profile::apply_high_quality(&mut req, true));
     assert_eq!(req.max_height, Some(720));
-    assert_eq!(req.vrchat_format_arg.as_deref(), Some("(mp4/best)[height<=?720]"));
+    assert_eq!(
+        req.vrchat_format_arg.as_deref(),
+        Some("(mp4/best)[height<=?720]")
+    );
     assert_eq!(req.prefer_highest, None);
 }
 
@@ -207,8 +220,16 @@ fn retry_policy_retries_only_transient_reasons_within_budget() {
     assert!(!retry::should_retry(dip, retry::MAX_RETRIES, 15_000));
     assert!(!retry::should_retry(dip, 0, 1_500));
     assert!(retry::should_retry(dip, 0, retry::MIN_BUDGET_FOR_RETRY_MS));
-    assert!(!retry::should_retry(dip, 0, retry::MIN_BUDGET_FOR_RETRY_MS - 1));
-    assert!(retry::should_retry(Some(fallback::SERVER_UNREACHABLE), 0, 15_000));
+    assert!(!retry::should_retry(
+        dip,
+        0,
+        retry::MIN_BUDGET_FOR_RETRY_MS - 1
+    ));
+    assert!(retry::should_retry(
+        Some(fallback::SERVER_UNREACHABLE),
+        0,
+        15_000
+    ));
     for reason in [
         fallback::ALL_CONFIGS_FAILED,
         fallback::CLIENT_DEADLINE_EXCEEDED,
@@ -229,7 +250,10 @@ fn retry_delays_follow_the_ladder_and_the_server_hint() {
     let dip = Some(fallback::DISCOVERY_IN_PROGRESS);
     assert_eq!(retry::next_delay_ms(0), 750);
     assert_eq!(retry::next_delay_ms(1), 2250);
-    assert_eq!(retry::retry_delay_ms(dip, Some(2000), 0, 24_000), Some(2000));
+    assert_eq!(
+        retry::retry_delay_ms(dip, Some(2000), 0, 24_000),
+        Some(2000)
+    );
     assert_eq!(retry::retry_delay_ms(dip, Some(25_000), 0, 26_000), None);
     assert_eq!(retry::retry_delay_ms(dip, None, 0, 26_000), Some(750));
     assert_eq!(retry::retry_delay_ms(dip, Some(4800), 0, 6_000), None);

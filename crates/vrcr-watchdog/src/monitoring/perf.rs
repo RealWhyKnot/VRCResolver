@@ -1,3 +1,5 @@
+use num_traits::ToPrimitive;
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -16,35 +18,56 @@ const MIB: f64 = 1024.0 * 1024.0;
 const GIB: f64 = MIB * 1024.0;
 
 pub fn mib(bytes: u64) -> String {
-    format!("{:.1}", bytes as f64 / MIB)
+    format!(
+        "{:.1}",
+        bytes.to_f64().expect("u64 values fit finite f64") / MIB
+    )
 }
 
 fn gib(bytes: u64) -> String {
-    format!("{:.1}", bytes as f64 / GIB)
+    format!(
+        "{:.1}",
+        bytes.to_f64().expect("u64 values fit finite f64") / GIB
+    )
 }
 
-pub fn cpu_percent(before_100ns: u64, after_100ns: u64, wall: Duration, cores: usize) -> Option<f64> {
-    let capacity = (wall.as_nanos() / 100).saturating_mul(cores.max(1) as u128);
-    (capacity > 0).then(|| after_100ns.saturating_sub(before_100ns) as f64 * 100.0 / capacity as f64)
+pub fn cpu_percent(
+    before_100ns: u64,
+    after_100ns: u64,
+    wall: Duration,
+    cores: usize,
+) -> Option<f64> {
+    let capacity = (wall.as_nanos() / 100)
+        .saturating_mul(u128::try_from(cores.max(1)).expect("core count fits u128"));
+    (capacity > 0).then(|| {
+        after_100ns
+            .saturating_sub(before_100ns)
+            .to_f64()
+            .expect("u64 values fit finite f64")
+            * 100.0
+            / capacity.to_f64().expect("u128 values fit finite f64")
+    })
 }
 
 fn push_spread(out: &mut String, key: &str, series: &mut Series) {
     if let Some(s) = series.spread() {
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             " {key}=p50:{},p95:{},max:{},n:{}",
             s.p50, s.p95, s.max, s.count
-        ));
+        );
     }
 }
 
 fn push_usage(out: &mut String, usage: Option<&ProcessUsage>) {
     if let Some(u) = usage {
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             " ws_mib={} private_mib={} handles={}",
             mib(u.working_set),
             mib(u.private_bytes),
             u.handles
-        ));
+        );
     }
 }
 
@@ -56,32 +79,33 @@ pub fn perf_line(
 ) -> String {
     let mut s = format!("[perf] window={}s", window.as_secs());
     if snap.relay_requests > 0 {
-        s.push_str(&format!(
+        let _ = write!(
+            s,
             " relay_req={} relay_err={} relay_mib={}",
             snap.relay_requests,
             snap.relay_errors,
             mib(snap.relay_bytes)
-        ));
+        );
     }
     push_spread(&mut s, "seg_header_ms", &mut snap.segment_header);
     push_spread(&mut s, "seg_total_ms", &mut snap.segment_total);
     push_spread(&mut s, "manifest_ms", &mut snap.manifest_total);
     if snap.resolves > 0 {
-        s.push_str(&format!(" resolves={}", snap.resolves));
+        let _ = write!(s, " resolves={}", snap.resolves);
         for (key, n) in [
             ("cached", snap.resolves_cached),
             ("fallback", snap.resolves_fallback),
             ("failed", snap.resolves_failed),
         ] {
             if n > 0 {
-                s.push_str(&format!(" {key}={n}"));
+                let _ = write!(s, " {key}={n}");
             }
         }
     }
     push_spread(&mut s, "resolve_ms", &mut snap.resolve_ms);
     push_spread(&mut s, "mesh_rtt_ms", &mut snap.mesh_rtt);
     if let Some(c) = cpu {
-        s.push_str(&format!(" cpu={c:.1}%"));
+        let _ = write!(s, " cpu={c:.1}%");
     }
     push_usage(&mut s, usage);
     s
@@ -100,11 +124,12 @@ pub fn session_line(up: Duration, a: &Activity, usage: Option<&ProcessUsage>) ->
         a.reconnects
     );
     if let Some(u) = usage {
-        s.push_str(&format!(
+        let _ = write!(
+            s,
             " cpu_s={:.1} peak_ws_mib={}",
-            u.cpu_100ns as f64 / 10_000_000.0,
+            u.cpu_100ns.to_f64().expect("u64 values fit finite f64") / 10_000_000.0,
             mib(u.peak_working_set)
-        ));
+        );
     }
     push_usage(&mut s, usage);
     s
@@ -138,20 +163,21 @@ pub fn logical_cores() -> usize {
 pub fn system_line(info: &SystemInfo) -> String {
     let mut s = "[startup] system".to_owned();
     if let Some(cpu) = &info.cpu {
-        s.push_str(&format!(" cpu=\"{cpu}\""));
+        let _ = write!(s, " cpu=\"{cpu}\"");
     }
-    s.push_str(&format!(" cores={}", info.cores));
+    let _ = write!(s, " cores={}", info.cores);
     if let Some(m) = info.memory {
-        s.push_str(&format!(
+        let _ = write!(
+            s,
             " ram_gib={} ram_free_gib={}",
             gib(m.total),
             gib(m.available)
-        ));
+        );
     }
     if let Some(free) = info.disk_free {
-        s.push_str(&format!(" disk_free_gib={}", gib(free)));
+        let _ = write!(s, " disk_free_gib={}", gib(free));
     }
-    s.push_str(&format!(" settings={}", info.settings));
+    let _ = write!(s, " settings={}", info.settings);
     s
 }
 
@@ -190,9 +216,9 @@ impl Phases {
     pub fn line(&self) -> String {
         let mut s = "[startup] phases".to_owned();
         for (name, took) in &self.marks {
-            s.push_str(&format!(" {name}={}ms", took.as_millis()));
+            let _ = write!(s, " {name}={}ms", took.as_millis());
         }
-        s.push_str(&format!(" total={}ms", (self.last - self.started).as_millis()));
+        let _ = write!(s, " total={}ms", (self.last - self.started).as_millis());
         s
     }
 }
@@ -237,7 +263,9 @@ impl PerfReporter {
         let mut snap = self.stats.perf.take();
         if snap.is_active() {
             let cpu = match (previous.cpu_100ns, usage) {
-                (Some(before), Some(u)) => cpu_percent(before, u.cpu_100ns, at - previous.at, self.cores),
+                (Some(before), Some(u)) => {
+                    cpu_percent(before, u.cpu_100ns, at - previous.at, self.cores)
+                }
                 _ => None,
             };
             self.log

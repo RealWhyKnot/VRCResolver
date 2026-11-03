@@ -45,6 +45,7 @@ impl Log {
                 st.dir = Some(dir.to_path_buf());
                 prune(dir, component, SystemTime::now());
                 open_new(&mut st);
+                drop(st);
             }
         }
         log
@@ -96,11 +97,12 @@ impl Log {
         let Some(w) = st.writer.as_mut() else {
             return;
         };
+        let text = crate::logutil::sanitize_for_console(text, usize::MAX);
         let record = format!("{} {}\n", UtcStamp::at(now).log_prefix(), text);
         if w.write_all(record.as_bytes()).is_err() {
             return;
         }
-        st.written += record.len() as u64;
+        st.written += u64::try_from(record.len()).expect("record length fits the byte counter");
         if st.written >= MAX_BYTES && st.dir.is_some() {
             open_new(&mut st);
         }

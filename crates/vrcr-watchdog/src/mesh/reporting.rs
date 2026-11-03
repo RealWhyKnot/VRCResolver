@@ -58,7 +58,8 @@ struct Patterns {
 
 impl Patterns {
     fn new() -> Patterns {
-        let compile = |p: &str| Regex::new(p).unwrap_or_else(|e| panic!("bad built-in pattern {p}: {e}"));
+        let compile =
+            |p: &str| Regex::new(p).unwrap_or_else(|e| panic!("bad built-in pattern {p}: {e}"));
         Patterns {
             ipv4: compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"),
             windows_path: compile(r#"[A-Za-z]:\\[^\s"]+"#),
@@ -88,9 +89,9 @@ pub struct Reporter {
 pub fn failure_kind(reason: &str) -> Option<&'static str> {
     match reason {
         fallback::ALL_CONFIGS_FAILED => Some("AllStrategiesFailed"),
-        fallback::EXTRACTOR_UNSUPPORTED | fallback::INTERNAL_ERROR | fallback::UNITY_UNSUPPORTED_FORMAT => {
-            Some("Unknown")
-        }
+        fallback::EXTRACTOR_UNSUPPORTED
+        | fallback::INTERNAL_ERROR
+        | fallback::UNITY_UNSUPPORTED_FORMAT => Some("Unknown"),
         fallback::WARP_DOWN => Some("NetworkError"),
         _ => None,
     }
@@ -153,7 +154,7 @@ pub fn http_post(app_version: &str) -> Post {
             .post(REPORT_URL)
             .send_json(payload)
             .map(|r| r.status().as_u16())
-            .map_err(|e| e.to_string())
+            .map_err(|e| format!("send playback report: {e}"))
     })
 }
 
@@ -226,7 +227,9 @@ impl Reporter {
         if b.sent >= MAX_PER_SESSION {
             return false;
         }
-        if b.last.is_some_and(|last| now.duration_since(last) < MIN_INTERVAL) {
+        if b.last
+            .is_some_and(|last| now.duration_since(last) < MIN_INTERVAL)
+        {
             return false;
         }
         b.sent += 1;
@@ -237,10 +240,13 @@ impl Reporter {
     pub fn send(&self, payload: &ReportPayload) {
         match (self.post)(payload) {
             Ok(code) if (200..300).contains(&code) => {}
-            Ok(code) => self
+            Ok(code) => self.ux.warn(
+                Component::Report,
+                &format!("server rejected report: {code}"),
+            ),
+            Err(e) => self
                 .ux
-                .warn(Component::Report, &format!("server rejected report: {code}")),
-            Err(e) => self.ux.warn(Component::Report, &format!("post failed: {e}")),
+                .warn(Component::Report, &format!("post failed: {e}")),
         }
     }
 

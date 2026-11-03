@@ -14,6 +14,12 @@ use super::renderer::{Renderer, Services};
 use super::session::SessionStore;
 use super::text::{ACTIVE_REFRESH, CommandLine, IDLE_REFRESH};
 
+#[derive(Clone, Copy)]
+pub struct OutputSupport {
+    pub input_is_terminal: bool,
+    pub output_supported: bool,
+}
+
 pub const STOP_WAIT: Duration = Duration::from_millis(500);
 pub const INPUT_POLL: Duration = Duration::from_millis(200);
 
@@ -91,12 +97,16 @@ impl KeyDecoder {
     }
 }
 
-pub fn interactive_allowed(stdin_tty: bool, stdout_tty: bool, disabled: Option<&str>) -> bool {
-    stdin_tty && stdout_tty && !disabled.is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+pub fn interactive_allowed(support: OutputSupport, disabled: Option<&str>) -> bool {
+    support.input_is_terminal
+        && support.output_supported
+        && !disabled.is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
-pub fn animations_allowed(stdin_tty: bool, color: bool, disabled: Option<&str>) -> bool {
-    stdin_tty && color && !disabled.is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+pub fn animations_allowed(support: OutputSupport, disabled: Option<&str>) -> bool {
+    support.input_is_terminal
+        && support.output_supported
+        && !disabled.is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
 pub struct Core {
@@ -110,7 +120,7 @@ impl Core {
     pub fn new(services: Services, session: Arc<SessionStore>) -> Core {
         let input = InputBuffer::new(session.load_history());
         Core {
-            renderer: Renderer::new(services, session.clone(), input),
+            renderer: Renderer::new(services, std::sync::Arc::clone(&session), input),
             session,
             commands: Registry::with_defaults(),
             stopped: AtomicBool::new(false),
@@ -200,7 +210,8 @@ impl Core {
             return;
         }
         if show_when_ambiguous && !completion.suggestions.is_empty() {
-            self.renderer.render_completions(&text, &completion.suggestions);
+            self.renderer
+                .render_completions(&text, &completion.suggestions);
         } else {
             self.redraw();
         }
@@ -312,8 +323,8 @@ impl Terminal {
 
     fn spawn(&self, name: &str, body: fn(&Core, &StopSignal)) -> Receiver<()> {
         let (tx, rx) = channel();
-        let core = self.core.clone();
-        let signal = self.signal.clone();
+        let core = std::sync::Arc::clone(&self.core);
+        let signal = std::sync::Arc::clone(&self.signal);
         let spawned = thread::Builder::new().name(name.to_owned()).spawn(move || {
             body(&core, &signal);
             let _ = tx.send(());
@@ -329,7 +340,12 @@ impl Terminal {
     pub fn stop(&self) {
         self.core.stopped.store(true, Ordering::SeqCst);
         self.signal.set();
-        drop(self.overlay.lock().unwrap_or_else(|e| e.into_inner()).take());
+        drop(
+            self.overlay
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take(),
+        );
         self.core.session.stop();
         let waiting: Vec<Receiver<()>> =
             std::mem::take(&mut *self.done.lock().unwrap_or_else(|e| e.into_inner()));
@@ -343,7 +359,12 @@ impl Drop for Terminal {
     fn drop(&mut self) {
         self.core.stopped.store(true, Ordering::SeqCst);
         self.signal.set();
-        drop(self.overlay.lock().unwrap_or_else(|e| e.into_inner()).take());
+        drop(
+            self.overlay
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take(),
+        );
     }
 }
 

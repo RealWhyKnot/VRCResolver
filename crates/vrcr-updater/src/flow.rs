@@ -61,7 +61,11 @@ pub fn fetch_latest(host: &dyn Host) -> Result<(LatestRelease, Option<String>), 
     };
     host.log(&format!(
         "[updater] GET {url}{}",
-        if include { " (include-prereleases=on)" } else { "" }
+        if include {
+            " (include-prereleases=on)"
+        } else {
+            ""
+        }
     ));
     let resp = host.get_text(url)?;
     host.log(&format!(
@@ -70,7 +74,10 @@ pub fn fetch_latest(host: &dyn Host) -> Result<(LatestRelease, Option<String>), 
         resp.content_type.as_deref().unwrap_or("<none>")
     ));
     if !is_success(resp.status) {
-        return Err(format!("GitHub releases API returned HTTP {}.", resp.status));
+        return Err(format!(
+            "GitHub releases API returned HTTP {}.",
+            resp.status
+        ));
     }
     let media = resp
         .content_type
@@ -109,7 +116,11 @@ pub fn fetch_latest(host: &dyn Host) -> Result<(LatestRelease, Option<String>), 
     Ok((release, sha))
 }
 
-pub fn finish_install(host: &dyn Host, payload_root: &Path, install_dir: &Path) -> Result<i32, String> {
+pub fn finish_install(
+    host: &dyn Host,
+    payload_root: &Path,
+    install_dir: &Path,
+) -> Result<i32, String> {
     atomic_copy_over(payload_root, install_dir)?;
     host.say("Update installed. Relaunching watchdog...");
     host.launch_watchdog(&install_dir.join(WATCHDOG_EXE), install_dir)?;
@@ -118,7 +129,10 @@ pub fn finish_install(host: &dyn Host, payload_root: &Path, install_dir: &Path) 
 
 fn update(host: &dyn Host, install_dir: &Path) -> Result<i32, String> {
     let watchdog = install_dir.join(WATCHDOG_EXE);
-    host.log(&format!("[updater] start installDir={}", install_dir.display()));
+    host.log(&format!(
+        "[updater] start installDir={}",
+        install_dir.display()
+    ));
     let current = current_version(host, &watchdog)?;
     host.say(&format!("Current version: {current}"));
 
@@ -152,7 +166,10 @@ fn update(host: &dyn Host, install_dir: &Path) -> Result<i32, String> {
         return Ok(EXIT_SHA_MISMATCH);
     }
 
-    let extract = temp.join(format!("vrcresolver-extract-{}", uuid::Uuid::new_v4().simple()));
+    let extract = temp.join(format!(
+        "vrcresolver-extract-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
     host.extract(&zip, &extract)?;
     let payload = resolve_payload_root(&extract)?;
     ensure_staged_updater_copy(&payload)?;

@@ -5,6 +5,12 @@ use vrcr_shared::console::Color;
 use crate::settings::AppSettings;
 use crate::stats::Activity;
 
+#[derive(Clone, Copy)]
+pub struct AnimationState {
+    pub active: bool,
+    pub animated: bool,
+}
+
 pub const ACTIVE_REFRESH: Duration = Duration::from_millis(125);
 pub const IDLE_REFRESH: Duration = Duration::from_secs(1);
 pub const ANIMATION_WINDOW: Duration = Duration::from_secs(2);
@@ -163,7 +169,8 @@ pub static UNICODE: Glyphs = Glyphs {
     bottom_right: "\u{2518}",
     spinner: ["\u{25d0}", "\u{25d3}", "\u{25d1}", "\u{25d2}"],
     sparkline: [
-        "\u{2581}", "\u{2582}", "\u{2583}", "\u{2584}", "\u{2585}", "\u{2586}", "\u{2587}", "\u{2588}",
+        "\u{2581}", "\u{2582}", "\u{2583}", "\u{2584}", "\u{2585}", "\u{2586}", "\u{2587}",
+        "\u{2588}",
     ],
     still: "\u{25cf}",
 };
@@ -186,11 +193,11 @@ pub fn glyphs(unicode: bool) -> &'static Glyphs {
     if unicode { &UNICODE } else { &ASCII }
 }
 
-pub fn activity_glyph(glyphs: &Glyphs, active: bool, frame: usize, animations: bool) -> &'static str {
-    if !active {
+pub fn activity_glyph(glyphs: &Glyphs, state: AnimationState, frame: usize) -> &'static str {
+    if !state.active {
         return "";
     }
-    if !animations {
+    if !state.animated {
         return glyphs.still;
     }
     glyphs.spinner[frame % glyphs.spinner.len()]
@@ -218,7 +225,7 @@ pub fn sparkline(samples: &[u64], width: usize, glyphs: &Glyphs) -> String {
     if max == 0 {
         return String::new();
     }
-    let top = (glyphs.sparkline.len() - 1) as u128;
+    let top = u128::try_from(glyphs.sparkline.len() - 1).expect("glyph count fits u128");
     tail.iter()
         .map(|&v| {
             let index = (u128::from(v) * top / u128::from(max)).min(top);

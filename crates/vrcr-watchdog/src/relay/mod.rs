@@ -22,8 +22,5 @@ pub fn short_url(url: &str) -> String {
     if url.is_empty() {
         return "?".to_owned();
     }
-    match url.char_indices().nth(100) {
-        Some((cut, _)) => format!("{}...", &url[..cut]),
-        None => url.to_owned(),
-    }
+    vrcr_shared::logutil::redact_url(url)
 }

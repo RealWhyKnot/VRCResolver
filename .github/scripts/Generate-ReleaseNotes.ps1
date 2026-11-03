@@ -1,4 +1,5 @@
 #!/usr/bin/env pwsh
+#Requires -Version 7.4
 
 [CmdletBinding()]
 param(
@@ -17,163 +18,17 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 
-if (-not $Tag) { throw "No tag provided (pass -Tag or set TAG_NAME / GITHUB_REF_NAME)." }
+function Read-ChangelogNote {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([string]$Version)
 
-if (-not $Extras) {
-    $Extras = Join-Path -Path (Get-Location) -ChildPath ".github/release-extras/$Tag.md"
-}
-
-if (-not $TemplateDir) {
-    $TemplateDir = Join-Path -Path (Get-Location) -ChildPath ".github/release-template"
-}
-
-function Get-KnownPrereleaseTags([string]$Repo, [string[]]$AdditionalTags) {
-    $set = @{}
-    foreach ($tagName in $AdditionalTags) {
-        if ($tagName) { $set[$tagName] = $true }
-    }
-
-    if ($Repo) {
-        $listJson = & gh release list --repo $Repo --limit 100 --json tagName, isPrerelease 2>$null
-        if ($LASTEXITCODE -eq 0 -and $listJson) {
-            try {
-                $releases = $listJson | ConvertFrom-Json
-                foreach ($release in $releases) {
-                    if ($release.isPrerelease -and $release.tagName) {
-                        $set[$release.tagName] = $true
-                    }
-                }
-            }
-            catch {
-                Write-Host "::warning::Failed to parse 'gh release list' output while reading prerelease tags: $_."
-            }
-        }
-    }
-
-    return $set
-}
-
-function Test-IsPrereleaseTag([string]$Tag, [hashtable]$KnownPrereleaseTags) {
-    if ($KnownPrereleaseTags -and $KnownPrereleaseTags.ContainsKey($Tag)) { return $true }
-    return $Tag -match '^v?\d{4}\.\d+\.\d+\.\d+-.+'
-}
-
-function Resolve-PrevTagForSlice([string]$Tag, [string]$Repo, [string[]]$AdditionalPrereleaseTags) {
-    $ErrorActionPreference = 'Continue'
-
-    $knownPrereleaseTags = Get-KnownPrereleaseTags -Repo $Repo -AdditionalTags $AdditionalPrereleaseTags
-
-    $describeArgs = @('describe', '--tags', '--abbrev=0')
-    if (-not (Test-IsPrereleaseTag -Tag $Tag -KnownPrereleaseTags $knownPrereleaseTags)) {
-        $describeArgs += @('--exclude', '*-*')
-        foreach ($preTag in $knownPrereleaseTags.Keys) {
-            if ($preTag -and $preTag -ne $Tag) {
-                $describeArgs += @('--exclude', $preTag)
-            }
-        }
-    }
-    $describeArgs += "$Tag^"
-    $prevRef = & git @describeArgs 2>$null
-    if ($LASTEXITCODE -eq 0 -and $prevRef) {
-        $prevTag = $prevRef.Trim()
-        $count = & git rev-list --count "$prevTag..$Tag" 2>$null
-        if ($LASTEXITCODE -eq 0 -and [int]$count -le 50) {
-            return @{
-                Tag     = $prevTag
-                LogArgs = @("$prevTag..$Tag")
-                Display = "$prevTag..$Tag"
-                Source  = 'describe'
-            }
-        }
-        Write-Host "::warning::Slice from $prevTag..$Tag is $count commits (>50 cap). Falling back to subject-match against the most recent published release."
-    }
-
-    if ($Repo) {
-        $listJson = & gh release list --repo $Repo --limit 20 --json tagName, publishedAt, isPrerelease 2>$null
-        if ($LASTEXITCODE -eq 0 -and $listJson) {
-            $candidatePrevTag = $null
-            try {
-                $releases = $listJson | ConvertFrom-Json
-                $candidate = $releases |
-                    Where-Object { $_.tagName -ne $Tag -and -not $_.isPrerelease } |
-                    Sort-Object publishedAt -Descending |
-                    Select-Object -First 1
-                if ($candidate) { $candidatePrevTag = $candidate.tagName }
-            }
-            catch {
-                Write-Host "::warning::Failed to parse 'gh release list' output: $_."
-            }
-
-            if ($candidatePrevTag) {
-                $orphanSha = & git rev-list -n 1 $candidatePrevTag 2>$null
-                if ($LASTEXITCODE -eq 0 -and $orphanSha) {
-                    $orphanSha = $orphanSha.Trim()
-                    & git merge-base --is-ancestor $orphanSha $Tag 2>$null
-                    if ($LASTEXITCODE -eq 0) {
-                        Write-Host "::warning::Using published stable release $candidatePrevTag as slice base after describe exceeded the sanity cap."
-                        return @{
-                            Tag     = $candidatePrevTag
-                            LogArgs = @("$candidatePrevTag..$Tag")
-                            Display = "$candidatePrevTag..$Tag"
-                            Source  = 'published-release'
-                        }
-                    }
-
-                    $orphanSubject = & git show -s --format=%s $orphanSha 2>$null
-                    if ($LASTEXITCODE -eq 0 -and $orphanSubject) {
-                        $rebasedSha = $null
-                        $logLines = & git log $Tag --format='%H%x09%s' 2>$null
-                        if ($LASTEXITCODE -eq 0 -and $logLines) {
-                            $lineArr = if ($logLines -is [array]) { $logLines } else { , $logLines }
-                            foreach ($line in $lineArr) {
-                                if (-not $line) { continue }
-                                $parts = $line -split "`t", 2
-                                if ($parts.Count -eq 2 -and $parts[1] -eq $orphanSubject) {
-                                    $rebasedSha = $parts[0]
-                                    break
-                                }
-                            }
-                        }
-                        if ($rebasedSha) {
-                            $shortSha = $rebasedSha.Substring(0, 12)
-                            Write-Host "::warning::Subject-matched slice: prev tag $candidatePrevTag (orphan sha $($orphanSha.Substring(0,12))) matches current-history sha $shortSha by subject; using $shortSha..$Tag."
-                            return @{
-                                Tag     = $candidatePrevTag
-                                LogArgs = @("$rebasedSha..$Tag")
-                                Display = "$candidatePrevTag..$Tag (subject-matched at $shortSha)"
-                                Source  = 'subject-match'
-                            }
-                        }
-                        Write-Host "::warning::Prev tag $candidatePrevTag subject '$orphanSubject' not found in current $Tag history. Falling back to first-release changelog notes."
-                    }
-                }
-            }
-        }
-        else {
-            Write-Host "::warning::'gh release list' produced no usable output (gh not authed or no releases yet). Falling back to first-release changelog notes."
-        }
-    }
-
-    Write-Host "::warning::No prior tag or published release matched; treating $Tag as the first release."
-    return @{
-        Tag     = $null
-        LogArgs = @()
-        Display = "$Tag (first release)"
-        Source  = 'first-release'
-    }
-}
-
-$prevInfo = Resolve-PrevTagForSlice -Tag $Tag -Repo $Repo -AdditionalPrereleaseTags $PrereleaseTags
-$prevTag = $prevInfo.Tag
-$logArgs = $prevInfo.LogArgs
-$range = $prevInfo.Display
-
-function Read-ChangelogNotes([string]$Version) {
     $path = Join-Path -Path (Get-Location) -ChildPath 'CHANGELOG.md'
     if (-not (Test-Path -LiteralPath $path)) { return $null }
 
-    $content = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+    $content = [IO.File]::ReadAllText($path)
     if ($Version) {
         $escaped = [regex]::Escape($Version)
         $versionPattern = "(?ms)^##\s+\[$escaped\][^\n]*\n(.*?)(?=^---\s*$|^##\s+|\z)"
@@ -196,16 +51,141 @@ function Read-ChangelogNotes([string]$Version) {
     return $null
 }
 
+function Format-AuthorCredit {
+    [CmdletBinding()]
+    [OutputType([string])]
+
+    param([string] $Author)
+
+    if (-not $Author) { return '' }
+    if ($Author -match '\[bot]$') { return $Author }
+    if ($Author -notmatch '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$') { return $Author }
+    return "[$Author](https://github.com/$Author)"
+}
+
+function Get-LoginsBySha {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param([string]$Repo, [string]$PrevTag, [string]$Tag)
+
+    $map = @{}
+    if (-not $Repo) { return $map }
+    $endpoint = if ($PrevTag) {
+        "repos/$Repo/compare/$PrevTag...$Tag"
+    } else {
+        "repos/$Repo/commits?sha=$Tag&per_page=100"
+    }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $json = & gh api $endpoint 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $json) { return $map }
+        $data = $json | ConvertFrom-Json -AsHashtable
+        $commits = if ($PrevTag) {
+            if ($data -isnot [Collections.IDictionary]) { return $map }
+            @($data['commits'])
+        } else { @($data) }
+        foreach ($c in $commits) {
+            if ($c -is [Collections.IDictionary] -and $c['sha'] -and
+                $c['author'] -is [Collections.IDictionary] -and $c['author']['login']) {
+                $map[$c['sha']] = $c['author']['login']
+            }
+        }
+    } catch [System.ArgumentException] {
+        return @{}
+    } finally {
+        $ErrorActionPreference = $prev
+        $global:LASTEXITCODE = 0
+    }
+    return $map
+}
+
+function Get-Category {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param([string] $subject)
+
+    if ($subject -match '^feat(\(.+?\))?!?:') { return @{ Order = 1; Name = 'Features' } }
+    if ($subject -match '^fix(\(.+?\))?!?:') { return @{ Order = 2; Name = 'Bug Fixes' } }
+    if ($subject -match '^perf(\(.+?\))?!?:') { return @{ Order = 3; Name = 'Performance' } }
+    if ($subject -match '^refactor(\(.+?\))?!?:') { return @{ Order = 4; Name = 'Refactors' } }
+    if ($subject -match '^revert(\(.+?\))?!?:') { return @{ Order = 5; Name = 'Reverts' } }
+    if ($subject -match '^docs(\(.+?\))?!?:') { return @{ Order = 6; Name = 'Documentation' } }
+    if ($subject -match '^style(\(.+?\))?!?:') { return @{ Order = 7; Name = 'Style' } }
+    if ($subject -match '^test(\(.+?\))?!?:') { return @{ Order = 8; Name = 'Tests' } }
+    if ($subject -match '^ci(\(.+?\))?!?:') { return @{ Order = 9; Name = 'CI' } }
+    if ($subject -match '^build(\(.+?\))?!?:') { return @{ Order = 10; Name = 'Build' } }
+    if ($subject -match '^chore(\(.+?\))?!?:') { return @{ Order = 11; Name = 'Chores' } }
+    return @{ Order = 99; Name = 'Other Changes' }
+}
+
+function Expand-Token {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([string] $text, [hashtable] $map)
+
+    if (-not $text) { return $text }
+    foreach ($key in $map.Keys) {
+        $val = $map[$key]
+        if ($null -eq $val) { $val = '' }
+        $text = $text.Replace($key, $val)
+    }
+    return $text
+}
+
+function Format-ByteSize {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([long] $bytes)
+
+    if ($bytes -ge 1MB) { return ('{0:F2} MB' -f ($bytes / 1MB)) }
+    if ($bytes -ge 1KB) { return ('{0:F2} KB' -f ($bytes / 1KB)) }
+    return ('{0} B' -f $bytes)
+}
+
+function Read-TemplateSection {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([string] $name, [string] $dir, [hashtable] $tokenMap)
+
+    $path = Join-Path -Path $dir -ChildPath "$name.md"
+    if (-not (Test-Path -LiteralPath $path)) {
+        Write-Host "::warning::Release-body template missing: $path. Section '$name' will not render."
+        return $null
+    }
+    $rawContent = [IO.File]::ReadAllText($path)
+    if ($null -eq $rawContent) { return $null }
+    $content = $rawContent.Trim()
+    if (-not $content) { return $null }
+    return (Expand-Token -text $content -map $tokenMap)
+}
+
+Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'ReleaseSlice.psm1') -Force
+
+if (-not $Tag) { throw 'No tag provided (pass -Tag or set TAG_NAME / GITHUB_REF_NAME).' }
+
+if (-not $Extras) {
+    $Extras = Join-Path -Path (Get-Location) -ChildPath ".github/release-extras/$Tag.md"
+}
+
+if (-not $TemplateDir) {
+    $TemplateDir = Join-Path -Path (Get-Location) -ChildPath '.github/release-template'
+}
+
+$prevInfo = Resolve-PrevTagForSlice -Tag $Tag -Repo $Repo -AdditionalPrereleaseTags $PrereleaseTags
+$prevTag = $prevInfo.Tag
+$logArgs = $prevInfo.LogArgs
+$range = $prevInfo.Display
+
 $changelogNotes = $null
 if ($prevInfo.Source -eq 'first-release') {
-    $changelogNotes = Read-ChangelogNotes -Version $Tag
+    $changelogNotes = Read-ChangelogNote -Version $Tag
     if (-not $changelogNotes) {
         if ($AllowEmpty) {
             $changelogNotes = '_First release; see commit log for details._'
-        }
-        else {
+        } else {
             throw "No prior tag or release exists, and CHANGELOG.md has no notes for $Tag or Unreleased. " +
-            "For the first release, write curated public notes under ## Unreleased before tagging."
+            'For the first release, write curated public notes under ## Unreleased before tagging.'
         }
     }
 }
@@ -219,42 +199,8 @@ if (-not $changelogNotes) {
 $lines = @()
 if ($raw) { $lines = $raw -split "`r?`n" | Where-Object { $_ } }
 
-function Format-AuthorCredit {
-    param([string] $Author)
-
-    if (-not $Author) { return "" }
-    if ($Author -match '\[bot]$') { return $Author }
-    if ($Author -notmatch '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$') { return $Author }
-    return "[$Author](https://github.com/$Author)"
-}
-
 $AuthorHandleMap = @{
     'WhyKnot' = 'RealWhyKnot'
-}
-
-function Get-LoginsBySha([string]$Repo, [string]$PrevTag, [string]$Tag) {
-    $map = @{}
-    if (-not $Repo) { return $map }
-    $endpoint = if ($PrevTag) { "repos/$Repo/compare/$PrevTag...$Tag" } else { "repos/$Repo/commits?sha=$Tag&per_page=100" }
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $json = & gh api $endpoint 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $json) { return $map }
-        $data = $json | ConvertFrom-Json
-        $commits = if ($PrevTag) { @($data.commits) } else { @($data) }
-        foreach ($c in $commits) {
-            if ($c.sha -and $c.author -and $c.author.login) { $map[$c.sha] = $c.author.login }
-        }
-    }
-    catch {
-        return @{}
-    }
-    finally {
-        $ErrorActionPreference = $prev
-        $global:LASTEXITCODE = 0
-    }
-    return $map
 }
 
 $loginsBySha = @{}
@@ -284,30 +230,15 @@ $entries = foreach ($line in $lines) {
     }
 }
 
-if (-not $changelogNotes -and (-not $entries -or $entries.Count -eq 0)) {
+if (-not $changelogNotes -and (-not $entries -or @($entries).Count -eq 0)) {
     if ($AllowEmpty) {
         return "## What's Changed`n`n_First release; see commit log for details._`n"
     }
     throw "No commits found in range $range. " +
-    "Either the previous tag is misdetected, every commit in the range " +
-    "carries [skip changelog], or the tag points at an empty branch. " +
-    "Pass -AllowEmpty for a first release. Otherwise amend the offending " +
-    "commits or push a real change before tagging."
-}
-
-function Get-Category([string] $subject) {
-    if ($subject -match '^feat(\(.+?\))?!?:') { return @{ Order = 1; Name = 'Features' } }
-    if ($subject -match '^fix(\(.+?\))?!?:') { return @{ Order = 2; Name = 'Bug Fixes' } }
-    if ($subject -match '^perf(\(.+?\))?!?:') { return @{ Order = 3; Name = 'Performance' } }
-    if ($subject -match '^refactor(\(.+?\))?!?:') { return @{ Order = 4; Name = 'Refactors' } }
-    if ($subject -match '^revert(\(.+?\))?!?:') { return @{ Order = 5; Name = 'Reverts' } }
-    if ($subject -match '^docs(\(.+?\))?!?:') { return @{ Order = 6; Name = 'Documentation' } }
-    if ($subject -match '^style(\(.+?\))?!?:') { return @{ Order = 7; Name = 'Style' } }
-    if ($subject -match '^test(\(.+?\))?!?:') { return @{ Order = 8; Name = 'Tests' } }
-    if ($subject -match '^ci(\(.+?\))?!?:') { return @{ Order = 9; Name = 'CI' } }
-    if ($subject -match '^build(\(.+?\))?!?:') { return @{ Order = 10; Name = 'Build' } }
-    if ($subject -match '^chore(\(.+?\))?!?:') { return @{ Order = 11; Name = 'Chores' } }
-    return @{ Order = 99; Name = 'Other Changes' }
+    'Either the previous tag is misdetected, every commit in the range ' +
+    'carries [skip changelog], or the tag points at an empty branch. ' +
+    'Pass -AllowEmpty for a first release. Otherwise amend the offending ' +
+    'commits or push a real change before tagging.'
 }
 
 $nonConforming = @()
@@ -316,7 +247,10 @@ if (-not $changelogNotes) {
             $_.Subject -notmatch '^(feat|fix|perf|refactor|revert|docs|style|test|ci|build|chore)(\(.+?\))?!?:'
         })
     if ($nonConforming.Count -gt 0) {
-        Write-Host "::warning::$($nonConforming.Count) commit(s) in range $range do not follow conventional-commit prefixes; bucketed under 'Other Changes':"
+        Write-Host (
+            "::warning::$($nonConforming.Count) commit(s) in range $range do not follow " +
+            "conventional-commit prefixes; bucketed under 'Other Changes':"
+        )
         foreach ($e in $nonConforming) {
             Write-Host "::warning::  $($e.Short)  $($e.Subject)"
         }
@@ -339,22 +273,21 @@ if ($Repo -and ($Repo -match '/')) {
     $parts = $Repo -split '/', 2
     $ownerOnly = $parts[0]
     $repoShort = $parts[1]
-}
-elseif ($Repo) {
+} elseif ($Repo) {
     $repoShort = $Repo
 }
 $tagCommitSha = ''
 $tagCommitShort = ''
 $prevErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
+Set-StrictMode -Version Latest
 try {
     $tagSha = & git rev-parse "$Tag^{}" 2>$null
     if ($LASTEXITCODE -eq 0 -and $tagSha) {
         $tagCommitSha = $tagSha.Trim()
         if ($tagCommitSha.Length -ge 12) { $tagCommitShort = $tagCommitSha.Substring(0, 12) }
     }
-}
-finally {
+} finally {
     $ErrorActionPreference = $prevErrorActionPreference
 }
 $priorTagToken = if ($prevTag) { $prevTag } else { '' }
@@ -371,104 +304,75 @@ $tokens = @{
     '{zip-name}'         = $zipNameToken
 }
 
-function Expand-Tokens([string] $text, [hashtable] $map) {
-    if (-not $text) { return $text }
-    foreach ($key in $map.Keys) {
-        $val = $map[$key]
-        if ($null -eq $val) { $val = '' }
-        $text = $text.Replace($key, $val)
-    }
-    return $text
-}
-
-function Format-Bytes([long] $bytes) {
-    if ($bytes -ge 1MB) { return ('{0:F2} MB' -f ($bytes / 1MB)) }
-    if ($bytes -ge 1KB) { return ('{0:F2} KB' -f ($bytes / 1KB)) }
-    return ('{0} B' -f $bytes)
-}
-
-function Read-TemplateSection([string] $name, [string] $dir, [hashtable] $tokenMap) {
-    $path = Join-Path -Path $dir -ChildPath "$name.md"
-    if (-not (Test-Path -LiteralPath $path)) {
-        Write-Host "::warning::Release-body template missing: $path. Section '$name' will not render."
-        return $null
-    }
-    $rawContent = Get-Content -LiteralPath $path -Raw -Encoding UTF8
-    if ($null -eq $rawContent) { return $null }
-    $content = $rawContent.Trim()
-    if (-not $content) { return $null }
-    return (Expand-Tokens -text $content -map $tokenMap)
-}
-
 $sb = [System.Text.StringBuilder]::new()
 if ($repoShort) {
-    [void]$sb.AppendLine("# $repoShort $Tag")
-    [void]$sb.AppendLine()
+    $null = $sb.AppendLine("# $repoShort $Tag")
+    $null = $sb.AppendLine()
 }
-[void]$sb.AppendLine("## What's Changed")
-[void]$sb.AppendLine()
+$null = $sb.AppendLine("## What's Changed")
+$null = $sb.AppendLine()
 
 if ($changelogNotes) {
-    [void]$sb.AppendLine($changelogNotes)
-    [void]$sb.AppendLine()
-}
-elseif ($useGroups) {
+    $null = $sb.AppendLine($changelogNotes)
+    $null = $sb.AppendLine()
+} elseif ($useGroups) {
     $tagged = foreach ($e in $entries) {
         $cat = Get-Category $e.Subject
         [pscustomobject]@{ Order = $cat.Order; Name = $cat.Name; Entry = $e }
     }
     $groups = $tagged | Group-Object Name | Sort-Object { ($_.Group | Select-Object -First 1).Order }
     foreach ($g in $groups) {
-        [void]$sb.AppendLine("### $($g.Name)")
+        $null = $sb.AppendLine("### $($g.Name)")
         foreach ($t in $g.Group) {
             $e = $t.Entry
-            [void]$sb.AppendLine("- $($e.Subject) by $(Format-AuthorCredit $e.Author) in $($e.Short)")
+            $null = $sb.AppendLine("- $($e.Subject) by $(Format-AuthorCredit $e.Author) in $($e.Short)")
         }
-        [void]$sb.AppendLine()
+        $null = $sb.AppendLine()
     }
-}
-else {
+} else {
     foreach ($e in $entries) {
-        [void]$sb.AppendLine("- $($e.Subject) by $(Format-AuthorCredit $e.Author) in $($e.Short)")
+        $null = $sb.AppendLine("- $($e.Subject) by $(Format-AuthorCredit $e.Author) in $($e.Short)")
     }
-    [void]$sb.AppendLine()
+    $null = $sb.AppendLine()
 }
 
 if ($Repo -and $prevTag) {
-    [void]$sb.AppendLine("**Full Changelog**: https://github.com/$Repo/compare/$prevTag...$Tag")
+    $null = $sb.AppendLine("**Full Changelog**: https://github.com/$Repo/compare/$prevTag...$Tag")
 }
 
 $includeIntegrity = $ZipPath -and $ZipSha256 -and $ZipSize -gt 0 -and $Manifest -and (Test-Path -LiteralPath $Manifest)
 if ($includeIntegrity) {
     $zipNameForLine = if ($zipNameToken) { $zipNameToken } else { Split-Path -Leaf $ZipPath }
     $integrityName = $zipNameForLine -replace '\.zip$', '.integrity.tsv'
-    [void]$sb.AppendLine()
-    [void]$sb.AppendLine("## File integrity")
-    [void]$sb.AppendLine()
-    [void]$sb.AppendLine("Full SHA256 hashes are attached as ``$integrityName``.")
-}
-elseif ($Manifest -or $ZipPath -or $ZipSha256) {
-    Write-Host "::warning::File-integrity section skipped: -Manifest, -ZipPath, -ZipSize, and -ZipSha256 must all be set. Got Manifest='$Manifest' ZipPath='$ZipPath' ZipSize=$ZipSize ZipSha256='$ZipSha256'."
+    $null = $sb.AppendLine()
+    $null = $sb.AppendLine('## File integrity')
+    $null = $sb.AppendLine()
+    $null = $sb.AppendLine("Full SHA256 hashes are attached as ``$integrityName``.")
+} elseif ($Manifest -or $ZipPath -or $ZipSha256) {
+    Write-Host (
+        '::warning::File-integrity section skipped: -Manifest, -ZipPath, -ZipSize, and -ZipSha256 must ' +
+        "all be set. Got Manifest='$Manifest' ZipPath='$ZipPath' ZipSize=$ZipSize ZipSha256='$ZipSha256'."
+    )
 }
 
 $templateOrder = @('links', 'install', 'uninstall', 'what-you-need-to-do')
 foreach ($name in $templateOrder) {
     $section = Read-TemplateSection -name $name -dir $TemplateDir -tokenMap $tokens
     if ($section) {
-        [void]$sb.AppendLine()
-        [void]$sb.AppendLine($section)
+        $null = $sb.AppendLine()
+        $null = $sb.AppendLine($section)
     }
 }
 
 if (Test-Path -LiteralPath $Extras) {
-    $extrasContent = (Get-Content -LiteralPath $Extras -Raw -Encoding UTF8).Trim()
+    $extrasContent = ([IO.File]::ReadAllText($Extras)).Trim()
     if ($extrasContent) {
-        [void]$sb.AppendLine()
-        [void]$sb.AppendLine("---")
-        [void]$sb.AppendLine()
-        [void]$sb.AppendLine("## Additional notes")
-        [void]$sb.AppendLine()
-        [void]$sb.AppendLine($extrasContent)
+        $null = $sb.AppendLine()
+        $null = $sb.AppendLine('---')
+        $null = $sb.AppendLine()
+        $null = $sb.AppendLine('## Additional notes')
+        $null = $sb.AppendLine()
+        $null = $sb.AppendLine($extrasContent)
     }
 }
 
@@ -516,10 +420,12 @@ if (-not $SkipScrub) {
         }
     }
     if ($offenders) {
-        $report = $offenders | ForEach-Object { "  line $($_.Line) col $($_.Col): $($_.Code) in: $($_.Text)" }
+        $report = foreach ($offender in $offenders) {
+            "  line $($offender.Line) col $($offender.Col): $($offender.Code) in: $($offender.Text)"
+        }
         throw "Non-ASCII characters in release body after normalisation:`n$($report -join "`n")`n" +
-        "Fix: amend the offending commit subject (or extras file) to use ASCII equivalents. " +
-        "Common substitutes are pre-mapped in Generate-ReleaseNotes.ps1; if a new character " +
+        'Fix: amend the offending commit subject (or extras file) to use ASCII equivalents. ' +
+        'Common substitutes are pre-mapped in Generate-ReleaseNotes.ps1; if a new character ' +
         "trips this, add it to `$asciiSubs and try again."
     }
 
@@ -550,18 +456,22 @@ if (-not $SkipScrub) {
         '\bmonths of effort\b'
         '\byears in the making\b'
     )
-    $matches = foreach ($pat in $forbiddenPatterns) {
+    $voiceMatches = foreach ($pat in $forbiddenPatterns) {
         $found = [regex]::Matches($body, $pat, 'IgnoreCase')
         foreach ($m in $found) {
             [pscustomobject]@{ Pattern = $pat; Match = $m.Value; Index = $m.Index }
         }
     }
-    if ($matches) {
-        $report = $matches | ForEach-Object { "  pattern $($_.Pattern) matched '$($_.Match)' at index $($_.Index)" }
+    if ($voiceMatches) {
+        $report = foreach ($voiceMatch in $voiceMatches) {
+            "  pattern $($voiceMatch.Pattern) matched '$($voiceMatch.Match)' at index $($voiceMatch.Index)"
+        }
         throw "voice or internal-only-vocabulary patterns in release body:`n$($report -join "`n")`n" +
-        "Fix: amend the offending commit subject (or extras file) to use plainer language, " +
-        "or mark the commit [skip changelog] if the term is unavoidable."
+        'Fix: amend the offending commit subject (or extras file) to use plainer language, ' +
+        'or mark the commit [skip changelog] if the term is unavoidable.'
     }
 }
 
 $body
+
+exit 0

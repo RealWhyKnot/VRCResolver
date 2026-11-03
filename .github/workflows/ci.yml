@@ -57,9 +57,15 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install PowerShell analyzer
+      - name: Install lint tools
         shell: pwsh
-        run: Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+        run: |
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          python -m pip install --disable-pip-version-check ruff==0.17.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          choco install shellcheck shfmt --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Join-Path ${env:ProgramFiles} 'Git/usr/bin' >> $env:GITHUB_PATH
 
       - name: Lint and format check
         shell: pwsh
