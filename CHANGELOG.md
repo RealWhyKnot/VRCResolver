@@ -18,6 +18,8 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ### Fixed
 - **uninstall:** Only delete files the app installed (f66a7fa)
+- Set the exec bit on the shell hooks (f49ac09)
+- Tighten client security and match the style guide (8cdbc29)
 
 ---
 
