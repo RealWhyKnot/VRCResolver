@@ -27,3 +27,4 @@ version.txt
 *.mkv
 
 target/
+__pycache__/
