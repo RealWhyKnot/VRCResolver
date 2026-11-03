@@ -2,48 +2,47 @@
 set -euo pipefail
 shopt -s inherit_errexit
 
-msg_file="$1"
-source="${2:-}"
-
 STAMP_PATTERN='\([0-9]{4}\.[0-9]+\.[0-9]+\.[0-9]+(-([A-Fa-f0-9]{4}|beta))?\)'
 VERSION_FILE='version.txt'
 VERSION_IN_GITDIR=0
 
-if [[ -f ${BASH_SOURCE[0]%/*}/hook-config ]]; then
-  source "${BASH_SOURCE[0]%/*}/hook-config"
+die() {
+  printf '\nprepare-commit-msg: %s\n\n  subject: %s\n\n' "$1" "${subject}" >&2
+  printf '%s\n\n' 'Drop the existing stamp and let this hook append the current one.' >&2
+  exit 1
+}
+
+message_file="$1"
+message_source="${2:-}"
+config_directory=$(dirname "$0")
+if [[ -f "${config_directory}/hook-config" ]]; then
+  source "${config_directory}/hook-config"
 fi
 
-case "${source}" in
+case "${message_source}" in
   merge | squash) exit 0 ;;
   *) ;;
 esac
 
-if [[ ${source} != "commit" ]]; then
-  subject="$(grep -m1 -vE '^(#|$)' "${msg_file}" || true)"
+if [[ ${message_source} != "commit" ]]; then
+  subject="$(grep -m1 -vE '^(#|$)' "${message_file}" || true)"
   if printf '%s\n' "${subject}" | grep -qE "${STAMP_PATTERN}"; then
-    printf '%s\n' "" >&2
-    printf '%s\n' "prepare-commit-msg: subject already contains a build-version stamp." >&2
-    printf '%s\n' "" >&2
-    printf '%s\n' "  subject: ${subject}" >&2
-    printf '%s\n' "" >&2
-    printf '%s\n' "Drop the existing stamp and let this hook append the current one." >&2
-    printf '%s\n' "" >&2
-    exit 1
+    die 'subject already contains a build-version stamp.'
   fi
 fi
 
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-[[ -n ${repo_root} ]] || exit 0
+repository_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -n ${repository_root} ]] || exit 0
 
 if [[ ${VERSION_IN_GITDIR} == "1" ]]; then
   version_file="$(git rev-parse --git-path "${VERSION_FILE}" 2>/dev/null || true)"
-  [[ -n ${version_file} ]] || version_file="${repo_root}/.git/${VERSION_FILE}"
+  [[ -n ${version_file} ]] || version_file="${repository_root}/.git/${VERSION_FILE}"
   case "${version_file}" in
     /* | [A-Za-z]:*) ;;
-    *) version_file="${repo_root}/${version_file}" ;;
+    *) version_file="${repository_root}/${version_file}" ;;
   esac
 else
-  version_file="${repo_root}/${VERSION_FILE}"
+  version_file="${repository_root}/${VERSION_FILE}"
 fi
 version=""
 if [[ -f ${version_file} ]]; then
@@ -55,12 +54,13 @@ if ! printf '%s\n' "${version}" | grep -qE "^${today}\."; then
   short_head="$(git rev-parse HEAD 2>/dev/null | cut -c1-4 | tr 'a-f' 'A-F' || true)"
   [[ -n ${short_head} ]] || short_head="0000"
   version="${today}.0-${short_head}"
-  mkdir -p "$(dirname "${version_file}")"
+  version_directory="$(dirname "${version_file}")"
+  mkdir -p "${version_directory}"
   printf '%s' "${version}" >"${version_file}"
 fi
 
 [[ -n ${version} ]] || exit 0
 
-if ! grep -qE "${STAMP_PATTERN}" "${msg_file}"; then
-  sed -i "1s/\$/ (${version})/" "${msg_file}"
+if ! grep -qE "${STAMP_PATTERN}" "${message_file}"; then
+  sed -i "1s/\$/ (${version})/" "${message_file}"
 fi

@@ -2,54 +2,48 @@
 set -euo pipefail
 shopt -s inherit_errexit
 
-msg_file="$1"
-[[ -f ${msg_file} ]] || exit 0
-
 CHECK_STAMP=1
 STAMP_PATTERN='\([0-9]{4}\.[0-9]+\.[0-9]+\.[0-9]+(-([A-Fa-f0-9]{4}|beta))?\)'
 CHECK_CONVENTIONAL=0
 CONVENTIONAL_PATTERN='^(feat|fix|chore|ci|docs|refactor|revert|test|perf|diag|style)(\([a-z0-9-]+\))?!?: .+'
 FORBIDDEN_BODY_PATTERN=''
 
-if [[ -f ${BASH_SOURCE[0]%/*}/hook-config ]]; then
-  source "${BASH_SOURCE[0]%/*}/hook-config"
+die() {
+  printf '\ncommit-msg: %s\n\n  subject: %s\n\n' "$1" "${subject}" >&2
+  exit 1
+}
+
+message_file="$1"
+[[ -f ${message_file} ]] || exit 0
+config_directory=$(dirname "$0")
+if [[ -f "${config_directory}/hook-config" ]]; then
+  source "${config_directory}/hook-config"
 fi
-
-subject="$(grep -m1 -vE '^(#|$)' "${msg_file}" || true)"
+subject="$(grep -m1 -vE '^(#|$)' "${message_file}" || true)"
 [[ -n ${subject} ]] || exit 0
-
 case "${subject}" in
   Merge\ * | Revert\ * | fixup!\ * | squash!\ *) is_merge=1 ;;
   *) is_merge=0 ;;
 esac
-
-fail() {
-  printf '%s\n' "" >&2
-  printf '%s\n' "commit-msg: $1" >&2
-  printf '%s\n' "" >&2
-  printf '%s\n' "  subject: ${subject}" >&2
-  printf '%s\n' "" >&2
-  exit 1
-}
 
 if [[ ${CHECK_STAMP} == "1" ]]; then
   count=$( (printf '%s\n' "${subject}" | grep -oE "${STAMP_PATTERN}" || true) | grep -c . || true)
   count=$(printf '%s' "${count}" | tr -cd '0-9')
   [[ -n ${count} ]] || count=0
   if [[ ${count} -gt 1 ]]; then
-    fail "subject contains ${count} build-version stamps; expected at most one."
+    die "subject contains ${count} build-version stamps; expected at most one."
   fi
 fi
 
 if [[ ${CHECK_CONVENTIONAL} == "1" ]] && [[ ${is_merge} == "0" ]]; then
   if ! printf '%s\n' "${subject}" | grep -qE "${CONVENTIONAL_PATTERN}"; then
-    fail "subject is not a conventional commit."
+    die "subject is not a conventional commit."
   fi
 fi
 
 if [[ -n ${FORBIDDEN_BODY_PATTERN} ]] && [[ ${is_merge} == "0" ]]; then
-  if grep -qiE "${FORBIDDEN_BODY_PATTERN}" "${msg_file}"; then
-    fail "message references an issue number or an upstream repository."
+  if grep -qiE "${FORBIDDEN_BODY_PATTERN}" "${message_file}"; then
+    die "message references an issue number or an upstream repository."
   fi
 fi
 
