@@ -6,3 +6,5 @@
 *.bash text eol=lf
 *.sh.tpl text eol=lf
 *.bash.tpl text eol=lf
+.shellcheckrc text eol=lf
+.github/lint/check-shell text eol=lf
