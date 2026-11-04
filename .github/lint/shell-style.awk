@@ -1,83 +1,83 @@
-function report(line, msg) {
-  printf "%s:%d: %s\n", cur_file, line, msg
-  bad = 1
+function report(line, message) {
+  printf "%s:%d: %s\n", current_file, line, message
+  has_findings = 1
 }
 
-function report_path(path, msg) {
-  printf "%s: %s\n", path, msg
-  bad = 1
+function report_path(path, message) {
+  printf "%s: %s\n", path, message
+  has_findings = 1
 }
 
 function pop(stack) {
   return substr(stack, 1, length(stack) - 1)
 }
 
-function scan(text, mode, out, i, n, c, stack, top) {
-  out = ""
+function scan(text, mode, output, position, text_length, character, stack, top) {
+  output = ""
   stack = ""
-  n = length(text)
-  for (i = 1; i <= n; i++) {
-    c = substr(text, i, 1)
+  text_length = length(text)
+  for (position = 1; position <= text_length; position++) {
+    character = substr(text, position, 1)
     top = substr(stack, length(stack), 1)
     if (top == "'") {
-      if (c == "'") {
+      if (character == "'") {
         stack = pop(stack)
-        out = out c
+        output = output character
       } else if (mode == "code") {
-        out = out "_"
+        output = output "_"
       }
       continue
     }
-    if (c == "\\") {
-      i++
-      out = out "__"
+    if (character == "\\") {
+      position++
+      output = output "__"
       continue
     }
     if (top == "\"") {
-      if (c == "\"") {
+      if (character == "\"") {
         stack = pop(stack)
-        out = out c
-      } else if (c == "$" && substr(text, i + 1, 1) == "(") {
+        output = output character
+      } else if (character == "$" && substr(text, position + 1, 1) == "(") {
         stack = stack "("
-        out = out "$("
-        i++
+        output = output "$("
+        position++
       } else if (mode == "code") {
-        out = out "_"
+        output = output "_"
       } else {
-        out = out c
+        output = output character
       }
       continue
     }
-    if (top == "(" && c == ")") {
+    if (top == "(" && character == ")") {
       stack = pop(stack)
-    } else if (top == "(" && c == "(") {
+    } else if (top == "(" && character == "(") {
       stack = stack "("
-    } else if (c == "'" || c == "\"") {
-      stack = stack c
+    } else if (character == "'" || character == "\"") {
+      stack = stack character
     }
-    out = out c
+    output = output character
   }
-  return out
+  return output
 }
 
-function drop_subst(text, out, i, n, c, depth) {
-  out = ""
+function drop_substitution(text, output, position, text_length, character, depth) {
+  output = ""
   depth = 0
-  n = length(text)
-  for (i = 1; i <= n; i++) {
-    c = substr(text, i, 1)
-    if (c == "$" && substr(text, i + 1, 1) == "(") {
+  text_length = length(text)
+  for (position = 1; position <= text_length; position++) {
+    character = substr(text, position, 1)
+    if (character == "$" && substr(text, position + 1, 1) == "(") {
       depth++
-      i++
-    } else if (depth > 0 && c == "(") {
+      position++
+    } else if (depth > 0 && character == "(") {
       depth++
-    } else if (depth > 0 && c == ")") {
+    } else if (depth > 0 && character == ")") {
       depth--
     } else if (depth == 0) {
-      out = out c
+      output = output character
     }
   }
-  return out
+  return output
 }
 
 function trim(text) {
@@ -96,32 +96,32 @@ function first_word(text) {
   return text
 }
 
-function split_steps(code, text, starts, ends, n, i, c, from, depth) {
-  n = 0
+function split_steps(code, text, starts, ends, step_count, position, character, from, depth) {
+  step_count = 0
   from = 1
   depth = 0
-  for (i = 1; i <= length(code); i++) {
-    c = substr(code, i, 1)
-    if (c == "$" && substr(code, i + 1, 1) == "(") {
+  for (position = 1; position <= length(code); position++) {
+    character = substr(code, position, 1)
+    if (character == "$" && substr(code, position + 1, 1) == "(") {
       depth++
-      i++
-    } else if (depth > 0 && c == ")") {
+      position++
+    } else if (depth > 0 && character == ")") {
       depth--
-    } else if (depth == 0 && c == ";") {
-      n++
-      starts[n] = from
-      ends[n] = i - 1
-      from = i + 1
+    } else if (depth == 0 && character == ";") {
+      step_count++
+      starts[step_count] = from
+      ends[step_count] = position - 1
+      from = position + 1
     }
   }
-  n++
-  starts[n] = from
-  ends[n] = length(code)
-  return n
+  step_count++
+  starts[step_count] = from
+  ends[step_count] = length(code)
+  return step_count
 }
 
-function note_conditions(step, line, parts, count, i, word) {
-  step = drop_subst(step)
+function note_conditions(step, line, parts, count, position, word) {
+  step = drop_substitution(step)
   if (match(step, /^[[:space:]]*(if|elif|while|until|!)[[:space:]]+/)) {
     word = first_word(substr(step, RLENGTH + 1))
     if (word != "") {
@@ -130,8 +130,8 @@ function note_conditions(step, line, parts, count, i, word) {
   }
   gsub(/&&|\|\|/, "\001", step)
   count = split(step, parts, "\001")
-  for (i = 1; i < count; i++) {
-    word = parts[i]
+  for (position = 1; position < count; position++) {
+    word = parts[position]
     sub(/^[[:space:]]*(if|elif|while|until)[[:space:]]+/, "", word)
     word = first_word(word)
     if (word != "") {
@@ -140,8 +140,8 @@ function note_conditions(step, line, parts, count, i, word) {
   }
 }
 
-function note_step(step, line, plain, name, rest, words, count, i, flat) {
-  plain = trim(drop_subst(step))
+function note_step(step, line, plain, name, rest, words, count, position, flat) {
+  plain = trim(drop_substitution(step))
   sub(/^[^[:space:]()]*\)[[:space:]]*/, "", plain)
   if (plain == "" || plain ~ /^(then|do|else|fi|done|esac|\{|\}|;|\)|\(|in)$/) {
     return
@@ -151,8 +151,8 @@ function note_step(step, line, plain, name, rest, words, count, i, flat) {
   }
   if (plain ~ /^(local|declare|typeset|readonly)([[:space:]]|$)/) {
     count = split(plain, words, /[[:space:]]+/)
-    for (i = 2; i <= count; i++) {
-      name = words[i]
+    for (position = 2; position <= count; position++) {
+      name = words[position]
       sub(/[+]?=.*$/, "", name)
       if (name ~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
         locals[name] = 1
@@ -179,28 +179,28 @@ function note_step(step, line, plain, name, rest, words, count, i, flat) {
   if (plain ~ /^(return|exit|break|continue|true|:)([[:space:]]|$)/) {
     return
   }
-  body_count[cur_fn]++
-  flat = cur_fn SUBSEP body_count[cur_fn]
+  body_count[current_function]++
+  flat = current_function SUBSEP body_count[current_function]
   body_line[flat] = line
   body_safe[flat] = plain ~ /\|\|[[:space:]]*(return|exit|die|\{)([[:space:]]|$)/
 }
 
-function check_names(code, line, parts, count, i, words, total, j, word, declaring, name) {
+function check_names(code, line, parts, count, position, words, total, word_position, word, is_declaring, name) {
   gsub(/\$\(|[;&|(){}]/, "\001", code)
   count = split(code, parts, "\001")
-  for (i = 1; i <= count; i++) {
-    total = split(trim(parts[i]), words, /[[:space:]]+/)
-    declaring = 0
-    for (j = 1; j <= total; j++) {
-      word = words[j]
-      if (!declaring && word ~ /^(then|do|else|elif|if|while|until|!|time)$/) {
+  for (position = 1; position <= count; position++) {
+    total = split(trim(parts[position]), words, /[[:space:]]+/)
+    is_declaring = 0
+    for (word_position = 1; word_position <= total; word_position++) {
+      word = words[word_position]
+      if (!is_declaring && word ~ /^(then|do|else|elif|if|while|until|!|time)$/) {
         continue
       }
-      if (!declaring && word ~ /^(local|declare|typeset|readonly|export)$/) {
-        declaring = 1
+      if (!is_declaring && word ~ /^(local|declare|typeset|readonly|export)$/) {
+        is_declaring = 1
         continue
       }
-      if (declaring && word ~ /^-/) {
+      if (is_declaring && word ~ /^-/) {
         continue
       }
       if (!match(word, /^[A-Za-z_][A-Za-z0-9_]*([+]?=|$)/)) {
@@ -208,7 +208,7 @@ function check_names(code, line, parts, count, i, words, total, j, word, declari
       }
       name = word
       sub(/[+]?=.*$/, "", name)
-      if (!declaring && name == word) {
+      if (!is_declaring && name == word) {
         break
       }
       if (name !~ /^[a-z_][a-z0-9_]*$/ && name !~ /^[A-Z_][A-Z0-9_]*$/) {
@@ -218,7 +218,7 @@ function check_names(code, line, parts, count, i, words, total, j, word, declari
   }
 }
 
-function check(text, line, code, expand, rest, name, steps, starts, ends, count, i, step) {
+function check(text, line, code, expand, rest, name, steps, starts, ends, count, position, step) {
   code = scan(text, "code")
   expand = scan(text, "expand")
   if (match(expand, /(^|[;&|({}!][[:space:]]*|[[:space:]])echo([[:space:]]|$)/)) {
@@ -272,8 +272,8 @@ function check(text, line, code, expand, rest, name, steps, starts, ends, count,
     if (name == "main") {
       report(line, "the main body runs at the top level, with no main function (SH-18)")
     }
-    if (cur_fn == "") {
-      cur_fn = name
+    if (current_function == "") {
+      current_function = name
       split("", locals)
       match(code, /^[[:space:]]*/)
       func_indent = substr(code, 1, RLENGTH)
@@ -282,23 +282,23 @@ function check(text, line, code, expand, rest, name, steps, starts, ends, count,
       if (index(code, "{") > 0 && rest ~ /}[[:space:]]*$/) {
         sub(/}[[:space:]]*$/, "", rest)
         count = split_steps(rest, rest, starts, ends)
-        for (i = 1; i <= count; i++) {
-          step = substr(rest, starts[i], ends[i] - starts[i] + 1)
+        for (position = 1; position <= count; position++) {
+          step = substr(rest, starts[position], ends[position] - starts[position] + 1)
           note_conditions(step, line)
           note_step(step, line)
         }
-        cur_fn = ""
+        current_function = ""
       }
       return
     }
   }
-  if (cur_fn != "" && code ~ ("^" func_indent "}")) {
-    cur_fn = ""
+  if (current_function != "" && code ~ ("^" func_indent "}")) {
+    current_function = ""
     return
   }
   count = split_steps(code, text, starts, ends)
-  for (i = 1; i <= count; i++) {
-    step = substr(code, starts[i], ends[i] - starts[i] + 1)
+  for (position = 1; position <= count; position++) {
+    step = substr(code, starts[position], ends[position] - starts[position] + 1)
     if (step ~ /^[[:space:]]*done([[:space:]]|$)/ && loops > 0) {
       loops--
     }
@@ -313,7 +313,7 @@ function check(text, line, code, expand, rest, name, steps, starts, ends, count,
     }
     printed = step ~ /(^|[{&|)]|then|do|else)[[:space:]]*(echo|printf)[[:space:]]/ && step !~ />/
     note_conditions(step, line)
-    if (cur_fn != "") {
+    if (current_function != "") {
       note_step(step, line)
     }
   }
@@ -340,7 +340,7 @@ function heredoc_start(code, text, at, rest, word) {
   return ""
 }
 
-function finish_file(name, flat, i) {
+function finish_file(name, flat, position) {
   if (joined != "") {
     check(joined, start)
   }
@@ -348,8 +348,8 @@ function finish_file(name, flat, i) {
     if (!(name in calls)) {
       continue
     }
-    for (i = 1; i < body_count[name]; i++) {
-      flat = name SUBSEP i
+    for (position = 1; position < body_count[name]; position++) {
+      flat = name SUBSEP position
       if (!body_safe[flat]) {
         report(body_line[flat], name " runs from if, !, && or || (line " calls[name] "); end this step with || return (SH-3)")
       }
@@ -361,17 +361,17 @@ function finish_file(name, flat, i) {
   split("", body_line)
   split("", body_safe)
   joined = ""
-  cur_fn = ""
+  current_function = ""
   heredoc = ""
   loops = 0
   printed = 0
 }
 
 FNR == 1 {
-  if (cur_file != "") {
+  if (current_file != "") {
     finish_file()
   }
-  cur_file = FILENAME
+  current_file = FILENAME
   path = FILENAME
   sub(/^\.\//, "", path)
   listed[path] = 1
@@ -432,9 +432,9 @@ length($0) > 120 {
     start = FNR
   }
   text = $0
-  continued = sub(/\\$/, "", text)
+  is_continued = sub(/\\$/, "", text)
   joined = joined text
-  if (!continued) {
+  if (!is_continued) {
     word = heredoc_start(scan(joined, "code"), joined)
     check(joined, start)
     joined = ""
@@ -461,26 +461,26 @@ function sourced_names(text, rest, word) {
 }
 
 END {
-  if (cur_file != "") {
+  if (current_file != "") {
     finish_file()
   }
   count = split(eols, rows, "\n")
-  for (i = 1; i <= count; i++) {
-    if (split(rows[i], cols, "\t") < 2) {
+  for (position = 1; position <= count; position++) {
+    if (split(rows[position], columns, "\t") < 2) {
       continue
     }
-    split(cols[1], flags, /[[:space:]]+/)
+    split(columns[1], flags, /[[:space:]]+/)
     if ((flags[1] != "i/lf" && flags[1] != "i/none") || (flags[2] != "w/lf" && flags[2] != "w/none")) {
-      report_path(cols[2], "check it in and out as LF through .gitattributes eol=lf (SH-8)")
+      report_path(columns[2], "check it in and out as LF through .gitattributes eol=lf (SH-8)")
     }
   }
   count = split(modes, rows, "\n")
-  for (i = 1; i <= count; i++) {
-    if (split(rows[i], cols, "\t") < 2) {
+  for (position = 1; position <= count; position++) {
+    if (split(rows[position], columns, "\t") < 2) {
       continue
     }
-    split(cols[1], flags, /[[:space:]]+/)
-    path = cols[2]
+    split(columns[1], flags, /[[:space:]]+/)
+    path = columns[2]
     base = path
     sub(/^.*\//, "", base)
     if (base ~ /\.(sh|bash)\.tpl$/) {
@@ -499,5 +499,5 @@ END {
       report_path(path, "hooks in .githooks/ have no extension (SH-19)")
     }
   }
-  exit bad
+  exit has_findings
 }

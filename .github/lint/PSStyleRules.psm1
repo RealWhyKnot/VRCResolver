@@ -47,14 +47,15 @@ function Get-ParameterName {
         }
     }
     $hits = [System.Collections.Generic.List[string]]::new()
-    foreach ($p in $script:ParameterCache[$Command]) {
-        $names = @($p.Name) + @($p.Aliases)
+    foreach ($parameter in $script:ParameterCache[$Command]) {
+        $names = @($parameter.Name) + @($parameter.Aliases)
         if ($names -contains $Given) {
-            return $p.Name
+            return $parameter.Name
         }
-        foreach ($n in $names) {
-            if ($n.StartsWith($Given, [StringComparison]::OrdinalIgnoreCase) -and -not $hits.Contains($p.Name)) {
-                $hits.Add($p.Name)
+        foreach ($candidateName in $names) {
+            if ($candidateName.StartsWith($Given, [StringComparison]::OrdinalIgnoreCase) -and
+                -not $hits.Contains($parameter.Name)) {
+                $hits.Add($parameter.Name)
             }
         }
     }
@@ -100,12 +101,13 @@ function Get-ScopeAst {
     param(
         [Parameter(Mandatory)][Ast] $Node
     )
-    $p = $Node.Parent
-    while ($p) {
-        if ($p -is [ScriptBlockAst] -and ($null -eq $p.Parent -or $p.Parent -is [FunctionDefinitionAst])) {
-            return $p
+    $parent = $Node.Parent
+    while ($parent) {
+        if ($parent -is [ScriptBlockAst] -and
+            ($null -eq $parent.Parent -or $parent.Parent -is [FunctionDefinitionAst])) {
+            return $parent
         }
-        $p = $p.Parent
+        $parent = $parent.Parent
     }
     $Node
 }
@@ -117,12 +119,12 @@ function Test-InLoop {
         [Parameter(Mandatory)][Ast] $Node,
         [Parameter(Mandatory)][Ast] $Scope
     )
-    $p = $Node.Parent
-    while ($p -and $p -ne $Scope) {
-        if ($p -is [LoopStatementAst]) {
+    $parent = $Node.Parent
+    while ($parent -and $parent -ne $Scope) {
+        if ($parent -is [LoopStatementAst]) {
             return $true
         }
-        $p = $p.Parent
+        $parent = $parent.Parent
     }
     $false
 }
@@ -191,13 +193,13 @@ function Get-FileRecord {
     $tokens = $null
     $parseErrors = $null
     $null = [Parser]::ParseFile($File, [ref]$tokens, [ref]$parseErrors)
-    foreach ($t in $tokens) {
-        if ($t.Kind -eq [TokenKind]::LineContinuation) {
-            New-StyleRecord -Rule 'StyleLineContinuation' -Extent $t.Extent
-        } elseif ($t.Kind -eq [TokenKind]::Comment) {
-            $shebang = $t.Extent.StartOffset -eq 0 -and $t.Text.StartsWith('#!')
-            if (-not $shebang -and $t.Text -notmatch '^#requires\s') {
-                New-StyleRecord -Rule 'StyleNoComment' -Extent $t.Extent
+    foreach ($token in $tokens) {
+        if ($token.Kind -eq [TokenKind]::LineContinuation) {
+            New-StyleRecord -Rule 'StyleLineContinuation' -Extent $token.Extent
+        } elseif ($token.Kind -eq [TokenKind]::Comment) {
+            $isShebang = $token.Extent.StartOffset -eq 0 -and $token.Text.StartsWith('#!')
+            if (-not $isShebang -and $token.Text -notmatch '^#requires\s') {
+                New-StyleRecord -Rule 'StyleNoComment' -Extent $token.Extent
             }
         }
     }
@@ -205,13 +207,13 @@ function Get-FileRecord {
         return
     }
     $param = $Root.ParamBlock
-    $binding = $param -and @($param.Attributes | Where-Object { $_.TypeName.Name -eq 'CmdletBinding' }).Count -gt 0
+    $hasBinding = $param -and @($param.Attributes | Where-Object { $_.TypeName.Name -eq 'CmdletBinding' }).Count -gt 0
     $splat = {
         param([Ast] $Node)
         $Node -is [VariableExpressionAst] -and $Node.Splatted -and $Node.VariablePath.UserPath -eq 'args'
     }
-    $launcher = -not $param -and $null -ne $Root.Find($splat, $false)
-    $header = $lines[0].TrimEnd("`r") -eq '#!/usr/bin/env pwsh' -and ($binding -or $launcher) -and
+    $isLauncher = -not $param -and $null -ne $Root.Find($splat, $false)
+    $header = $lines[0].TrimEnd("`r") -eq '#!/usr/bin/env pwsh' -and ($hasBinding -or $isLauncher) -and
     $Statements.Count -ge 2 -and
     $Statements[0].Extent.Text -eq $script:HeaderLines[0] -and $Statements[1].Extent.Text -eq $script:HeaderLines[1]
     if (-not $header) {
@@ -240,7 +242,7 @@ function Get-CommandRecord {
         return
     }
     $pipe = $Command.Parent
-    $fromValue = $pipe -is [PipelineAst] -and $pipe.PipelineElements.Count -gt 1 -and
+    $isFromValue = $pipe -is [PipelineAst] -and $pipe.PipelineElements.Count -gt 1 -and
     $pipe.PipelineElements[0] -is [CommandExpressionAst] -and $pipe.PipelineElements[1] -eq $Command
     switch ($name) {
         'ConvertTo-Json' {
@@ -277,7 +279,7 @@ function Get-CommandRecord {
             }
         }
         { $_ -in 'ForEach-Object', '%', 'foreach' } {
-            if ($fromValue) {
+            if ($isFromValue) {
                 New-StyleRecord -Rule 'StyleForEachObject' -Extent $Command.Extent
             }
         }
@@ -322,81 +324,81 @@ function Measure-StyleRule {
         Get-FileRecord -Root $ScriptBlockAst -File $file -Statements $statements
     }
 
-    $body = $false
-    foreach ($s in $statements) {
-        if ($s -is [FunctionDefinitionAst]) {
-            if ($body) {
-                New-StyleRecord -Rule 'StyleLayout' -Extent $s.Extent
+    $hasBody = $false
+    foreach ($statement in $statements) {
+        if ($statement -is [FunctionDefinitionAst]) {
+            if ($hasBody) {
+                New-StyleRecord -Rule 'StyleLayout' -Extent $statement.Extent
             }
-        } elseif (-not (Test-HeaderStatement -Statement $s)) {
-            $body = $true
+        } elseif (-not (Test-HeaderStatement -Statement $statement)) {
+            $hasBody = $true
         }
     }
 
     $all = $ScriptBlockAst.FindAll({ $true }, $true)
     $kinds = [System.Collections.Generic.Dictionary[string, System.Collections.Generic.HashSet[string]]]::new()
-    foreach ($a in $all) {
-        if ($a -is [AssignmentStatementAst] -and $a.Operator -eq [TokenKind]::Equals) {
-            $name = Get-AssignedName -Left $a.Left
+    foreach ($assignment in $all) {
+        if ($assignment -is [AssignmentStatementAst] -and $assignment.Operator -eq [TokenKind]::Equals) {
+            $name = Get-AssignedName -Left $assignment.Left
             if ($name) {
-                $key = '{0}:{1}' -f (Get-ScopeAst -Node $a).Extent.StartOffset, $name.ToLowerInvariant()
+                $key = '{0}:{1}' -f (Get-ScopeAst -Node $assignment).Extent.StartOffset, $name.ToLowerInvariant()
                 if (-not $kinds.ContainsKey($key)) {
                     $kinds[$key] = [System.Collections.Generic.HashSet[string]]::new()
                 }
-                $null = $kinds[$key].Add((Get-AssignedKind -Assignment $a))
+                $null = $kinds[$key].Add((Get-AssignedKind -Assignment $assignment))
             }
         }
     }
 
-    foreach ($n in $all) {
-        if ($n -is [CommandAst]) {
-            Get-CommandRecord -Command $n
-        } elseif ($n -is [FunctionDefinitionAst]) {
-            Get-FunctionRecord -Function $n
-        } elseif ($n -is [FileRedirectionAst]) {
-            $target = $n.Location
+    foreach ($node in $all) {
+        if ($node -is [CommandAst]) {
+            Get-CommandRecord -Command $node
+        } elseif ($node -is [FunctionDefinitionAst]) {
+            Get-FunctionRecord -Function $node
+        } elseif ($node -is [FileRedirectionAst]) {
+            $target = $node.Location
             if (-not ($target -is [VariableExpressionAst] -and $target.VariablePath.UserPath -eq 'null')) {
-                New-StyleRecord -Rule 'StyleFileWrite' -Extent $n.Extent -Detail '> or >>'
+                New-StyleRecord -Rule 'StyleFileWrite' -Extent $node.Extent -Detail '> or >>'
             }
-        } elseif ($n -is [VariableExpressionAst]) {
-            if ($n.VariablePath.UserPath -in 'IsWindows', 'IsLinux', 'IsMacOS', 'IsCoreCLR') {
-                New-StyleRecord -Rule 'StylePlatformCheck' -Extent $n.Extent -Detail $n.VariablePath.UserPath
+        } elseif ($node -is [VariableExpressionAst]) {
+            if ($node.VariablePath.UserPath -in 'IsWindows', 'IsLinux', 'IsMacOS', 'IsCoreCLR') {
+                New-StyleRecord -Rule 'StylePlatformCheck' -Extent $node.Extent -Detail $node.VariablePath.UserPath
             }
-        } elseif ($n -is [ParameterAst]) {
-            if (-not @($n.Attributes | Where-Object { $_ -is [TypeConstraintAst] }).Count) {
-                New-StyleRecord -Rule 'StyleTypedParameter' -Extent $n.Extent
+        } elseif ($node -is [ParameterAst]) {
+            if (-not @($node.Attributes | Where-Object { $_ -is [TypeConstraintAst] }).Count) {
+                New-StyleRecord -Rule 'StyleTypedParameter' -Extent $node.Extent
             }
-        } elseif ($n -is [ExitStatementAst]) {
-            $p = $n.Parent
-            while ($p -and -not ($p -is [FunctionDefinitionAst])) {
-                $p = $p.Parent
+        } elseif ($node -is [ExitStatementAst]) {
+            $parent = $node.Parent
+            while ($parent -and -not ($parent -is [FunctionDefinitionAst])) {
+                $parent = $parent.Parent
             }
-            if ($p) {
-                New-StyleRecord -Rule 'StyleExitInFunction' -Extent $n.Extent
+            if ($parent) {
+                New-StyleRecord -Rule 'StyleExitInFunction' -Extent $node.Extent
             }
-        } elseif ($n -is [CatchClauseAst]) {
-            if ($n.IsCatchAll) {
-                New-StyleRecord -Rule 'StyleTypedCatch' -Extent $n.Extent
+        } elseif ($node -is [CatchClauseAst]) {
+            if ($node.IsCatchAll) {
+                New-StyleRecord -Rule 'StyleTypedCatch' -Extent $node.Extent
             }
-        } elseif ($n -is [AttributeAst]) {
-            if ($n.TypeName.FullName -match '(^|\.)SuppressMessage(Attribute)?$') {
-                New-StyleRecord -Rule 'StyleSuppression' -Extent $n.Extent
+        } elseif ($node -is [AttributeAst]) {
+            if ($node.TypeName.FullName -match '(^|\.)SuppressMessage(Attribute)?$') {
+                New-StyleRecord -Rule 'StyleSuppression' -Extent $node.Extent
             }
-        } elseif ($n -is [ConvertExpressionAst]) {
-            if ($n.Type.TypeName.Name -eq 'void') {
-                New-StyleRecord -Rule 'StyleDiscard' -Extent $n.Extent -Detail '[void]'
+        } elseif ($node -is [ConvertExpressionAst]) {
+            if ($node.Type.TypeName.Name -eq 'void') {
+                New-StyleRecord -Rule 'StyleDiscard' -Extent $node.Extent -Detail '[void]'
             }
-        } elseif ($n -is [AssignmentStatementAst] -and $n.Operator -eq [TokenKind]::PlusEquals) {
-            $name = Get-AssignedName -Left $n.Left
+        } elseif ($node -is [AssignmentStatementAst] -and $node.Operator -eq [TokenKind]::PlusEquals) {
+            $name = Get-AssignedName -Left $node.Left
             if ($name) {
-                $scope = Get-ScopeAst -Node $n
+                $scope = Get-ScopeAst -Node $node
                 $key = '{0}:{1}' -f $scope.Extent.StartOffset, $name.ToLowerInvariant()
                 $set = $null
                 if ($kinds.TryGetValue($key, [ref]$set)) {
                     if ($set.Contains('array')) {
-                        New-StyleRecord -Rule 'StyleArrayAppend' -Extent $n.Extent
-                    } elseif ($set.Contains('string') -and (Test-InLoop -Node $n -Scope $scope)) {
-                        New-StyleRecord -Rule 'StyleStringAppend' -Extent $n.Extent
+                        New-StyleRecord -Rule 'StyleArrayAppend' -Extent $node.Extent
+                    } elseif ($set.Contains('string') -and (Test-InLoop -Node $node -Scope $scope)) {
+                        New-StyleRecord -Rule 'StyleStringAppend' -Extent $node.Extent
                     }
                 }
             }

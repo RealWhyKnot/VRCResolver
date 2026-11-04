@@ -88,8 +88,8 @@ def comment_findings(
     keep: Callable[[Comment], bool],
 ) -> list[Finding]:
     header = [comment for comment in comments if comment.line < first_code]
-    licensed = any(LICENCE.search(comment.text) for comment in header)
-    header_lines = {comment.line for comment in header} if licensed else set[int]()
+    is_licensed = any(LICENCE.search(comment.text) for comment in header)
+    header_lines = {comment.line for comment in header} if is_licensed else set[int]()
     findings: list[Finding] = []
     for comment in comments:
         if comment.line in header_lines:
@@ -117,7 +117,7 @@ def is_python_preamble(comment: Comment) -> bool:
 
 
 def check_rust(path: str, text: str) -> RustReport:
-    scan = Lexer(text, rust=True).run()
+    scan = Lexer(text, is_rust=True).run()
     code = "".join(scan.code)
     findings = comment_findings(path, scan.comments, first_code_line(scan), is_safety_comment)
     findings.extend(
@@ -136,7 +136,7 @@ def check_rust(path: str, text: str) -> RustReport:
 
 
 def check_csharp(path: str, text: str) -> list[Finding]:
-    scan = Lexer(text, rust=False).run()
+    scan = Lexer(text, is_rust=False).run()
     code = "".join(scan.code)
     findings = comment_findings(path, scan.comments, first_code_line(scan), is_never_kept)
     findings.extend(

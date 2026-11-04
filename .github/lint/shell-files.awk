@@ -17,15 +17,15 @@ FNR == NR {
   next
 }
 
-function vendored(path, parts, count, i) {
-  for (i = 1; i <= prefix_count; i++) {
-    if (substr(path, 1, length(prefixes[i])) == prefixes[i]) {
+function is_vendored(path, parts, count, position) {
+  for (position = 1; position <= prefix_count; position++) {
+    if (substr(path, 1, length(prefixes[position])) == prefixes[position]) {
       return 1
     }
   }
   count = split(path, parts, "/")
-  for (i = 1; i < count; i++) {
-    if (parts[i] in names) {
+  for (position = 1; position < count; position++) {
+    if (parts[position] in names) {
       return 1
     }
   }
@@ -34,7 +34,7 @@ function vendored(path, parts, count, i) {
 
 {
   path = $0
-  if (path == "" || vendored(path)) {
+  if (path == "" || is_vendored(path)) {
     next
   }
   base = path

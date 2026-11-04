@@ -38,13 +38,13 @@ class Scan:
 
 
 class Lexer:
-    def __init__(self, text: str, *, rust: bool) -> None:
+    def __init__(self, text: str, *, is_rust: bool) -> None:
         self.text = text
-        self.rust = rust
-        self.scan = Scan(text, list(text), [], [], [0] + [m.end() for m in re.finditer(r"\n", text)])
+        self.is_rust = is_rust
+        self.scan = Scan(text, list(text), [], [], [0] + [match.end() for match in re.finditer(r"\n", text)])
 
     def run(self) -> Scan:
-        self.code(0, inside_interpolation=False)
+        self.code(0, is_inside_interpolation=False)
         return self.scan
 
     def blank(self, start: int, end: int) -> None:
@@ -57,7 +57,7 @@ class Lexer:
         self.scan.comments.append(Comment(self.scan.line_of(start), self.text[start:end]))
         self.blank(start, end)
 
-    def code(self, index: int, *, inside_interpolation: bool) -> int:
+    def code(self, index: int, *, is_inside_interpolation: bool) -> int:
         text = self.text
         size = len(text)
         depth = 0
@@ -75,20 +75,20 @@ class Lexer:
                 self.comment(index, end)
                 index = end
                 continue
-            if not self.rust and char == "#" and self.at_line_start(index):
+            if not self.is_rust and char == "#" and self.at_line_start(index):
                 end = text.find("\n", index)
                 end = size if end < 0 else end
                 self.scan.directives.append(Comment(self.scan.line_of(index), text[index:end]))
                 index = end
                 continue
-            literal_end = self.rust_literal(index) if self.rust else self.csharp_literal(index)
+            literal_end = self.rust_literal(index) if self.is_rust else self.csharp_literal(index)
             if literal_end is not None:
                 index = literal_end
                 continue
             if char == "{":
                 depth += 1
             elif char == "}":
-                if depth == 0 and inside_interpolation:
+                if depth == 0 and is_inside_interpolation:
                     return index
                 depth -= 1
             index += 1
@@ -106,7 +106,7 @@ class Lexer:
             if pair == "/*":
                 depth += 1
                 index += 2
-                if not self.rust:
+                if not self.is_rust:
                     end = text.find("*/", index)
                     return len(text) if end < 0 else end + 2
                 continue
@@ -119,15 +119,15 @@ class Lexer:
             index += 1
         return len(text)
 
-    def quoted(self, start: int, index: int, *, escapes: bool, verbatim: bool) -> int:
+    def quoted(self, start: int, index: int, *, has_escapes: bool, is_verbatim: bool) -> int:
         text = self.text
         while index < len(text):
             char = text[index]
-            if escapes and char == "\\":
+            if has_escapes and char == "\\":
                 index += 2
                 continue
             if char == '"':
-                if verbatim and text[index + 1 : index + 2] == '"':
+                if is_verbatim and text[index + 1 : index + 2] == '"':
                     index += 2
                     continue
                 index += 1
@@ -153,13 +153,13 @@ class Lexer:
         text = self.text
         start = index
         previous = text[index - 1] if index else " "
-        starts_token = not (previous.isalnum() or previous == "_")
-        if starts_token and text[index] in "bc":
+        is_token_start = not (previous.isalnum() or previous == "_")
+        if is_token_start and text[index] in "bc":
             index += 1
-        if starts_token and text[index : index + 1] == "r":
+        if is_token_start and text[index : index + 1] == "r":
             return self.raw_string(start, index + 1)
         if text[index : index + 1] == '"':
-            return self.quoted(start, index + 1, escapes=True, verbatim=False)
+            return self.quoted(start, index + 1, has_escapes=True, is_verbatim=False)
         if text[index : index + 1] == "'":
             return self.char_literal(index)
         return None
@@ -183,12 +183,12 @@ class Lexer:
             return self.char_literal(index)
         cursor = index
         dollars = 0
-        verbatim = False
+        is_verbatim = False
         while cursor < len(text) and text[cursor] in "$@":
             if text[cursor] == "$":
                 dollars += 1
             else:
-                verbatim = True
+                is_verbatim = True
             cursor += 1
         if text[cursor : cursor + 1] != '"':
             return None
@@ -200,19 +200,19 @@ class Lexer:
             self.blank(index, end)
             return end
         if not dollars:
-            return self.quoted(index, cursor + 1, escapes=not verbatim, verbatim=verbatim)
-        return self.interpolated(index, cursor + 1, verbatim=verbatim)
+            return self.quoted(index, cursor + 1, has_escapes=not is_verbatim, is_verbatim=is_verbatim)
+        return self.interpolated(index, cursor + 1, is_verbatim=is_verbatim)
 
-    def interpolated(self, start: int, index: int, *, verbatim: bool) -> int:
+    def interpolated(self, start: int, index: int, *, is_verbatim: bool) -> int:
         text = self.text
         while index < len(text):
             char = text[index]
             pair = text[index : index + 2]
-            if not verbatim and char == "\\":
+            if not is_verbatim and char == "\\":
                 index += 2
                 continue
             if char == '"':
-                if verbatim and pair == '""':
+                if is_verbatim and pair == '""':
                     index += 2
                     continue
                 index += 1
@@ -222,7 +222,7 @@ class Lexer:
                 continue
             if char == "{":
                 self.blank(start, index + 1)
-                index = self.code(index + 1, inside_interpolation=True)
+                index = self.code(index + 1, is_inside_interpolation=True)
                 start = index
                 index += 1
                 continue

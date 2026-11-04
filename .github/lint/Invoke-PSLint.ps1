@@ -108,21 +108,22 @@ function New-LintSetting {
     $settings
 }
 
-function Invoke-Analyzer {
+function Split-RacingRule {
     [CmdletBinding()]
-    [OutputType([object[]])]
+    [OutputType([hashtable])]
     param(
-        [Parameter(Mandatory)][string] $Path,
-        [Parameter(Mandatory)][hashtable] $Settings
+        [Parameter(Mandatory)][hashtable] $Settings,
+        [Parameter(Mandatory)][string[]] $Racing
     )
-    for ($try = 1; ; $try++) {
-        try {
-            return @(Invoke-ScriptAnalyzer -Path $Path -Settings $Settings)
-        } catch [System.NullReferenceException] {
-            if ($try -ge 3) {
-                throw
-            }
+    $main = $Settings.Clone()
+    $main.ExcludeRules = @($Settings.ExcludeRules) + $Racing
+    $main
+    foreach ($rule in $Racing) {
+        $rules = @{}
+        if ($Settings.Rules.ContainsKey($rule)) {
+            $rules[$rule] = $Settings.Rules[$rule]
         }
+        @{ Severity = $Settings.Severity; IncludeRules = @($rule); Rules = $rules }
     }
 }
 
@@ -143,8 +144,11 @@ if (-not $SevenProfile -or -not (Test-Path -LiteralPath $SevenProfile -PathType 
     exit 2
 }
 $windows = 'win-8_x64_10.0.17763.0_5.1.17763.316_x64_4.0.30319.42000_framework'
-$both = New-LintSetting -Folder $lint -Profiles $windows, $SevenProfile -Versions '5.1', '7.4'
-$seven = New-LintSetting -Folder $lint -Profiles $SevenProfile -Versions '7.4'
+$racing = @('PSUseCorrectCasing', 'PSUseCmdletCorrectly')
+$bothSetting = New-LintSetting -Folder $lint -Profiles $windows, $SevenProfile -Versions '5.1', '7.4'
+$sevenSetting = New-LintSetting -Folder $lint -Profiles $SevenProfile -Versions '7.4'
+$both = @(Split-RacingRule -Settings $bothSetting -Racing $racing)
+$seven = @(Split-RacingRule -Settings $sevenSetting -Racing $racing)
 
 $listed = @(& { $ErrorActionPreference = 'Continue'; git -c core.quotepath=off -C $folder ls-files 2>$null })
 if ($LASTEXITCODE -ne 0) {
@@ -158,12 +162,14 @@ foreach ($file in $files) {
     if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
         continue
     }
-    $settings = $both
+    $passes = $both
     if (Test-SevenOnly -Path $full) {
-        $settings = $seven
+        $passes = $seven
     }
-    foreach ($record in Invoke-Analyzer -Path $full -Settings $settings) {
-        $found.Add($record)
+    foreach ($pass in $passes) {
+        foreach ($record in @(Invoke-ScriptAnalyzer -Path $full -Settings $pass)) {
+            $found.Add($record)
+        }
     }
 }
 foreach ($record in $found) {

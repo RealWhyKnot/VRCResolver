@@ -3,15 +3,17 @@ from __future__ import annotations
 import json
 import re
 import tomllib
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from style_scan import Finding
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 LINT_DIR = ".github/lint"
+TEMPLATE_FILE_DEPTH = 3
+MERGE_PROFILE_DEPTH = 4
 ROOT_ONLY = frozenset(
     {
         ".editorconfig",
@@ -78,17 +80,14 @@ PROJECT_DOWNGRADE = re.compile("|".join(PROJECT_DOWNGRADES), re.IGNORECASE)
 
 
 def read_toml(path: Path) -> dict[str, object]:
-    try:
-        return tomllib.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return {}
+    return tomllib.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def read_json(path: Path) -> object:
-    try:
-        loaded: object = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    loaded: object = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(loaded, dict):
+        message = f"{path}: expected a JSON object"
+        raise TypeError(message)
     return loaded
 
 
@@ -110,7 +109,8 @@ def package_problem(path: Path, _root: Path) -> str | None:
 
 def workspace_has_lints(folder: Path, root: Path) -> bool:
     while True:
-        workspace = read_toml(folder / "Cargo.toml").get("workspace")
+        manifest = folder / "Cargo.toml"
+        workspace = read_toml(manifest).get("workspace") if manifest.is_file() else None
         if isinstance(workspace, dict):
             return "lints" in workspace
         if folder in {root, folder.parent}:
@@ -158,15 +158,45 @@ def misplaced(path: str, root: Path) -> str | None:
         return f"Unity lint projects belong in {LINT_DIR}/unity/ (GEN-5)"
     if NEVER.match(name):
         return "lint or format config the baseline doesn't use (GEN-5)"
-    root_only = name in ROOT_ONLY or ROOT_ONLY_PATTERN.match(name) is not None
-    if folder and root_only and not beside_unity_projects(path, root):
+    is_root_only = name in ROOT_ONLY or ROOT_ONLY_PATTERN.match(name) is not None
+    if folder and is_root_only and not beside_unity_projects(path, root):
         return "nested lint or format config overrides the baseline (GEN-5)"
     if folder not in {"", LINT_DIR} and name in LINT_ONLY:
         return "nested lint or format config overrides the baseline (GEN-5)"
     return None
 
 
+def config_root(path: str, root: Path) -> Path:
+    parts = path.split("/")
+    distribution = root / "lint"
+    source = distribution / "common" / LINT_DIR / Path(__file__).name
+    if (
+        len(parts) < TEMPLATE_FILE_DEPTH
+        or parts[0] != "lint"
+        or not (distribution / "Install-Lint.ps1").is_file()
+        or not source.is_file()
+        or source.read_bytes() != Path(__file__).read_bytes()
+    ):
+        return root
+    template = distribution / parts[1]
+    manifest = template / "install.psd1"
+    if len(parts) > MERGE_PROFILE_DEPTH and parts[2] == "merge" and manifest.is_file():
+        uses = re.findall(r"\bUse\s*=\s*'([^']+)'", manifest.read_text(encoding="utf-8-sig"))
+        if any(Path(use).parent.as_posix() == "/".join(parts[2:-1]) for use in uses):
+            return root.joinpath(*parts[:-1])
+    return template
+
+
 def check_config(path: str, root: Path) -> list[Finding]:
+    try:
+        context = config_root(path, root)
+        relative = (root / path).relative_to(context).as_posix()
+        return [Finding(path, finding.line, finding.message) for finding in check_effective_config(relative, context)]
+    except (OSError, ValueError, TypeError) as error:
+        return [Finding(path, 0, f"can't read config: {error}. Fix the file and run the check again (GEN-19)")]
+
+
+def check_effective_config(path: str, root: Path) -> list[Finding]:
     name = path.rsplit("/", 1)[-1]
     problem = misplaced(path, root)
     if problem:

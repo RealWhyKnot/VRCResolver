@@ -1,17 +1,21 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
+import logging
 import re
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from style_configs import LINT_DIR, check_config
 from style_scan import Finding
 from style_sources import check_generated, check_source
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 VENDORED_FILE = "vendored-paths.txt"
 LOCAL_FILE = "vendored-paths.local.txt"
@@ -90,7 +94,13 @@ def check_repo(root: Path, vendored: VendoredPaths) -> list[Finding]:
     return sorted(findings)
 
 
+def report_unhandled(error_type: type[BaseException], error: BaseException, traceback: TracebackType | None) -> None:
+    logging.getLogger(__name__).error("Style check failed", exc_info=(error_type, error, traceback))
+    sys.stderr.write("Style check failed; fix the error above and run it again.\n")
+
+
 def main() -> int:
+    sys.excepthook = report_unhandled
     parser = argparse.ArgumentParser(
         description="Check a repo for comments, lint suppressions, long files and nested lint configs.",
     )
