@@ -27,6 +27,12 @@ esac
 if [[ ${message_source} != "commit" ]]; then
   subject="$(grep -m1 -vE '^(#|$)' "${message_file}" || true)"
   if printf '%s\n' "${subject}" | grep -qE "${STAMP_PATTERN}"; then
+    for marker in rebase-merge rebase-apply CHERRY_PICK_HEAD; do
+      marker_path="$(git rev-parse --git-path "${marker}" 2>/dev/null || true)"
+      if [[ -n ${marker_path} && -e ${marker_path} ]]; then
+        exit 0
+      fi
+    done
     die 'subject already contains a build-version stamp.'
   fi
 fi
