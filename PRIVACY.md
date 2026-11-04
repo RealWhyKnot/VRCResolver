@@ -1,6 +1,6 @@
 # Privacy policy
 
-**Effective 15 October 2026.**
+**Effective 4 November 2026.**
 
 The live version is at [vrcresolver.com/privacy](https://vrcresolver.com/privacy). This copy is
 updated automatically when the live version changes.
@@ -103,12 +103,13 @@ judgement about you.
 
 <a id="s6"></a>
 
-- **Application logs.** The active log file rotates after 7 days. Rotated files are compressed and
-  deleted after 30 days. After that the entries are gone, including the IP addresses and URLs in
-  them.
-- **Caches.** Short-lived and technical. A resolved URL is cached for about 30 seconds, manifest
-  bodies for about 20 seconds, and streaming session state for an hour or two. Transcoded segments
-  are written to disk only while a stream is being watched, and are evicted under disk pressure.
+- **Application logs.** Logs are kept in memory on the server and encrypted every minute with a key
+  the server doesn't hold. The encrypted logs are deleted after 30 days, on the server and on our
+  own copy. After that the entries are gone, including the IP addresses and URLs in them.
+- **Caches.** Short-lived and technical. A resolved URL is cached for up to 15 minutes, a URL with
+  nothing playable for an hour, manifest bodies for about 20 seconds, and streaming session state
+  for up to two hours. Transcoded segments are written to disk only while a stream is being watched,
+  and are evicted under disk pressure.
 - **Browser streams.** Kept in memory only and never written to disk. While you're live, the server
   holds the last few segments, about 12 seconds of video, so viewers can catch up, and drops older
   ones as new ones arrive. When the stream ends, the rest is dropped within a minute. Anyone who has
@@ -177,8 +178,9 @@ We'll tell you the hosting locations on request at
 personal information. If you believe a child has provided personal information, email
 contact@whyknot.dev and we'll delete it.
 
-**Security.** We use HTTPS throughout, keep logs on access-restricted hosts, and hold the minimum
-the Service needs to work. No system is completely secure, and we can't guarantee absolute security.
+**Security.** We use HTTPS throughout, keep logs encrypted on access-restricted hosts, and hold the
+minimum the Service needs to work. No system is completely secure, and we can't guarantee absolute
+security.
 
 ## 11. Changes and contact
 
