@@ -5,38 +5,34 @@
 The live version is at [vrcresolver.com/privacy](https://vrcresolver.com/privacy). This copy is
 updated automatically when the live version changes.
 
-This policy explains what VRCResolver collects, why, and how long it's kept. It covers
+This policy covers what VRCResolver collects, why, and how long it's kept. It applies to
 vrcresolver.com, the resolver and media proxy API, the peer relay, browser streaming, and the
-VRCResolver desktop client. The operator is WhyKnot. Contact:
+VRCResolver desktop client. VRCResolver is run by WhyKnot, and you can reach us at
 [contact@whyknot.dev](mailto:contact@whyknot.dev).
 
-The short version, before the detail:
+In short:
 
-- There are no accounts. You never give us a name, an email address, or a password.
+- There are no accounts. You don't give us a name, an email address or a password.
 - We don't use advertising, analytics, tracking pixels or third-party trackers.
 - We don't sell your personal information, and we don't share it for cross-context behavioural
-  advertising. Both of those terms are used in the sense the California Consumer Privacy Act gives
-  them.
-- Your resolve history never leaves your browser.
+  advertising. We mean both terms the way the California Consumer Privacy Act defines them.
+- Your resolve history is stored only in your browser.
 
 ## 1. Data we collect automatically
 
 <a id="s1"></a>
 
-Running a web service means handling requests, and requests contain information whether or not
-anyone wants them to:
-
-- **Your IP address.** Read from the `X-Forwarded-For` header, which our proxy layer fills in from
-  Cloudflare's `CF-Connecting-IP`. It's used to apply rate limits and to identify and block abuse,
-  and it appears in server logs.
+- **Your IP address.** We read it from the `X-Forwarded-For` header, which our proxy fills in from
+  Cloudflare's `CF-Connecting-IP`. We use it for rate limits and to find and block abuse, and it
+  shows up in server logs.
 - **Ordinary request metadata.** Timestamp, path, method, response status, response size, user
   agent, and referrer.
-- **The URLs you submit.** A resolve request is a URL, and we have to receive it to resolve it. It
-  may appear in application logs alongside the target player and the maximum height requested.
-- **Correlation identifiers.** Random per-request IDs used to tie the stages of one resolve together
-  when something fails. They aren't tied to you and aren't reused.
-- **Approximate location.** Cloudflare, which is in front of the Service, infers a country from your
-  IP address as part of routing and abuse prevention.
+- **The URLs you submit.** We can't resolve a URL without receiving it. It may show up in
+  application logs along with the target player and the maximum height you asked for.
+- **Correlation identifiers.** Random IDs, one per request, that let us follow a single resolve
+  through each stage when something fails. They aren't linked to you and aren't reused.
+- **Approximate location.** Cloudflare, which runs in front of the Service, works out a country from
+  your IP address for routing and abuse prevention.
 
 We don't use cookies, fingerprinting, or any other technique to build a profile of you, and we don't
 link requests across sessions.
@@ -48,23 +44,23 @@ link requests across sessions.
 The desktop client opens a WebSocket to the resolver and sends:
 
 - the URL to resolve, the target player (`avpro` or `unity`), and a maximum height;
-- occasional playback feedback after a video plays or fails, which shows us failure patterns;
-- its version, which tells the server which protocol features it supports.
+- occasional playback feedback after a video plays or fails, which we use to spot patterns in
+  failures;
+- its version, which tells the server what protocol features it supports.
 
-Playback feedback and failure reports are kept narrow on purpose. A report contains only a domain, a
-failure kind from a fixed list, and a player name. The server rejects any report containing
-something that looks like a file path, a home directory, or an IP address. It doesn't strip those
-out and accept the rest. If a future client version ever started leaking that kind of data, its
-reports would be rejected with an error instead of being accepted.
+A playback or failure report holds only a domain, a failure type from a fixed list, and a player
+name. If any part of a report looks like a file path, a home directory or an IP address, the server
+rejects the whole report with an error. That also covers a future client version that starts sending
+that kind of data by mistake.
 
-The client writes its own logs on your machine, in `%LOCALAPPDATA%Low\vrcresolver\logs\`. Those are
-local. They're never sent to us, and the uninstaller deletes them.
+The client keeps its own logs on your machine, in `%LOCALAPPDATA%Low\vrcresolver\logs\`, and doesn't
+send them to us. The uninstaller deletes them.
 
 ## 3. Data kept on your device
 
 <a id="s3"></a>
 
-These are kept in your browser's local storage and are never sent to us:
+Your browser keeps these in local storage and doesn't send them to us:
 
 - your resolve history on the website, including titles and URLs;
 - player volume and playback rate;
@@ -77,45 +73,46 @@ deletes `%LOCALAPPDATA%Low\vrcresolver\`.
 
 <a id="s4"></a>
 
-We don't set any cookies, including analytics, advertising and third-party ones. That's why there's
+We don't set any cookies, analytics, advertising and third-party ones included. That's why there's
 no consent banner.
 
 ## 5. Why we process this, and on what basis
 
 <a id="s5"></a>
 
-- **Running the Service.** Resolving links, proxying media, and delivering streams can't happen
-  without receiving the request.
-- **Abuse prevention and rate limiting.** IP addresses are the only workable signal when there are
-  no accounts.
-- **Diagnosis.** Logs are how a broken resolve gets fixed. Most bugs are visible only in the
-  sequence of one failed request.
+- **Running the Service.** We can't resolve a link, proxy media or deliver a stream without
+  receiving the request.
+- **Abuse prevention and rate limiting.** Without accounts, an IP address is the only thing we can
+  rate-limit or block by.
+- **Diagnosis.** We fix broken resolves from the logs, since most bugs only show up in the steps of
+  a single failed request.
 - **Capacity planning and security.**
 
 For users in the European Economic Area and the United Kingdom, our legal basis for logging,
-security, and abuse prevention is legitimate interests under Article 6(1)(f) of the GDPR, being our
-interest in keeping a free service running and available. We don't process special-category data,
-and we don't carry out automated decision-making with legal or similarly significant effects. Rate
-limiting is applied to an address, not to a person. It limits request volume and doesn't make any
-judgement about you.
+security, and abuse prevention is legitimate interests under Article 6(1)(f) of the GDPR, namely our
+interest in keeping a free service up and running. We don't process special-category data, and we
+don't carry out automated decision-making with legal or similarly significant effects. A rate limit
+only counts how many requests come from an IP address.
 
 ## 6. How long it's kept
 
 <a id="s6"></a>
 
-- **Application logs.** Logs are kept in memory on the server and encrypted every minute with a key
-  the server doesn't hold. The encrypted logs are deleted after 30 days, on the server and on our
-  own copy. After that the entries are gone, including the IP addresses and URLs in them.
-- **Caches.** Short-lived and technical. A resolved URL is cached for up to 15 minutes, a URL with
-  nothing playable for an hour, manifest bodies for about 20 seconds, and streaming session state
-  for up to two hours. Transcoded segments are written to disk only while a stream is being watched,
-  and are evicted under disk pressure.
-- **Browser streams.** Kept in memory only and never written to disk. While you're live, the server
-  holds the last few segments, about 12 seconds of video, so viewers can catch up, and drops older
-  ones as new ones arrive. When the stream ends, the rest is dropped within a minute. Anyone who has
-  the link can watch while it's live.
-- **Relayed files.** Never stored. The relay streams chunks out of the sharing browser on demand and
-  forwards them without writing them to server storage, and closing the tab ends the share.
+- **Application logs.** Logs are kept in the server's memory and encrypted every minute. The key
+  that decrypts them isn't on the server. Until an hour is over, the server can still read that
+  hour's logs; after that only the encrypted copy is left. We delete the encrypted logs after 30
+  days, on the server and on our own copy, along with the IP addresses and URLs in them.
+- **Caches.** Cached data is technical and short-lived. A resolved URL is cached for up to 15
+  minutes, a URL with nothing playable for an hour, stream manifests for about 20 seconds, and
+  streaming session state for up to two hours. Transcoded segments only go to disk while someone is
+  watching the stream, and they're removed if the disk starts running out of space.
+- **Browser streams.** These are kept in memory and aren't written to disk. While you're live, the
+  server keeps the last 12 seconds or so of video for viewers who are catching up, and drops older
+  segments as new ones come in. Whatever's left is dropped within a minute of the stream ending.
+  Anyone with the link can watch while you're live.
+- **Relayed files.** We don't store these. The relay pulls chunks from the sharing browser as
+  they're requested and passes them on without saving them on the server. Closing the tab ends the
+  share.
 
 ## 7. Who we disclose it to
 
@@ -124,25 +121,22 @@ judgement about you.
 We don't sell personal information or share it for advertising. We don't work with data brokers,
 advertising partners or analytics vendors.
 
-Data is handled by the infrastructure the traffic passes through: our hosting providers, and
-Cloudflare as the network and security layer in front of the Service. They process it to deliver the
-traffic, not for their own purposes.
+Our hosting providers and Cloudflare, which handles the network and security in front of the
+Service, see data as it passes through them. They only process it to deliver the traffic.
 
-We will disclose information where we're legally required to, and where we believe in good faith
-it's necessary to protect the Service, our rights, or someone's safety.
+We'll disclose information where we're legally required to, and where we believe in good faith it's
+necessary to protect the Service, our rights, or someone's safety.
 
-One thing here works the other way from most services. When the proxy fetches a video, the upstream
-host sees our server's address, not yours. Proxying your traffic is what the Service is for, and we
-consider the reduced exposure to upstream hosts a feature.
+When the proxy fetches a video, the site hosting it only sees our server's address.
 
 ## 8. Third parties your browser contacts directly
 
 <a id="s8"></a>
 
-Your browser connects to these directly, so they receive your IP address and their own policies
-apply:
+Your browser connects to these directly. They receive your IP address, and their own privacy
+policies apply.
 
-- **Cloudflare.** Fronts the Service. See
+- **Cloudflare.** Runs in front of the Service. See
   [cloudflare.com/privacypolicy](https://www.cloudflare.com/privacypolicy/).
 
 ## 9. Your rights
@@ -152,47 +146,44 @@ apply:
 Depending on where you live, you may have the right to access, correct, delete, or receive a copy of
 your personal information, to object to or restrict processing, and to complain to a data protection
 authority. Where the CCPA applies, you also have the right to know, to delete, to correct, and to
-opt out of sale or sharing. We don't sell or share, and there's nothing to opt out of. We will never
-discriminate against you for exercising a right.
+opt out of sale or sharing. We don't sell or share personal information. We won't discriminate
+against you for using any of these rights.
 
 Email [contact@whyknot.dev](mailto:contact@whyknot.dev) to exercise any of these.
 
-There's a limit to what we can do here. Without accounts, nothing we hold is tied to an identity. If
-you ask for a copy of your data, the truthful answer is usually that we can't find it. The only key
-is an IP address you'd have to tell us, and matching on that alone would mean handing you log
-entries that might belong to someone else who shared that address. Where we can identify records, we
-act. Where we can't, we'll tell you that plainly. In practice the retention schedule in section 6
-handles it: everything ages out within 30 days regardless.
+Since there are no accounts, the data we hold isn't tied to a person, and if you ask for a copy of
+yours we usually can't find any. The only thing we could search by is an IP address you give us, and
+matching on that alone might turn up log entries from someone else who used the same address. If we
+can identify your records, we'll act on your request, and if we can't, we'll tell you. Logs are
+deleted after 30 days, as section 6 describes.
 
 ## 10. Where processing happens, children, and security
 
 <a id="s10"></a>
 
-**Location.** The Service runs on two nodes, one serving traffic routed as United States and rest of
-world, and one serving traffic routed as European. Using the Service means data is sent to whichever
-node serves you, and between the two where they coordinate, which may be an international transfer.
-We'll tell you the hosting locations on request at
-[contact@whyknot.dev](mailto:contact@whyknot.dev).
+**Location.** The Service runs on two servers, one for traffic routed to the United States and the
+rest of the world, and one for traffic routed to Europe. Your data goes to whichever one serves you,
+and between the two when they coordinate, which can count as an international transfer. Email
+[contact@whyknot.dev](mailto:contact@whyknot.dev) if you'd like to know where they're hosted.
 
 **Children.** The Service isn't directed at children under 13, and we don't knowingly collect their
-personal information. If you believe a child has provided personal information, email
+personal information. If you think a child has given us personal information, email
 contact@whyknot.dev and we'll delete it.
 
-**Security.** We use HTTPS throughout, keep logs encrypted on access-restricted hosts, and hold the
-minimum the Service needs to work. No system is completely secure, and we can't guarantee absolute
-security.
+**Security.** Connections to the Service use HTTPS. We keep logs encrypted on servers with
+restricted access and hold only what the Service needs to work. We can't promise that any system is
+completely secure, ours included.
 
 ## 11. Changes and contact
 
 <a id="s11"></a>
 
-We may update this policy. The effective date at the top changes when we do, and the current version
-is always at https://vrcresolver.com/privacy. Material changes will be noted there. Continued use
-after a change means you accept it.
+We may update this policy. When we do, the date at the top changes, and the current version is at
+https://vrcresolver.com/privacy, where we'll point out any significant changes. If you keep using
+the Service after a change, you're accepting it.
 
-For personal-data requests and anything involving your own information, email
-[contact@whyknot.dev](mailto:contact@whyknot.dev). Please don't put personal information in a public
-issue. For bugs, questions, and anything that isn't about your own data, the [issue
-tracker](https://github.com/RealWhyKnot/VRCResolver/issues) is usually faster.
+Email [contact@whyknot.dev](mailto:contact@whyknot.dev) about anything involving your own
+information, and please don't put personal information in a public issue. For bugs and other
+questions, the [issue tracker](https://github.com/RealWhyKnot/VRCResolver/issues) is usually faster.
 
 See also the [Terms of Service](TERMS.md).
