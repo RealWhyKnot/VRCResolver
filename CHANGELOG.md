@@ -16,6 +16,8 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **deps:** Bump rustls from 0.23.45 to 0.23.46 (#79) (f70544e)
 - **deps:** Bump zip from 2.4.2 to 9.0.3 (#80) (7567526)
 - **deps:** Update crates and ruff (e04cfe8)
+- **deps:** Update cc, flate2 and zip (620471e)
+- **deps:** Update winnow (64a657d)
 
 ### Fixed
 - **uninstall:** Only delete files the app installed (f66a7fa)
