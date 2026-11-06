@@ -57,10 +57,12 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Set up PSScriptAnalyzer
+        uses: RealWhyKnot/workflows/setup-pssa@v1
+
       - name: Install lint tools
         shell: pwsh
         run: |
-          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
           python -m pip install --disable-pip-version-check ruff==0.17.3
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           choco install shellcheck shfmt --yes --no-progress
