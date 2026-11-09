@@ -19,13 +19,13 @@
   <a href=".github/SECURITY.md">Security</a>
 </p>
 
-VRChat plays videos through yt-dlp. Stock yt-dlp is slow, breaks whenever YouTube changes something, and returns URLs that AVPro blocks in public worlds. VRCResolver replaces VRChat's `Tools/yt-dlp.exe` with a patched build that resolves videos through vrcresolver.com and serves them from a local address AVPro trusts. If anything fails, it falls back to VRChat's original yt-dlp. Playback is never worse than stock.
+VRChat plays videos through yt-dlp. Stock yt-dlp is slow, breaks whenever YouTube changes something, and returns URLs that AVPro blocks in public worlds. VRCResolver replaces VRChat's `Tools/yt-dlp.exe` with a patched build that resolves videos through vrcresolver.com and serves them from a local address AVPro trusts. If the server can't resolve a YouTube link, the client asks YouTube itself, and if that fails too it falls back to VRChat's original yt-dlp. Playback is never worse than stock.
 
 Formerly WKVRCProxy.
 
 ## What you get
 
-Streams come from `localhost.youtube.com:{port}`, which is on AVPro's trust list, and that's what makes them play in public worlds. Videos are resolved on the server instead of your PC. Regional blocks and rate limits on your connection don't apply, and the server updates its yt-dlp nightly. A new URL takes 2-3 seconds and a repeat about 20 ms. You get 1080p HLS instead of 360p mp4. Any failure hands the URL to VRChat's original yt-dlp.
+Streams come from `localhost.youtube.com:{port}`, which is on AVPro's trust list, and that's what makes them play in public worlds. Videos are resolved on the server instead of your PC. Regional blocks and rate limits on your connection don't apply, and the server updates its yt-dlp nightly. A new URL takes 2-3 seconds and a repeat about 20 ms. You get 1080p HLS instead of 360p mp4. When the server can't resolve a YouTube link, the client resolves it on your PC. In our test that took about half a second, where VRChat's yt-dlp took about three. Any failure after that hands the URL to VRChat's original yt-dlp.
 
 It doesn't bypass DRM, host any content or log in to YouTube.
 

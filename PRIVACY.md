@@ -129,6 +129,10 @@ necessary to protect the Service, our rights, or someone's safety.
 
 When the proxy fetches a video, the site hosting it only sees our server's address.
 
+If our server can't resolve a YouTube link, the desktop client asks YouTube for it from your PC, and
+VRChat's own yt-dlp does the same if that fails too. In those cases YouTube sees your IP address, as
+it would without VRCResolver.
+
 ## 8. Third parties your browser contacts directly
 
 <a id="s8"></a>
