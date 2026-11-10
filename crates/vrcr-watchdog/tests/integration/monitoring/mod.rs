@@ -261,6 +261,8 @@ mod contracts_cases;
 
 mod heartbeat_cases;
 
+mod local_cases;
+
 mod logs_cases;
 
 mod performance_cases;

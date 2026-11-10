@@ -4,6 +4,7 @@ pub mod display;
 pub mod health;
 pub mod hosts;
 pub mod ipc;
+pub mod local;
 pub mod maintenance;
 pub mod mesh;
 pub mod monitoring;

@@ -101,6 +101,17 @@ impl<M: Mesh> Ipc<M> {
                 );
             }
             if paused {
+                if let Some(frame) = self.local_frame(&req, &id, deadline).await {
+                    let _ = framing::write_frame(pipe, &frame).await;
+                    self.ux.write(
+                        Component::Ipc,
+                        &format!(
+                            "local resolve (resolver paused) id={id}{} host={host}",
+                            cid_suffix(cid.as_deref())
+                        ),
+                    );
+                    return;
+                }
                 framing::write_fallback(pipe, &id, og_reason::RESOLVER_UNHEALTHY).await;
                 self.ux.write(
                     Component::Ipc,
@@ -118,6 +129,7 @@ impl<M: Mesh> Ipc<M> {
         let mut outcome = "?".to_owned();
         let mut server_reason: Option<String> = None;
         let mut via_cache = false;
+        let mut via_local = false;
         let mut failure: Option<Failure> = None;
 
         let cached = if is_probe {
@@ -174,7 +186,14 @@ impl<M: Mesh> Ipc<M> {
                 .await
             {
                 Ok(result) => {
-                    if framing::write_frame(pipe, &result.frame).await.is_err() {
+                    let local = if result.action == action::FALLBACK_NATIVE {
+                        self.local_frame(&req, &id, deadline).await
+                    } else {
+                        None
+                    };
+                    via_local = local.is_some();
+                    let frame = local.as_deref().unwrap_or(&result.frame);
+                    if framing::write_frame(pipe, frame).await.is_err() {
                         self.log
                             .line(&format!("[ipc] wrapper left before the reply id={id}"));
                     }
@@ -191,7 +210,18 @@ impl<M: Mesh> Ipc<M> {
         let fail_reason = failure.as_ref().map(Failure::reason);
         if let Some(reason) = fail_reason {
             outcome = format!("{}/{reason}", action::FALLBACK_NATIVE);
-            framing::write_fallback(pipe, &id, reason).await;
+            let local = if matches!(failure, Some(Failure::Internal)) {
+                self.local_frame(&req, &id, deadline).await
+            } else {
+                None
+            };
+            match local {
+                Some(frame) => {
+                    via_local = true;
+                    let _ = framing::write_frame(pipe, &frame).await;
+                }
+                None => framing::write_fallback(pipe, &id, reason).await,
+            }
             (self.report_fallback)(&req, reason);
         } else if let Some(reason) = outcome
             .strip_prefix(action::FALLBACK_NATIVE)
@@ -201,7 +231,14 @@ impl<M: Mesh> Ipc<M> {
             (self.report_fallback)(&req, reason);
         }
 
-        let (status, reason_for_line) = if outcome == action::RESOLVED {
+        let (status, reason_for_line) = if via_local {
+            (
+                ResolveStatus::Local,
+                fail_reason
+                    .map(str::to_owned)
+                    .or_else(|| server_reason.clone()),
+            )
+        } else if outcome == action::RESOLVED {
             (ResolveStatus::Resolved, None)
         } else if let Some(r) = fail_reason {
             (ResolveStatus::Failed, Some(r.to_owned()))
@@ -254,9 +291,72 @@ impl<M: Mesh> Ipc<M> {
             sanitize_for_console(&outcome, 48),
             sanitize_for_console(server_reason.as_deref().or(fail_reason).unwrap_or_default(), 48),
             key_player.unwrap_or("unknown"),
-            if via_cache { " via=cache" } else { "" },
+            if via_cache {
+                " via=cache"
+            } else if via_local {
+                " via=local"
+            } else {
+                ""
+            },
             elapsed.as_millis()
         ));
+    }
+
+    async fn local_frame(
+        &self,
+        req: &ResolveRequest,
+        id: &str,
+        deadline: Instant,
+    ) -> Option<Vec<u8>> {
+        let step = self.local.as_deref()?;
+        if req.player != Some(Player::AvPro) || !step.covers(&req.url) {
+            return None;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining < local::MIN_BUDGET {
+            self.log
+                .line(&format!("[local] skipped id={id} reason=no_time"));
+            return None;
+        }
+        let budget = (remaining - local::BUDGET_RESERVE).min(local::MAX_BUDGET);
+        let started = Instant::now();
+        let ask = Ask {
+            url: &req.url,
+            max_height: req.max_height,
+        };
+        let attempt = tokio::time::timeout(budget, step.play(ask)).await;
+        let elapsed_ms = started.elapsed().as_millis();
+        let play = match attempt {
+            Ok(Ok(play)) => play,
+            Ok(Err(reason)) => {
+                self.log.line(&format!(
+                    "[local] skipped id={id} reason={reason} elapsed_ms={elapsed_ms}"
+                ));
+                return None;
+            }
+            Err(_) => {
+                self.log.line(&format!(
+                    "[local] skipped id={id} reason=timeout elapsed_ms={elapsed_ms}"
+                ));
+                return None;
+            }
+        };
+        self.log.line(&format!(
+            "[local] resolved id={id} height={} elapsed_ms={elapsed_ms}",
+            play.height
+        ));
+        let frame = ResolveResponse {
+            action: action::RESOLVED.to_owned(),
+            id: id.to_owned(),
+            url: Some(play.url),
+            engine: Some(local::ENGINE.to_owned()),
+            protocol: Some("hls".to_owned()),
+            video_codec: Some("h264".to_owned()),
+            audio_codec: play.audio_codec.map(|_| "aac".to_owned()),
+            resolved_height: i32::try_from(play.height).ok(),
+            ..ResolveResponse::default()
+        };
+        serde_json::to_vec(&frame).ok()
     }
 
     pub(super) async fn resolve_with_retries(

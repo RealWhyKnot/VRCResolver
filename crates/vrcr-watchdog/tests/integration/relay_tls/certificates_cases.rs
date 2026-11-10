@@ -278,6 +278,7 @@ async fn relay_serves_https_with_the_generated_cert() {
         activity: Arc::new(RelayActivity::new()),
         hitch: Arc::new(HitchDetector::new()),
         stats: Arc::new(Stats::new(SystemTime::now())),
+        manifests: Arc::default(),
         now: clock::system(),
         ux: Ux::new(Box::new(out.clone()), Style::plain(), String::new),
         log: Log::disabled(),

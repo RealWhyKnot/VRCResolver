@@ -180,6 +180,21 @@ fn resolve_outcome_lines_keep_their_columns() {
         )
     );
 
+    let local = Outcome {
+        reason: Some("all_configs_failed"),
+        ..outcome(ResolveStatus::Local)
+    };
+    let (c, line) = console::resolve_outcome_line("*", &local);
+    assert_eq!(c, Color::Green);
+    assert_eq!(
+        line,
+        format!(
+            "* [resolve] OK  local     youtube.com{}avpro{}1.2s   all_configs_failed",
+            sp(24),
+            sp(13)
+        )
+    );
+
     let (c, line) = console::resolve_outcome_line("*", &outcome(ResolveStatus::Fallback));
     assert_eq!(c, Color::Yellow);
     assert!(line.starts_with("* [resolve] !!  fallback  "));

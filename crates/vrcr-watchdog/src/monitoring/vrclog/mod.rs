@@ -20,6 +20,8 @@ use vrcr_shared::wire::feedback;
 use crate::clock::Now;
 use crate::health::{self, HealthGate, Transition};
 use crate::ipc::{Feedback, Mesh};
+use crate::local;
+use crate::local::store::Manifests;
 use crate::monitoring::audio::{self, AudioCheck, NO_SOUND_FIX};
 use crate::og_hint::OgFallbackHint;
 use crate::relay::RelayActivity;
@@ -72,6 +74,7 @@ pub struct MonitorDeps {
     pub cache: Option<Arc<ResolveCache>>,
     pub og_hint: Option<Arc<OgFallbackHint>>,
     pub health: Option<Arc<HealthGate>>,
+    pub local: Option<Arc<Manifests>>,
     pub relay_wedge: Option<RelayWedge>,
     pub on_new_session: Option<Box<dyn Fn() + Send + Sync>>,
     pub audio: Box<dyn Fn() -> AudioCheck + Send + Sync>,
@@ -93,6 +96,7 @@ impl MonitorDeps {
             cache: None,
             og_hint: None,
             health: None,
+            local: None,
             relay_wedge: None,
             on_new_session: None,
             audio: Box::new(audio::check_default),
@@ -280,6 +284,15 @@ impl VrcLogMonitor {
     }
 
     fn confirm_playback(&self, url: &str) {
+        if local::is_play_url(url) {
+            if let Some(plays) = &self.deps.local {
+                plays.confirmed(url);
+            }
+            return;
+        }
+        if let Some(plays) = &self.deps.local {
+            plays.played_elsewhere();
+        }
         let Some(gate) = &self.deps.health else {
             return;
         };

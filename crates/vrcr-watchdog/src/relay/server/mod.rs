@@ -8,10 +8,10 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::StreamExt;
-use http::header::{ALLOW, CONTENT_LENGTH, CONTENT_TYPE, HOST, HeaderValue, ORIGIN};
+use http::header::{ALLOW, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HOST, HeaderValue, ORIGIN};
 use http::{Method, Request, Response, StatusCode};
 use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, Empty, StreamBody};
+use http_body_util::{BodyExt, Empty, Full, StreamBody};
 use hyper::body::{Frame, Incoming};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -35,6 +35,7 @@ use super::short_url;
 use super::targets::{self, TargetResolver};
 use super::upstream::{BodyStream, Upstream, UpstreamRequest, UpstreamResponse};
 use crate::clock::Now;
+use crate::local::store::Manifests;
 use crate::stats::Stats;
 
 pub const MAX_IN_FLIGHT: usize = 128;
@@ -68,6 +69,7 @@ pub struct RelayDeps {
     pub activity: Arc<RelayActivity>,
     pub hitch: Arc<HitchDetector>,
     pub stats: Arc<Stats>,
+    pub manifests: Arc<Manifests>,
     pub now: Now,
     pub ux: Ux,
     pub log: Log,
@@ -332,6 +334,21 @@ async fn handle(
         inner.diag_verbose(&req_id, "-> 404 (path mismatch)");
         return status_only(StatusCode::NOT_FOUND);
     }
+    if let Some(token) = crate::local::token(&path) {
+        let manifest = inner.deps.manifests.get(token);
+        inner.diag_verbose(
+            &req_id,
+            if manifest.is_some() {
+                "-> 200 (local manifest)"
+            } else {
+                "-> 404 (local manifest gone)"
+            },
+        );
+        return match manifest {
+            Some(body) => local_manifest(body, method == Method::HEAD),
+            None => status_only(StatusCode::NOT_FOUND),
+        };
+    }
     let policy = inner
         .deps
         .policy
@@ -465,6 +482,24 @@ impl ManifestSink for ChannelSink {
             Ok(Ok(())) => Ok(()),
         }
     }
+}
+
+fn local_manifest(manifest: String, is_head: bool) -> Response<Body> {
+    let length = HeaderValue::from(manifest.len());
+    let body = if is_head {
+        Empty::new().map_err(never).boxed()
+    } else {
+        Full::new(Bytes::from(manifest)).map_err(never).boxed()
+    };
+    let mut resp = Response::new(body);
+    let headers = resp.headers_mut();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static(crate::local::MANIFEST_TYPE),
+    );
+    headers.insert(CONTENT_LENGTH, length);
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    resp
 }
 
 fn status_only(status: StatusCode) -> Response<Body> {

@@ -404,4 +404,6 @@ mod events_cases;
 
 mod health_cases;
 
+mod local_cases;
+
 mod requests_cases;

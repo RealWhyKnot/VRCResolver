@@ -4,6 +4,7 @@ mod common;
 mod app;
 mod hosts;
 mod ipc_server;
+mod local;
 mod maintenance;
 mod mesh_live;
 mod mesh_units;

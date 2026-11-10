@@ -63,6 +63,7 @@ impl Component {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolveStatus {
     Resolved,
+    Local,
     Fallback,
     Failed,
     Unexpected,
@@ -366,6 +367,7 @@ pub fn resolve_outcome_line(bullet: &str, o: &Outcome<'_>) -> (Color, String) {
             "OK",
             if o.via_cache { "cached" } else { "resolved" },
         ),
+        ResolveStatus::Local => (Color::Green, "OK", "local"),
         ResolveStatus::Fallback => (Color::Yellow, "!!", "fallback"),
         ResolveStatus::Failed => (Color::Red, "XX", "failed"),
         ResolveStatus::Unexpected => (Color::DarkGray, "??", "unknown"),

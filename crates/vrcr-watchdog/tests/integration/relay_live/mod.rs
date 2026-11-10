@@ -290,6 +290,7 @@ fn deps(upstream: Arc<dyn Upstream>, out: &Capture) -> (RelayDeps, Arc<Stats>, A
         activity: std::sync::Arc::clone(&activity),
         hitch: Arc::new(HitchDetector::new()),
         stats: std::sync::Arc::clone(&stats),
+        manifests: Arc::default(),
         now: clock::system(),
         ux: Ux::new(Box::new(out.clone()), Style::plain(), String::new),
         log: Log::disabled(),
@@ -571,6 +572,8 @@ async fn stub_origin() -> Stub {
 mod contracts_cases;
 
 mod lifecycle_cases;
+
+mod local_cases;
 
 mod manifests_cases;
 

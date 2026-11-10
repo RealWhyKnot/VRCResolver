@@ -319,7 +319,7 @@ impl PerfWindow {
             ResolveStatus::Resolved => w
                 .resolve_ms
                 .push(i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)),
-            ResolveStatus::Fallback => w.resolves_fallback += 1,
+            ResolveStatus::Fallback | ResolveStatus::Local => w.resolves_fallback += 1,
             ResolveStatus::Failed | ResolveStatus::Unexpected => w.resolves_failed += 1,
         }
     }

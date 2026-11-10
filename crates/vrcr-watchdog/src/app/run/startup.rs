@@ -1,4 +1,11 @@
 use super::*;
+use vrcr_shared::trust_gateway;
+
+pub(super) struct RelayShared {
+    activity: Arc<RelayActivity>,
+    stats: Arc<Stats>,
+    manifests: Arc<Manifests>,
+}
 
 impl App {
     pub(super) fn watch(&self, runtime: &Runtime) -> i32 {
@@ -60,6 +67,14 @@ impl App {
         ));
         let codecs = Arc::new(CodecCapabilities::system(self.log.clone()));
 
+        let manifests = Arc::new(Manifests::default());
+        let is_relay_up = Arc::new(AtomicBool::new(false));
+        let local_step = self.local_step(
+            &state_root,
+            std::sync::Arc::clone(&manifests),
+            std::sync::Arc::clone(&is_relay_up),
+        );
+
         let ipc = Ipc::builder(Arc::new(mesh.clone()), self.ux.clone(), self.log.clone())
             .cache(std::sync::Arc::clone(&cache))
             .og_hint(std::sync::Arc::clone(&og_hint))
@@ -77,6 +92,7 @@ impl App {
                 let reporter = std::sync::Arc::clone(&self.reporter);
                 move |req, reason| reporter.report_fallback(req, reason, None)
             })
+            .local(local_step)
             .build();
         put(
             &self.parts.ipc,
@@ -104,8 +120,11 @@ impl App {
                 https_allowed,
                 &state_root,
                 mesh.first_party(),
-                std::sync::Arc::clone(&activity),
-                std::sync::Arc::clone(&stats),
+                RelayShared {
+                    activity: std::sync::Arc::clone(&activity),
+                    stats: std::sync::Arc::clone(&stats),
+                    manifests: std::sync::Arc::clone(&manifests),
+                },
             ));
             if relay_started.is_none() {
                 self.ux.warn(
@@ -133,6 +152,7 @@ impl App {
         deps.cache = Some(std::sync::Arc::clone(&cache));
         deps.og_hint = Some(og_hint);
         deps.health = Some(health);
+        deps.local = Some(std::sync::Arc::clone(&manifests));
         if let Some((server, scheme)) = relay {
             let bypass = Arc::new(RelayBypass::new(
                 std::sync::Arc::clone(&ports),
@@ -145,6 +165,7 @@ impl App {
                 on_wedged: Box::new(move |port| engage.engage(port)),
             });
             deps.on_new_session = Some(Box::new(move || bypass.release()));
+            is_relay_up.store(true, Ordering::SeqCst);
             put(&self.parts.relay, Arc::new(server));
         }
         let vrc_dir = self.paths.local_low().join("VRChat").join("VRChat");
@@ -249,15 +270,50 @@ impl App {
         0
     }
 
+    fn local_step(
+        &self,
+        state_root: &Path,
+        manifests: Arc<Manifests>,
+        is_relay_up: Arc<AtomicBool>,
+    ) -> Option<Arc<dyn Step>> {
+        let client = connect::platform_tls().and_then(|tls| local::client((*tls).clone()));
+        let client = match client {
+            Ok(client) => client,
+            Err(e) => {
+                self.log.line(&format!("[local] disabled: {e}"));
+                return None;
+            }
+        };
+        let root = state_root.to_path_buf();
+        let relay = Arc::new(move || {
+            if !is_relay_up.load(Ordering::SeqCst) {
+                return None;
+            }
+            let port = trust_gateway::read_relay_port(&root)?;
+            let scheme = trust_gateway::read_relay_scheme(&root);
+            Some(format!("{scheme}://{}:{port}", trust_gateway::GATEWAY_HOST))
+        });
+        Some(Arc::new(Local::new(
+            client,
+            Origin::youtube(),
+            manifests,
+            relay,
+        )))
+    }
+
     pub(super) async fn start_relay(
         &self,
         ports: &RelayPortManager,
         https_allowed: bool,
         state_root: &Path,
         policy: Arc<std::sync::RwLock<vrcr_shared::first_party::FirstPartyPolicy>>,
-        activity: Arc<RelayActivity>,
-        stats: Arc<Stats>,
+        shared: RelayShared,
     ) -> Option<(RelayServer, &'static str)> {
+        let RelayShared {
+            activity,
+            stats,
+            manifests,
+        } = shared;
         let upstream: Result<Arc<dyn Upstream>, String> = connect::platform_tls()
             .and_then(|tls| ReqwestUpstream::new((*tls).clone()))
             .map(upstream::shared);
@@ -281,6 +337,7 @@ impl App {
             let activity = std::sync::Arc::clone(&activity);
             let hitch = std::sync::Arc::clone(&hitch);
             let stats = std::sync::Arc::clone(&stats);
+            let manifests = std::sync::Arc::clone(&manifests);
             let ux = self.ux.clone();
             let log = self.log.clone();
             async move {
@@ -291,6 +348,7 @@ impl App {
                     activity,
                     hitch,
                     stats,
+                    manifests,
                     now: clock::system(),
                     ux,
                     log,

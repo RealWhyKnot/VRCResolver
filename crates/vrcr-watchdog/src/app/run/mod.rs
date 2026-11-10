@@ -25,6 +25,8 @@ use crate::clock;
 use crate::health::{self, HealthGate};
 use crate::hosts::{self, HostsManager, HostsTicker, TickerHandle};
 use crate::ipc::{Ipc, Mesh};
+use crate::local::store::Manifests;
+use crate::local::{self, Local, Origin, Step};
 use crate::maintenance::codec::{self, CodecCapabilities};
 use crate::maintenance::patch::{self, PatchConfig, PatchManager};
 use crate::maintenance::shutdown::{ShutdownCoordinator, ShutdownStep, cancel_all, panic_text};

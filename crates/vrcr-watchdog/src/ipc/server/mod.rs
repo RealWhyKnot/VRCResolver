@@ -17,6 +17,7 @@ use vrcr_shared::wire::{
 use super::framing::{self, cid_suffix};
 use super::{Feedback, Mesh, MeshResult, caller_opted_into_v2};
 use crate::health::{self, HealthGate, Transition};
+use crate::local::{self, Ask, Step};
 use crate::og_hint::{self, OgFallbackHint};
 use crate::resolve_cache::{Key, ResolveCache};
 use crate::stats::Stats;
@@ -125,6 +126,11 @@ impl<M: Mesh> IpcBuilder<M> {
         self
     }
 
+    pub fn local(mut self, step: Option<Arc<dyn Step>>) -> Self {
+        self.ipc.local = step;
+        self
+    }
+
     pub fn build(self) -> Arc<Ipc<M>> {
         Arc::new(self.ipc)
     }
@@ -141,6 +147,7 @@ pub struct Ipc<M: Mesh> {
     high_quality: Flag,
     verified_codecs: Codecs,
     report_fallback: FallbackSink,
+    local: Option<Arc<dyn Step>>,
 }
 
 enum Failure {
@@ -171,6 +178,7 @@ impl<M: Mesh> Ipc<M> {
                 high_quality: Arc::new(|| false),
                 verified_codecs: Arc::new(|| None),
                 report_fallback: Arc::new(|_, _| {}),
+                local: None,
             },
         }
     }

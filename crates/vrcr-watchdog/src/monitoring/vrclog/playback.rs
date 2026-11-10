@@ -207,11 +207,21 @@ impl VrcLogMonitor {
     }
 
     pub fn mark_playback_failure(&self, reported: &str) -> Recovery {
-        let attributed = self.is_attributed(reported);
+        let is_local = local::is_play_url(reported);
+        let attributed = !is_local && self.is_attributed(reported);
         let mut og_hint_armed = false;
-        if let (Some(hint), Some(cache)) = (&self.deps.og_hint, &self.deps.cache)
-            && let Some(source) = cache.source_url_for_resolved(reported)
-        {
+        let source = if is_local {
+            self.deps
+                .local
+                .as_ref()
+                .and_then(|plays| plays.failed(reported))
+        } else {
+            self.deps
+                .cache
+                .as_ref()
+                .and_then(|cache| cache.source_url_for_resolved(reported))
+        };
+        if let (Some(hint), Some(source)) = (&self.deps.og_hint, source) {
             hint.record_load_failure(&source);
             og_hint_armed = true;
         }
@@ -239,6 +249,9 @@ impl VrcLogMonitor {
     }
 
     pub(super) fn send(&self, url: &str, kind: &'static str, ms: i32, height: Option<i32>) {
+        if local::is_play_url(url) {
+            return;
+        }
         self.deps.mesh.send_playback_feedback(Feedback {
             url: url.to_owned(),
             kind,
