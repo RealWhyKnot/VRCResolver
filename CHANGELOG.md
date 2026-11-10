@@ -11,6 +11,12 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
+_No notable changes since the last release._
+
+---
+
+## [v2026.11.10.1](https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.11.10.1) - 2026-11-10
+
 ### Added
 - Resolve YouTube on the PC when the server can't (10045cb)
 
@@ -29,6 +35,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 - Tighten client security and match the style guide (8cdbc29)
 - **relay:** Trim live playlists and stop retry storms (1d0c03d)
 - **patch:** Report startup recovery as a normal line (8ace1ba)
+- Keep the shell lint files on LF (f69923a)
 
 ---
 
