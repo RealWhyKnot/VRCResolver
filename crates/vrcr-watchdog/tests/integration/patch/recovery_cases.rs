@@ -36,11 +36,14 @@ fn recover_restores_the_og_after_an_unclean_exit() {
     m.recover_from_unclean_shutdown();
     assert_eq!(r.entries(), vec!["yt-dlp.exe".to_owned()]);
     assert_eq!(read(&r.target), og);
-    assert!(
-        r.out
-            .text()
-            .contains("Recovery: previous run exited uncleanly -- restoring")
-    );
+    let output = r.out.text();
+    let recovery = output
+        .lines()
+        .find(|line| line.contains("Recovery:"))
+        .expect("recovery line");
+    assert!(recovery.ends_with("[patch] Recovery: the last run was stopped before it could clean up. Restoring VRChat's yt-dlp from yt-dlp-og.exe."), "{output}");
+    assert!(!output.contains("[warn]"), "{output}");
+    assert!(output.is_ascii(), "{output}");
 }
 
 #[test]
@@ -67,6 +70,7 @@ fn recover_clears_a_read_only_orphan_wrapper() {
     assert!(left.next().is_none(), "{:?}", r.entries());
     let scratch = r.dir.path().to_string_lossy().to_lowercase();
     assert!(!r.out.text().to_lowercase().contains(&scratch));
+    assert!(r.out.text().contains("[patch][warn] Recovery: previous run exited uncleanly and left our wrapper in Tools with no backup -- removing it. VRChat will re-download its yt-dlp on next session."));
 }
 
 #[test]

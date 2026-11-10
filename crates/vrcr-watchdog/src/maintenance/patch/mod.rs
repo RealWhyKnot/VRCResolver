@@ -256,9 +256,9 @@ impl PatchManager {
         };
         let target = dir.join(TARGET_NAME);
         if dir.join(OG_NAME).is_file() {
-            self.ux.warn(
+            self.ux.write(
                 Component::Patch,
-                "Recovery: previous run exited uncleanly -- restoring VRChat's yt-dlp from yt-dlp-og.exe.",
+                "Recovery: the last run was stopped before it could clean up. Restoring VRChat's yt-dlp from yt-dlp-og.exe.",
             );
             restore_ytdlp_in_tools(dir, None, &self.ux, &self.log);
             return;
