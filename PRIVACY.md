@@ -1,6 +1,6 @@
 # Privacy policy
 
-**Effective 9 November 2026.**
+**Effective 10 November 2026.**
 
 The live version is at [vrcresolver.com/privacy](https://vrcresolver.com/privacy). This copy is
 updated automatically when the live version changes.
@@ -29,8 +29,9 @@ In short:
   agent, and referrer.
 - **The URLs you submit.** We can't resolve a URL without receiving it. It may show up in
   application logs along with the target player and the maximum height you asked for.
-- **Correlation identifiers.** Random IDs, one per request, that let us follow a single resolve
-  through each stage when something fails. They aren't linked to you and aren't reused.
+- **Correlation identifiers.** Random IDs that let us follow one resolve, and the playlist and
+  segment requests of the playback it starts, through each stage when something fails. A new set is
+  made for every resolve. They aren't linked to you and aren't reused.
 - **Approximate location.** Cloudflare, which runs in front of the Service, works out a country from
   your IP address for routing and abuse prevention.
 
@@ -48,8 +49,11 @@ The desktop client opens a WebSocket to the resolver and sends:
   failures;
 - its version, which tells the server what protocol features it supports.
 
-A playback or failure report holds only a domain, a failure type from a fixed list, and a player
-name. If any part of a report looks like a file path, a home directory or an IP address, the server
+A playback or failure report holds a domain, a failure type from a fixed list, and a player name. A
+failure report also holds the random IDs of the request and playback that failed (the ones described
+in section 1), whether the failure was on the client's side or the server's, the player's error
+code, the last HTTP status the server returned, and how many repeated requests the client held back.
+If any part of a report looks like a file path, a home directory or an IP address, the server
 rejects the whole report with an error. That also covers a future client version that starts sending
 that kind of data by mistake.
 
