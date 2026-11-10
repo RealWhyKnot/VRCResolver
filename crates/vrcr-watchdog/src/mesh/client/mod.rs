@@ -404,6 +404,15 @@ impl Mesh for MeshClient {
             .correlation_id
             .clone()
             .or_else(|| inner.lookup_recent_cid(&fb.url));
+        let context =
+            matches!(fb.kind, feedback::LOAD_FAILURE | feedback::SILENT_STALL).then(|| {
+                inner.stats.playback.context(&fb.url).unwrap_or_else(|| {
+                    crate::diagnostics::FailureContext {
+                        source: "unknown".to_owned(),
+                        ..Default::default()
+                    }
+                })
+            });
         let payload = frames::playback_feedback_payload(crate::mesh::frames::PlaybackFeedback {
             url: &fb.url,
             kind: fb.kind,
@@ -413,6 +422,7 @@ impl Mesh for MeshClient {
             timestamp: SystemTime::now(),
             delivered_height: fb.delivered_height,
             detail,
+            context: context.as_ref(),
         });
         let inner = Arc::clone(inner);
         tokio::spawn(async move {

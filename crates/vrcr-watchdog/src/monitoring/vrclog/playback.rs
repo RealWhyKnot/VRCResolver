@@ -3,7 +3,7 @@ use super::*;
 impl VrcLogMonitor {
     pub(super) fn process_line(&mut self, line: &str, now: SystemTime) {
         if line.contains("[Behaviour] OnLeftRoom") || line.contains("[Behaviour] Entering Room:") {
-            self.stop_watching("world_change");
+            self.stop_watching("world_change", now);
             return;
         }
         if let Some(c) = AUDIO_DEVICE_COUNT.captures(line) {
@@ -23,8 +23,11 @@ impl VrcLogMonitor {
             self.send(&url, feedback::PLAYING, elapsed_ms(at, now), Some(height));
             return;
         }
-        if line.contains("[AVProVideo] Error: Loading failed") {
-            self.on_load_failed(now);
+        if line.contains("[AVProVideo] Error:") {
+            self.player_error = Some(crate::diagnostics::player_error(line));
+            if line.contains("Loading failed") {
+                self.on_load_failed(now);
+            }
             return;
         }
         let accepted = line.contains("[AVProVideo] Using playback path:");
@@ -62,6 +65,23 @@ impl VrcLogMonitor {
 
     pub(super) fn on_opening(&mut self, opened: String, now: SystemTime) {
         let canonical = self.canonical(&opened);
+        if let Some((previous, _)) = &self.active
+            && let Some(stats) = &self.deps.stats
+        {
+            stats.playback.close(
+                self.active_playback_id.as_deref().unwrap_or(previous),
+                "replaced",
+                now,
+                &self.deps.ux,
+            );
+        }
+        self.active_playback_id = self
+            .deps
+            .stats
+            .as_ref()
+            .and_then(|stats| stats.playback.context(&canonical))
+            .map(|context| context.playback_id);
+        self.player_error = None;
         self.last_opening = Some((opened.clone(), now));
         self.active = Some((canonical.clone(), now));
         self.playing = None;
@@ -81,6 +101,19 @@ impl VrcLogMonitor {
         });
         if let Some((observed, at)) = recent {
             self.report_load_failure(&observed, elapsed_ms(at, now), now);
+        } else {
+            self.stall = None;
+            return;
+        }
+        if let Some((url, _)) = &self.active
+            && let Some(stats) = &self.deps.stats
+        {
+            stats.playback.close(
+                self.active_playback_id.as_deref().unwrap_or(url),
+                "error",
+                now,
+                &self.deps.ux,
+            );
         }
         self.clear_playback();
     }
@@ -108,17 +141,19 @@ impl VrcLogMonitor {
         let height = self.delivered_height(&failed, now);
         self.send(&failed, feedback::LOAD_FAILURE, ms, height);
         let recovery = self.mark_playback_failure(&failed);
-        self.deps.ux.warn(
+        self.deps.ux.write(
             Component::VrcLog,
             &format!(
-                "load_failure ms={ms} url={}{}",
+                "load_failure ms={ms} url={}{} error={}",
                 redact_url(&failed),
-                recovery.suffix()
+                recovery.suffix(),
+                self.player_error.as_deref().unwrap_or("loading_failed"),
             ),
         );
     }
 
     pub(super) fn clear_playback(&mut self) {
+        self.active_playback_id = None;
         self.stall = None;
         self.playing = None;
         self.active = None;
@@ -137,6 +172,9 @@ impl VrcLogMonitor {
     }
 
     pub fn fire_due(&mut self, now: SystemTime) {
+        if let Some(stats) = &self.deps.stats {
+            stats.playback.expire(now, &self.deps.ux);
+        }
         if self
             .stall
             .as_ref()
@@ -171,6 +209,14 @@ impl VrcLogMonitor {
         let reported = self.canonical(opened);
         let height = self.delivered_height(&reported, now);
         self.send(&reported, feedback::SILENT_STALL, ms, height);
+        if let Some(stats) = &self.deps.stats {
+            stats.playback.close(
+                self.active_playback_id.as_deref().unwrap_or(&reported),
+                "error",
+                now,
+                &self.deps.ux,
+            );
+        }
         self.playing = None;
         self.active = None;
         let recovery = self.mark_playback_failure(&reported);
@@ -257,7 +303,15 @@ impl VrcLogMonitor {
             kind,
             ms_since_open: ms,
             delivered_height: height,
-            detail: None,
+            detail: match kind {
+                feedback::LOAD_FAILURE => Some(
+                    self.player_error
+                        .clone()
+                        .unwrap_or_else(|| "loading_failed".to_owned()),
+                ),
+                feedback::SILENT_STALL => Some("silent_stall".to_owned()),
+                _ => None,
+            },
             correlation_id: None,
         });
     }
@@ -304,7 +358,7 @@ impl VrcLogMonitor {
         Some(height)
     }
 
-    pub(super) fn stop_watching(&mut self, reason: &str) {
+    pub(super) fn stop_watching(&mut self, reason: &str, now: SystemTime) {
         let watched = self
             .active
             .take()
@@ -314,6 +368,14 @@ impl VrcLogMonitor {
         self.playing = None;
         self.last_opening = None;
         if let Some(url) = watched {
+            if let Some(stats) = &self.deps.stats {
+                stats.playback.close(
+                    self.active_playback_id.take().as_deref().unwrap_or(&url),
+                    "player_closed",
+                    now,
+                    &self.deps.ux,
+                );
+            }
             self.deps.log.line(&format!(
                 "[vrclog] stopped watching {} reason={reason}",
                 redact_url(&url)

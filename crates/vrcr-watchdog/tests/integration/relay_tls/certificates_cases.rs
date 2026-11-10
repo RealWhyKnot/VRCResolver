@@ -273,6 +273,7 @@ async fn relay_serves_https_with_the_generated_cert() {
         Arc::new(ReqwestUpstream::new(tls_client).unwrap_or_else(|e| panic!("{e}")));
     let out = Capture::default();
     let deps = RelayDeps {
+        recovery: Default::default(),
         upstream,
         policy: Arc::new(RwLock::new(FirstPartyPolicy::default())),
         activity: Arc::new(RelayActivity::new()),

@@ -386,7 +386,7 @@ async fn only_the_first_failed_connect_reaches_the_console() {
     let failures: Vec<&str> = out.lines().filter(|l| l.contains("failed after")).collect();
     assert_eq!(failures.len(), 1, "{out}");
     assert!(failures[0].contains("during upgrade"));
-    assert!(failures[0].contains("HandshakeError: server returned HTTP 503 instead of 101"));
+    assert!(failures[0].contains("http_503"));
     assert!(
         t.log()
             .contains("[mesh] reconnect attempt 1 failed: connect to vrcresolver.com failed after")

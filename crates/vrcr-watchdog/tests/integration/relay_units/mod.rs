@@ -161,6 +161,13 @@ fn sample(
     total: i64,
 ) -> TimingSample {
     TimingSample {
+        suppressed: false,
+        recovery: false,
+        retry_reason: None,
+        request_id: "fixture-request".to_owned(),
+        stream_id: String::new(),
+        player_status: status,
+        playlist_shape: None,
         method: method.to_owned(),
         local_path: local.to_owned(),
         target_url: target.to_owned(),
@@ -168,6 +175,7 @@ fn sample(
         header_ms: header,
         total_ms: total,
         bytes_out: 100,
+        media: None,
         lazy_state: Some("HIT".to_owned()),
         lazy_wait_ms: -1,
         lazy_generator: None,
@@ -189,6 +197,10 @@ mod hitches_cases;
 
 mod manifests_cases;
 
+mod live_cases;
+mod live_review_cases;
+
 mod ports_cases;
 
+mod retry_cases;
 mod targets_cases;

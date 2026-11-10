@@ -87,6 +87,20 @@ pub fn perf_line(
             mib(snap.relay_bytes)
         );
     }
+    if !snap.hitch_reasons.is_empty() {
+        let _ = write!(
+            s,
+            " hitches={}",
+            crate::diagnostics::counts(&snap.hitch_reasons)
+        );
+    }
+    if !snap.upstream_statuses.is_empty() {
+        let _ = write!(
+            s,
+            " statuses={}",
+            crate::diagnostics::counts(&snap.upstream_statuses)
+        );
+    }
     push_spread(&mut s, "seg_header_ms", &mut snap.segment_header);
     push_spread(&mut s, "seg_total_ms", &mut snap.segment_total);
     push_spread(&mut s, "manifest_ms", &mut snap.manifest_total);

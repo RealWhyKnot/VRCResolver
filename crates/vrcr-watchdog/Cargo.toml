@@ -19,6 +19,7 @@ bytes.workspace = true
 futures-util.workspace = true
 hex.workspace = true
 http.workspace = true
+httpdate = "1.0.3"
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true

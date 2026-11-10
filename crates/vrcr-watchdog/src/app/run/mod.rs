@@ -81,7 +81,14 @@ pub fn run(build: BuildInfo, args: &[String]) -> i32 {
         "[console] quick_edit={}",
         win::disable_quick_edit()
     ));
-    let ux = Ux::stdout();
+    let ux = Ux::new(
+        Box::new(io::stdout()),
+        crate::diagnostics::startup::console_style(
+            !io::stdout().is_terminal(),
+            std::env::var("NO_COLOR").ok().as_deref(),
+        ),
+        vrcr_shared::console::local_clock,
+    );
     ux.tee_to(log.clone());
 
     let reporter = Arc::new(Reporter::from_env(&build.version, ux.clone()));
@@ -401,7 +408,9 @@ impl App {
         ));
         let parts = std::sync::Arc::clone(&self.parts);
         let life = std::sync::Arc::clone(&self.life);
+        let state_root = self.paths.state_root();
         self.crash.set_snapshot(Some(Arc::new(move || {
+            crate::diagnostics::startup::record(&state_root, "panic_observed");
             snapshot_state(&parts.snapshot(&life))
         })));
     }
@@ -438,10 +447,19 @@ impl App {
         });
         let parts = std::sync::Arc::clone(&self.parts);
         let log = self.log.clone();
+        let state_root = self.paths.state_root();
         let coordinator = ShutdownCoordinator::new(
             restore,
             Arc::new(move || parts.steps()),
-            Arc::new(move |line: &str| log.line(&format!("[shutdown] {line}"))),
+            Arc::new(move |line: &str| {
+                if let Some(trigger) = line.strip_prefix("shutdown trigger=") {
+                    crate::diagnostics::startup::record(
+                        &state_root,
+                        &format!("shutdown-{}", crate::diagnostics::token(trigger)),
+                    );
+                }
+                log.line(&format!("[shutdown] {line}"));
+            }),
         );
         let _ = self.life.coordinator.set(coordinator);
     }

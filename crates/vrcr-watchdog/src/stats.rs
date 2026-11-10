@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -22,6 +23,7 @@ pub struct Stats {
     last_upstream_relay_ms: AtomicU64,
     bandwidth: Mutex<[(u64, u64); BANDWIDTH_BUCKETS]>,
     pub perf: PerfWindow,
+    pub playback: crate::diagnostics::PlaybackLog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -89,6 +91,7 @@ impl Stats {
             last_upstream_relay_ms: AtomicU64::new(0),
             bandwidth: Mutex::new([(0, 0); BANDWIDTH_BUCKETS]),
             perf: PerfWindow::default(),
+            playback: crate::diagnostics::PlaybackLog::default(),
         }
     }
 
@@ -245,6 +248,8 @@ impl Series {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PerfSnapshot {
+    pub hitch_reasons: BTreeMap<String, u64>,
+    pub upstream_statuses: BTreeMap<String, u64>,
     pub relay_requests: u64,
     pub relay_errors: u64,
     pub relay_bytes: u64,
@@ -321,6 +326,22 @@ impl PerfWindow {
                 .push(i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)),
             ResolveStatus::Fallback | ResolveStatus::Local => w.resolves_fallback += 1,
             ResolveStatus::Failed | ResolveStatus::Unexpected => w.resolves_failed += 1,
+        }
+    }
+
+    pub fn record_diagnostics(&self, reasons: &str, status: u16) {
+        if !self.enabled() {
+            return;
+        }
+        let mut snapshot = self.lock();
+        for reason in reasons.split(',').filter(|reason| !reason.is_empty()) {
+            crate::diagnostics::count(
+                &mut snapshot.hitch_reasons,
+                crate::diagnostics::token(reason),
+            );
+        }
+        if !matches!(status, 200 | 206) {
+            crate::diagnostics::count(&mut snapshot.upstream_statuses, status.to_string());
         }
     }
 

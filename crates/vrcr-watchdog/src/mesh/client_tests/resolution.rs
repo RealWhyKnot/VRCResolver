@@ -139,7 +139,7 @@ async fn resolve_log_goes_to_the_file_only() {
     assert_eq!(h.out.text(), "");
     assert!(
         h.log()
-            .contains("[mesh][resolve_log] id=r1 level=warn trying tv")
+            .contains("[mesh][resolve_log] id=r1 level=warn phase=trying config=tv")
     );
 }
 

@@ -233,6 +233,6 @@ fn hitch_record_writes_the_file_line_or_the_console_line() {
     let (ux, out) = capture_ux();
     HitchDetector::new().record(&s, utc(1_790_769_600), &ux, &log);
     assert!(out.text().contains(
-        "hitch reasons=segment-http-502,segment-body_idle_timeout,slow-segment-total kind=segment segment=1 status=502 lazy_wait_ms=5 lazy_generator=ffmpeg total_ms=3000 failure=body_idle_timeout"
+        "[hitch] reasons=segment-http-502,segment-body_idle_timeout,slow-segment-total kind=segment stream=wk_abc segment=1 status=502 lazy=HIT lazy_wait_ms=5 lazy_generator=ffmpeg header_ms=10 total_ms=3000 bytes=100 failure=body_idle_timeout"
     ), "{}", out.text());
 }

@@ -125,6 +125,7 @@ fn respond(
         );
     }
     UpstreamResponse {
+        direct: false,
         status: StatusCode::from_u16(status).unwrap_or_else(|e| panic!("{e}")),
         headers: map,
         body: Box::pin(ScriptBody {
@@ -285,6 +286,7 @@ fn deps(upstream: Arc<dyn Upstream>, out: &Capture) -> (RelayDeps, Arc<Stats>, A
     let stats = Arc::new(Stats::new(SystemTime::now()));
     let activity = Arc::new(RelayActivity::new());
     let deps = RelayDeps {
+        recovery: Default::default(),
         upstream,
         policy: Arc::new(RwLock::new(FirstPartyPolicy::default())),
         activity: std::sync::Arc::clone(&activity),
@@ -577,6 +579,12 @@ mod local_cases;
 
 mod manifests_cases;
 
+mod live_playlist_cases;
+mod live_streaming_cases;
+
 mod streaming_cases;
 
 mod seek_abort_cases;
+
+mod diagnostics_cases;
+mod retry_cases;

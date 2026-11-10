@@ -28,6 +28,7 @@ pub struct UpstreamRequest {
 }
 
 pub struct UpstreamResponse {
+    pub direct: bool,
     pub status: StatusCode,
     pub headers: HeaderMap,
     pub body: BodyStream,
@@ -91,19 +92,10 @@ impl ReqwestUpstream {
         tls: rustls::ClientConfig,
         overrides: &[(&str, SocketAddr)],
     ) -> Result<ReqwestUpstream, String> {
-        let policy = redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() > MAX_REDIRECTS {
-                return attempt.error("too many redirects");
-            }
-            match blocked_literal(attempt.url()) {
-                Some(ip) => attempt.error(blocked_message(ip)),
-                None => attempt.follow(),
-            }
-        });
         let mut builder = reqwest::Client::builder()
             .tls_backend_preconfigured(tls)
             .dns_resolver(GuardedResolver)
-            .redirect(policy)
+            .redirect(redirect::Policy::none())
             .referer(false)
             .no_proxy()
             .connect_timeout(CONNECT_TIMEOUT)
@@ -122,20 +114,42 @@ impl ReqwestUpstream {
 impl Upstream for ReqwestUpstream {
     fn send(&self, req: UpstreamRequest) -> Sending<'_> {
         Box::pin(async move {
-            if let Some(ip) = blocked_literal(&req.url) {
-                return Err(UpstreamError::new("blocked_address", blocked_message(ip)));
-            }
-            let resp = self
-                .client
-                .request(req.method, req.url)
-                .headers(req.headers)
-                .send()
-                .await
-                .map_err(describe)?;
+            let mut url = req.url;
+            let mut redirected = false;
+            let mut count = 0;
+            let resp = loop {
+                if let Some(ip) = blocked_literal(&url) {
+                    return Err(UpstreamError::new("blocked_address", blocked_message(ip)));
+                }
+                let response = self
+                    .client
+                    .request(req.method.clone(), url.clone())
+                    .headers(req.headers.clone())
+                    .send()
+                    .await
+                    .map_err(describe)?;
+                if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308)
+                    && let Some(location) = response
+                        .headers()
+                        .get(http::header::LOCATION)
+                        .and_then(|v| v.to_str().ok())
+                    && let Ok(next) = url.join(location)
+                {
+                    count += 1;
+                    if count > MAX_REDIRECTS {
+                        return Err(UpstreamError::new("redirect_limit", "too many redirects"));
+                    }
+                    url = next;
+                    redirected = true;
+                    continue;
+                }
+                break response;
+            };
             let status = resp.status();
             let headers = resp.headers().clone();
             let body: BodyStream = Box::pin(resp.bytes_stream().map_err(io::Error::other));
             Ok(UpstreamResponse {
+                direct: !redirected,
                 status,
                 headers,
                 body,

@@ -189,30 +189,31 @@ impl<M: Mesh> Ipc<M> {
 
     pub async fn handle<S: AsyncRead + AsyncWrite + Unpin>(&self, pipe: &mut S) {
         let started = Instant::now();
+        let ingress_id = format!("ipc-{}", uuid::Uuid::new_v4().simple());
         let line = match tokio::time::timeout(PER_REQUEST_TIMEOUT, framing::read_line(pipe)).await {
             Ok(Ok(line)) => line,
             Ok(Err(e)) => {
-                self.ux.warn(
-                    Component::Ipc,
-                    &format!("connection error id=: {:?}", e.kind()),
+                self.ingress_failure(
+                    &ingress_id,
+                    started,
+                    0,
+                    &format!("read_{:?}", e.kind()),
+                    "none",
                 );
                 return;
             }
             Err(_) => {
-                self.ux.warn(
-                    Component::Ipc,
-                    "connection error id=: request read timed out",
-                );
+                self.ingress_failure(&ingress_id, started, 0, "read_timeout", "none");
                 return;
             }
         };
         if line.truncated {
-            self.ux.warn(
-                Component::Ipc,
-                &format!(
-                    "rejecting request: payload exceeded {} bytes without a newline terminator",
-                    framing::MAX_REQUEST_BYTES
-                ),
+            self.ingress_failure(
+                &ingress_id,
+                started,
+                framing::MAX_REQUEST_BYTES,
+                "payload_limit",
+                "fallback_native",
             );
             framing::write_fallback(pipe, "", fallback::INTERNAL_ERROR).await;
             return;
@@ -239,23 +240,21 @@ impl<M: Mesh> Ipc<M> {
         let req = match parsed {
             Ok(Some(req)) if !req.url.is_empty() => req,
             other => {
-                let msg = match other {
-                    Err(e) => format!(
-                        "request parse failed: {:?} line={} column={} bytes={}",
-                        e.classify(),
-                        e.line(),
-                        e.column(),
-                        text.len()
-                    ),
-                    Ok(Some(_)) => "request missing url".to_owned(),
-                    Ok(None) => "empty request received".to_owned(),
+                let reason = match other {
+                    Err(_) => "request_parse_failed",
+                    Ok(Some(_)) => "url_missing",
+                    Ok(None) => "request_empty",
                 };
-                self.ux.warn(Component::Ipc, &msg);
+                self.ingress_failure(&ingress_id, started, text.len(), reason, "fallback_native");
                 framing::write_fallback(pipe, "", fallback::INTERNAL_ERROR).await;
                 return;
             }
         };
         self.resolve(pipe, req, started).await;
+    }
+
+    fn ingress_failure(&self, id: &str, started: Instant, bytes: usize, reason: &str, sent: &str) {
+        self.ux.write(Component::Ipc, &format!("resolve failed req={id} kind=resolve host=unknown status=unknown elapsed_ms={} bytes=0 read_bytes={bytes} retry=false sent={sent} reason={reason}", started.elapsed().as_millis()));
     }
 
     pub fn handle_wrapper_event(&self, n: &WrapperEventNotify) {

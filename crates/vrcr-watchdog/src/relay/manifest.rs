@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::future::Future;
 use std::io;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 use futures_util::{Stream, StreamExt};
@@ -10,6 +11,8 @@ use sha2::{Digest, Sha256};
 use url::Url;
 use vrcr_shared::b64;
 use vrcr_shared::first_party::{FirstPartyPolicy, allowed_extension_from_path};
+
+use super::live;
 
 pub const MAX_MANIFEST_BYTES: u64 = 64 * 1024 * 1024;
 pub const DEFAULT_CONTENT_TYPE: &str = "application/vnd.apple.mpegurl";
@@ -26,6 +29,43 @@ pub struct LocalizeResult {
     pub bytes_out: u64,
     pub changed: bool,
     pub exceeded: bool,
+    pub media: Option<live::MediaInfo>,
+    pub kind: PlaylistKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlaylistKind {
+    #[default]
+    Unknown,
+    Master,
+    Media,
+}
+
+impl LocalizeResult {
+    pub fn shape(&self) -> String {
+        let kind = match self.kind {
+            PlaylistKind::Unknown => "unknown",
+            PlaylistKind::Master => "master",
+            PlaylistKind::Media => "media",
+        };
+        let media = self.media.unwrap_or_default();
+        let mode = if self.kind != PlaylistKind::Media {
+            "unknown"
+        } else if media.live {
+            "live"
+        } else {
+            "vod"
+        };
+        format!(
+            "kind={kind} mode={mode} segments={} target_ms={} bytes_in={} bytes_out={} trimmed={} kept={}",
+            media.segments,
+            media.target_ms,
+            self.bytes_in,
+            self.bytes_out,
+            media.kept < media.segments,
+            media.kept
+        )
+    }
 }
 
 pub trait ManifestSink {
@@ -72,9 +112,23 @@ pub fn localize(policy: &FirstPartyPolicy, content: &str) -> String {
 
 pub async fn localize_stream<S, W>(
     policy: &FirstPartyPolicy,
+    input: S,
+    out: &mut W,
+    max_bytes: u64,
+) -> io::Result<LocalizeResult>
+where
+    S: Stream<Item = io::Result<Bytes>> + Unpin,
+    W: ManifestSink,
+{
+    localize_stream_with_ending(policy, input, out, max_bytes, b"\n").await
+}
+
+async fn localize_stream_with_ending<S, W>(
+    policy: &FirstPartyPolicy,
     mut input: S,
     out: &mut W,
     max_bytes: u64,
+    ending: &[u8],
 ) -> io::Result<LocalizeResult>
 where
     S: Stream<Item = io::Result<Bytes>> + Unpin,
@@ -86,9 +140,22 @@ where
     let mut first = true;
     let mut lines: Vec<Vec<u8>> = Vec::new();
     let mut done = false;
+    let mut media = live::MediaInfo {
+        live: true,
+        ..Default::default()
+    };
+    let mut hls = false;
+    let mut master = false;
+    let mut tail_duration = Duration::ZERO;
     while !done {
         match input.next().await {
-            Some(chunk) => splitter.push(&chunk?, &mut lines),
+            Some(chunk) => {
+                let chunk = chunk?;
+                media.bytes = media
+                    .bytes
+                    .saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+                splitter.push(&chunk, &mut lines);
+            }
             None => {
                 splitter.finish(&mut lines);
                 done = true;
@@ -97,13 +164,35 @@ where
         for raw in lines.drain(..) {
             result.bytes_in += u64::try_from(raw.len()).expect("length fits the byte counter");
             let text = String::from_utf8_lossy(&raw);
+            match text.trim().split(':').next().unwrap_or_default() {
+                "#EXTM3U" => hls = true,
+                "#EXT-X-STREAM-INF" | "#EXT-X-MEDIA" | "#EXT-X-I-FRAME-STREAM-INF" => master = true,
+                "#EXTINF" => {
+                    media.segments += 1;
+                    if media.segments > 1
+                        && let Some(duration) =
+                            text.strip_prefix("#EXTINF:").and_then(live::duration)
+                    {
+                        tail_duration = tail_duration.saturating_add(duration);
+                    }
+                }
+                "#EXT-X-ENDLIST" | "#EXT-X-PLAYLIST-TYPE" => media.live = false,
+                "#EXT-X-TARGETDURATION" => {
+                    media.target_ms = text
+                        .split_once(':')
+                        .and_then(|(_, value)| value.parse::<u64>().ok())
+                        .and_then(|value| value.checked_mul(1000))
+                        .unwrap_or(0);
+                }
+                _ => {}
+            }
             let localized = localize_line(policy, &text);
             if matches!(localized, Cow::Owned(_)) {
                 result.changed = true;
             }
             if !first {
-                pending.extend_from_slice(b"\n");
-                result.bytes_out += 1;
+                pending.extend_from_slice(ending);
+                result.bytes_out += u64::try_from(ending.len()).unwrap_or(0);
             }
             first = false;
             pending.extend_from_slice(localized.as_bytes());
@@ -121,6 +210,203 @@ where
     }
     if !pending.is_empty() {
         out.write(pending.freeze()).await?;
+    }
+    result.bytes_in = media.bytes;
+    result.kind = if !hls {
+        PlaylistKind::Unknown
+    } else if master {
+        PlaylistKind::Master
+    } else {
+        PlaylistKind::Media
+    };
+    if hls && !master {
+        media.kept = media.segments;
+        media.needs_trim = media.segments > 120
+            || (media.segments > 12 && tail_duration >= Duration::from_secs(60));
+        result.media = Some(media);
+    }
+    Ok(result)
+}
+
+pub async fn localize_relay_stream<S, W>(
+    policy: &FirstPartyPolicy,
+    input: S,
+    out: &mut W,
+    max_bytes: u64,
+) -> io::Result<LocalizeResult>
+where
+    S: Stream<Item = io::Result<Bytes>> + Unpin,
+    W: ManifestSink,
+{
+    localize_relay_stream_with_budget(
+        policy,
+        input,
+        out,
+        max_bytes,
+        Duration::from_secs(1),
+        Buffering::Unknown,
+    )
+    .await
+}
+
+pub(crate) enum Buffering {
+    Unknown,
+    Live,
+    Small,
+}
+
+pub(crate) async fn localize_relay_stream_with_budget<S, W>(
+    policy: &FirstPartyPolicy,
+    mut input: S,
+    out: &mut W,
+    max_bytes: u64,
+    budget: Duration,
+    buffering: Buffering,
+) -> io::Result<LocalizeResult>
+where
+    S: Stream<Item = io::Result<Bytes>> + Unpin,
+    W: ManifestSink,
+{
+    let mut buffered = BytesMut::new();
+    let mut splitter = LineSplitter::default();
+    let mut lines = Vec::new();
+    let mut first_line = true;
+    let started = tokio::time::Instant::now();
+    let mut segments = 0;
+    let mut live_header = matches!(buffering, Buffering::Live);
+    let stream_directly = matches!(buffering, Buffering::Small);
+    loop {
+        let deadline = started
+            + if segments > 120 {
+                budget
+            } else {
+                budget.min(Duration::from_millis(50))
+            };
+        let next = if live_header {
+            Some(input.next().await)
+        } else if tokio::time::Instant::now() >= deadline {
+            None
+        } else {
+            tokio::time::timeout_at(deadline, input.next()).await.ok()
+        };
+        let chunk = match next {
+            Some(Some(Ok(chunk))) => chunk,
+            Some(None) => break,
+            Some(Some(Err(error))) => {
+                let prefix = futures_util::stream::iter([Ok(buffered.freeze()), Err(error)]);
+                return localize_stream(policy, prefix, out, max_bytes).await;
+            }
+            None => {
+                let prefix = futures_util::stream::iter([Ok(buffered.freeze())]);
+                return stream_untrimmed(policy, prefix.chain(input), out, max_bytes, "budget")
+                    .await;
+            }
+        };
+        if buffered.len().saturating_add(chunk.len()) > live::MAX_INPUT_BYTES {
+            let prefix = futures_util::stream::iter([Ok(buffered.freeze()), Ok(chunk)]);
+            return stream_untrimmed(policy, prefix.chain(input), out, max_bytes, "size limit")
+                .await;
+        }
+        buffered.extend_from_slice(&chunk);
+        splitter.push(&chunk, &mut lines);
+        let bypass = lines.drain(..).any(|line| {
+            let line = String::from_utf8_lossy(&line);
+            if line.starts_with("#EXTINF:") {
+                segments += 1;
+            }
+            if segments == 0
+                && line
+                    .strip_prefix("#EXT-X-MEDIA-SEQUENCE:")
+                    .and_then(|value| value.trim().parse::<u64>().ok())
+                    .is_some_and(|sequence| sequence > 0)
+            {
+                live_header = true;
+            }
+            if first_line {
+                first_line = false;
+                if line.trim() != "#EXTM3U" {
+                    return true;
+                }
+            }
+            matches!(
+                line.trim().split(':').next().unwrap_or_default(),
+                "#EXT-X-ENDLIST"
+                    | "#EXT-X-PLAYLIST-TYPE"
+                    | "#EXT-X-STREAM-INF"
+                    | "#EXT-X-MEDIA"
+                    | "#EXT-X-I-FRAME-STREAM-INF"
+                    | "#EXT-X-PART"
+                    | "#EXT-X-PART-INF"
+                    | "#EXT-X-PRELOAD-HINT"
+                    | "#EXT-X-RENDITION-REPORT"
+                    | "#EXT-X-SKIP"
+                    | "#EXT-X-DEFINE"
+            )
+        });
+        if bypass
+            || (stream_directly && !live_header)
+            || u64::try_from(buffered.len()).unwrap_or(u64::MAX) > max_bytes
+        {
+            let prefix = futures_util::stream::iter([Ok(buffered.freeze())]);
+            return stream_untrimmed(
+                policy,
+                prefix.chain(input),
+                out,
+                max_bytes,
+                if bypass {
+                    "bypass tag"
+                } else if stream_directly && !live_header {
+                    "budget"
+                } else {
+                    "size limit"
+                },
+            )
+            .await;
+        }
+    }
+    let (body, media) = match std::str::from_utf8(&buffered) {
+        Ok(body) => {
+            let (trimmed, media) = live::trim(body);
+            (Bytes::copy_from_slice(trimmed.as_bytes()), media)
+        }
+        Err(_) => (buffered.clone().freeze(), None),
+    };
+    let trimmed = media.is_some_and(|info| info.kept < info.segments);
+    let ending: &[u8] = if trimmed && buffered.windows(2).any(|pair| pair == b"\r\n") {
+        b"\r\n"
+    } else {
+        b"\n"
+    };
+    let mut result = localize_stream_with_ending(
+        policy,
+        futures_util::stream::iter([Ok(body)]),
+        out,
+        max_bytes,
+        ending,
+    )
+    .await?;
+    result.bytes_in = u64::try_from(buffered.len()).unwrap_or(u64::MAX);
+    result.changed |= trimmed;
+    if media.is_some() {
+        result.media = media;
+    }
+    Ok(result)
+}
+
+async fn stream_untrimmed<S, W>(
+    policy: &FirstPartyPolicy,
+    input: S,
+    out: &mut W,
+    max_bytes: u64,
+    reason: &'static str,
+) -> io::Result<LocalizeResult>
+where
+    S: Stream<Item = io::Result<Bytes>> + Unpin,
+    W: ManifestSink,
+{
+    let mut result = localize_stream(policy, input, out, max_bytes).await?;
+    if let Some(media) = result.media.as_mut() {
+        media.untrimmed = reason;
     }
     Ok(result)
 }

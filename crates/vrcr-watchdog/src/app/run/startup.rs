@@ -2,6 +2,7 @@ use super::*;
 use vrcr_shared::trust_gateway;
 
 pub(super) struct RelayShared {
+    recovery: crate::relay::retry::Hooks,
     activity: Arc<RelayActivity>,
     stats: Arc<Stats>,
     manifests: Arc<Manifests>,
@@ -10,8 +11,9 @@ pub(super) struct RelayShared {
 impl App {
     pub(super) fn watch(&self, runtime: &Runtime) -> i32 {
         let mut phases = Phases::start();
-        self.hook_console();
         let state_root = self.paths.state_root();
+        let previous = crate::diagnostics::startup::begin(&state_root);
+        self.hook_console();
         let settings = Arc::new(Store::new(state_root.join("settings.json"), {
             let ux = self.ux.clone();
             Box::new(move |msg: &str| ux.warn(Component::Terminal, msg))
@@ -121,6 +123,18 @@ impl App {
                 &state_root,
                 mesh.first_party(),
                 RelayShared {
+                    recovery: crate::relay::retry::Hooks {
+                        invalidate: Some({
+                            let cache = Arc::clone(&cache);
+                            Arc::new(move |url| {
+                                cache.evict_by_url(url);
+                            })
+                        }),
+                        report: Some({
+                            let mesh = mesh.clone();
+                            Arc::new(move |feedback| mesh.send_playback_feedback(feedback))
+                        }),
+                    },
                     activity: std::sync::Arc::clone(&activity),
                     stats: std::sync::Arc::clone(&stats),
                     manifests: std::sync::Arc::clone(&manifests),
@@ -141,6 +155,38 @@ impl App {
             None
         };
 
+        let node = mesh.current_node_host();
+        let node = if node.is_empty() {
+            crate::mesh::PROXY_HOST
+        } else {
+            &node
+        };
+        let host_state = match hosts::read_bypass_state(&hosts::hosts_path()) {
+            Ok(true) => "present",
+            Ok(false) => "missing",
+            Err(_) => "unknown",
+        };
+        self.ux.write(
+            Component::Relay,
+            &crate::diagnostics::startup::line(&crate::diagnostics::startup::Environment {
+                version: &self.build.version,
+                os: &win::os_description(),
+                server: node,
+                port: relay.as_ref().map_or(0, |(server, _)| server.port()),
+                tls: relay.as_ref().map_or("unavailable", |(_, scheme)| {
+                    if *scheme == "https" {
+                        "ready"
+                    } else {
+                        "not_in_use"
+                    }
+                }),
+                hosts: host_state,
+                vrchat: win::list_processes()
+                    .iter()
+                    .any(|process| win::process_stem(&process.exe).eq_ignore_ascii_case("VRChat")),
+                previous: &previous,
+            }),
+        );
         phases.mark("relay");
 
         let mut deps = MonitorDeps::new(
@@ -150,6 +196,7 @@ impl App {
             self.log.clone(),
         );
         deps.cache = Some(std::sync::Arc::clone(&cache));
+        deps.stats = Some(std::sync::Arc::clone(&stats));
         deps.og_hint = Some(og_hint);
         deps.health = Some(health);
         deps.local = Some(std::sync::Arc::clone(&manifests));
@@ -310,6 +357,7 @@ impl App {
         shared: RelayShared,
     ) -> Option<(RelayServer, &'static str)> {
         let RelayShared {
+            recovery,
             activity,
             stats,
             manifests,
@@ -324,6 +372,7 @@ impl App {
         };
         let hitch = Arc::new(HitchDetector::new());
         let start = |port: u16, tls: ServerTls| {
+            let recovery = recovery.clone();
             let upstream = upstream.clone();
             let scheme = if tls.is_some() { "https" } else { "http" };
             let cfg = RelayConfig {
@@ -343,6 +392,7 @@ impl App {
             async move {
                 let upstream = upstream.map_err(io::Error::other)?;
                 let deps = RelayDeps {
+                    recovery,
                     upstream,
                     policy,
                     activity,

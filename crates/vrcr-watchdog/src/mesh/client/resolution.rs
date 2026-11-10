@@ -145,7 +145,7 @@ impl Inner {
                         Component::Mesh,
                         &format!(
                             "send failed id={id}{cid}: {}",
-                            sanitize_for_console(&e, 160)
+                            crate::diagnostics::error_kind(&e)
                         ),
                     );
                     false

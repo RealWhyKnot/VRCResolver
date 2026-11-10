@@ -267,7 +267,7 @@ async fn seek_aborts_leave_followup_segments_prompt_and_complete() {
     let diagnostics = output.text();
     assert_eq!(
         diagnostics.matches("segment-client_disconnect").count(),
-        160
+        320
     );
     assert!(diagnostics.contains("segment-backtrack"), "{diagnostics}");
     assert!(diagnostics.contains("segment-retry"), "{diagnostics}");

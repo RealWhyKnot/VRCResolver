@@ -72,6 +72,7 @@ pub struct MonitorDeps {
     pub mesh: Arc<dyn PlaybackSink>,
     pub policy: Arc<RwLock<FirstPartyPolicy>>,
     pub cache: Option<Arc<ResolveCache>>,
+    pub stats: Option<Arc<crate::stats::Stats>>,
     pub og_hint: Option<Arc<OgFallbackHint>>,
     pub health: Option<Arc<HealthGate>>,
     pub local: Option<Arc<Manifests>>,
@@ -94,6 +95,7 @@ impl MonitorDeps {
             mesh,
             policy,
             cache: None,
+            stats: None,
             og_hint: None,
             health: None,
             local: None,
@@ -218,6 +220,8 @@ pub struct VrcLogMonitor {
     playing: Option<Playing>,
     delivered: HashMap<String, (i32, SystemTime)>,
     audio_missing: bool,
+    player_error: Option<String>,
+    active_playback_id: Option<String>,
 }
 
 impl VrcLogMonitor {
@@ -235,6 +239,8 @@ impl VrcLogMonitor {
             playing: None,
             delivered: HashMap::new(),
             audio_missing: false,
+            player_error: None,
+            active_playback_id: None,
         }
     }
 

@@ -8,6 +8,11 @@ impl<M: Mesh> Ipc<M> {
         started: Instant,
     ) {
         let id = req.id.clone();
+        let mut trace =
+            crate::diagnostics::resolve::ResolveTrace::new(&req, &self.stats.playback, &self.ux);
+        self.stats
+            .playback
+            .resolver_origin(&id, &self.mesh.current_node_host());
         let mut cid = req.correlation_id.clone();
         if req.action != action::RESOLVE {
             self.ux.warn(
@@ -17,6 +22,8 @@ impl<M: Mesh> Ipc<M> {
                     sanitize_for_console(&req.action, 32)
                 ),
             );
+            trace.reason = "invalid_request";
+            trace.sent = "fallback_native";
             framing::write_fallback(pipe, &id, fallback::INTERNAL_ERROR).await;
             return;
         }
@@ -29,6 +36,8 @@ impl<M: Mesh> Ipc<M> {
                     req.player.map(Player::as_str).unwrap_or("<null>")
                 ),
             );
+            trace.reason = "invalid_request";
+            trace.sent = "fallback_native";
             framing::write_fallback(pipe, &id, fallback::INTERNAL_ERROR).await;
             return;
         }
@@ -78,6 +87,8 @@ impl<M: Mesh> Ipc<M> {
                 h.try_clear(&req.url);
             }
         } else if hint.is_some_and(|h| h.should_prefer_og(&req.url)) {
+            trace.reason = "prior_load_failure";
+            trace.sent = "fallback_native";
             framing::write_fallback(pipe, &id, og_reason::PRIOR_LOAD_FAILURE).await;
             self.ux.write(
                 Component::Ipc,
@@ -102,6 +113,7 @@ impl<M: Mesh> Ipc<M> {
             }
             if paused {
                 if let Some(frame) = self.local_frame(&req, &id, deadline).await {
+                    trace.reply(&frame, false);
                     let _ = framing::write_frame(pipe, &frame).await;
                     self.ux.write(
                         Component::Ipc,
@@ -112,6 +124,8 @@ impl<M: Mesh> Ipc<M> {
                     );
                     return;
                 }
+                trace.reason = "resolver_paused";
+                trace.sent = "fallback_native";
                 framing::write_fallback(pipe, &id, og_reason::RESOLVER_UNHEALTHY).await;
                 self.ux.write(
                     Component::Ipc,
@@ -150,9 +164,11 @@ impl<M: Mesh> Ipc<M> {
         };
 
         if let Some(hit) = cached {
+            trace.reply(&hit.frame, true);
             if framing::write_frame(pipe, &hit.frame).await.is_err() {
-                self.log
-                    .line(&format!("[ipc] wrapper left before the reply id={id}"));
+                trace.finished = false;
+                trace.reason = "wrapper_disconnected";
+                trace.sent = "partial_or_none";
             }
             outcome = hit.action;
             server_reason = hit.reason;
@@ -193,9 +209,12 @@ impl<M: Mesh> Ipc<M> {
                     };
                     via_local = local.is_some();
                     let frame = local.as_deref().unwrap_or(&result.frame);
+                    trace.retried = req.id != trace.request.id;
+                    trace.reply(frame, false);
                     if framing::write_frame(pipe, frame).await.is_err() {
-                        self.log
-                            .line(&format!("[ipc] wrapper left before the reply id={id}"));
+                        trace.finished = false;
+                        trace.reason = "wrapper_disconnected";
+                        trace.sent = "partial_or_none";
                     }
                     outcome = result.action;
                     server_reason = result.reason;
@@ -209,6 +228,9 @@ impl<M: Mesh> Ipc<M> {
 
         let fail_reason = failure.as_ref().map(Failure::reason);
         if let Some(reason) = fail_reason {
+            trace.reason = reason;
+            trace.sent = "fallback_native";
+            trace.retried = req.id != trace.request.id;
             outcome = format!("{}/{reason}", action::FALLBACK_NATIVE);
             let local = if matches!(failure, Some(Failure::Internal)) {
                 self.local_frame(&req, &id, deadline).await
@@ -218,6 +240,7 @@ impl<M: Mesh> Ipc<M> {
             match local {
                 Some(frame) => {
                     via_local = true;
+                    trace.reply(&frame, false);
                     let _ = framing::write_frame(pipe, &frame).await;
                 }
                 None => framing::write_fallback(pipe, &id, reason).await,
@@ -284,22 +307,6 @@ impl<M: Mesh> Ipc<M> {
                 Transition::None => {}
             }
         }
-
-        self.log.line(&format!(
-            "[ipc] resolve_dispatch_complete id={id}{} action={} reason={} player={}{} elapsed_ms={}",
-            cid_suffix(cid.as_deref()),
-            sanitize_for_console(&outcome, 48),
-            sanitize_for_console(server_reason.as_deref().or(fail_reason).unwrap_or_default(), 48),
-            key_player.unwrap_or("unknown"),
-            if via_cache {
-                " via=cache"
-            } else if via_local {
-                " via=local"
-            } else {
-                ""
-            },
-            elapsed.as_millis()
-        ));
     }
 
     async fn local_frame(
@@ -416,18 +423,7 @@ impl<M: Mesh> Ipc<M> {
     ) -> Result<MeshResult, Failure> {
         match tokio::time::timeout_at(deadline, self.mesh.resolve(req, deadline)).await {
             Ok(Ok(r)) => Ok(r),
-            Ok(Err(e)) => {
-                self.ux.warn(
-                    Component::Ipc,
-                    &format!(
-                        "mesh resolve failed id={}{}: {}",
-                        req.id,
-                        cid_suffix(req.correlation_id.as_deref()),
-                        sanitize_for_console(&e, 160)
-                    ),
-                );
-                Err(Failure::Internal)
-            }
+            Ok(Err(_)) => Err(Failure::Internal),
             Err(_) => Err(Failure::Deadline),
         }
     }

@@ -36,6 +36,15 @@ async fn malformed_requests_do_not_log_payloads_or_invalid_values() {
     log.close();
     let text = std::fs::read_to_string(path).expect("IPC log");
     assert!(text.contains("parse failed"));
+    assert_eq!(text.matches("resolve failed req=ipc-").count(), 2);
+    assert_eq!(text.matches("reason=request_parse_failed").count(), 2);
+    assert_eq!(
+        text.matches("kind=resolve host=unknown status=unknown elapsed_ms=")
+            .count(),
+        2
+    );
+    assert_eq!(text.matches("retry=false sent=fallback_native").count(), 2);
+    assert!(text.contains("bytes=0 read_bytes="));
     assert!(!text.contains("private-"), "{text}");
 }
 

@@ -1,5 +1,6 @@
 pub mod app;
 pub mod clock;
+pub mod diagnostics;
 pub mod display;
 pub mod health;
 pub mod hosts;

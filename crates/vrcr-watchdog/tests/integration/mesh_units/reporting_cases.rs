@@ -11,7 +11,7 @@ fn describe_connect_failure_reports_the_root_cause() {
             &probe(Phase::Upgrade, Some(1), Some(2)),
             Some(&cause)
         ),
-        "connect to vrcresolver.com failed after 15 ms during upgrade (dns 1 ms, tcp 2 ms): HandshakeError: server returned HTTP 503 instead of 101"
+        "connect to vrcresolver.com failed after 15 ms during upgrade (dns 1 ms, tcp 2 ms): http_503"
     );
 }
 
@@ -48,6 +48,7 @@ fn playback_quality_lines() {
 fn playback_feedback_payload_drops_empty_optionals() {
     let at = std::time::UNIX_EPOCH + Duration::from_secs(1_790_704_800);
     let text = playback_feedback_payload(vrcr_watchdog::mesh::frames::PlaybackFeedback {
+        context: None,
         url: "https://x",
         kind: feedback::PLAYING,
         ms_since_open: 1200,
@@ -66,6 +67,7 @@ fn playback_feedback_payload_drops_empty_optionals() {
     assert!(v.get("delivered_height").is_none_or(Value::is_null));
     assert!(v.get("detail").is_none_or(Value::is_null));
     let text = playback_feedback_payload(vrcr_watchdog::mesh::frames::PlaybackFeedback {
+        context: None,
         url: "https://x",
         kind: feedback::OG_FAILED,
         ms_since_open: 5,

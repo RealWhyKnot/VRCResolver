@@ -32,7 +32,7 @@ fn describe_connect_failure_names_the_phase() {
         (
             probe(Phase::Upgrade, Some(3), Some(40)),
             Some("HandshakeError: x"),
-            "connect to vrcresolver.com failed after 8000 ms during upgrade (dns 3 ms, tcp 40 ms): HandshakeError: x",
+            "connect to vrcresolver.com failed after 8000 ms during upgrade (dns 3 ms, tcp 40 ms): handshake_error",
         ),
     ];
     for (p, cause, want) in cases {

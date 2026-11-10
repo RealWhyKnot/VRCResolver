@@ -5,8 +5,8 @@ use std::time::SystemTime;
 use url::Url;
 use vrcr_shared::console::{Component, Ux};
 use vrcr_shared::log::Log;
-use vrcr_shared::logutil::sanitize_for_console;
 
+use super::live::MediaInfo;
 use crate::stats::RelayKind;
 
 const SEGMENT_SLOW_HEADER_MS: i64 = 1500;
@@ -19,6 +19,13 @@ const MAX_TRACKED_STREAMS: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimingSample {
+    pub suppressed: bool,
+    pub recovery: bool,
+    pub retry_reason: Option<String>,
+    pub request_id: String,
+    pub stream_id: String,
+    pub player_status: u16,
+    pub playlist_shape: Option<String>,
     pub method: String,
     pub local_path: String,
     pub target_url: String,
@@ -26,6 +33,7 @@ pub struct TimingSample {
     pub header_ms: i64,
     pub total_ms: i64,
     pub bytes_out: u64,
+    pub media: Option<MediaInfo>,
     pub lazy_state: Option<String>,
     pub lazy_wait_ms: i64,
     pub lazy_generator: Option<String>,
@@ -47,6 +55,20 @@ pub struct HitchDiagnostic {
 #[derive(Default)]
 pub struct HitchDetector {
     streams: Mutex<Streams>,
+    notices: Mutex<Notices>,
+}
+
+#[derive(Default)]
+struct Notices {
+    entries: HashMap<String, Notice>,
+    order: VecDeque<String>,
+}
+
+#[derive(Default)]
+struct Notice {
+    trimmed: Option<(SystemTime, u64, usize)>,
+    slow: Option<SystemTime>,
+    large: Option<SystemTime>,
 }
 
 #[derive(Default)]
@@ -66,12 +88,67 @@ impl HitchDetector {
     }
 
     pub fn record(&self, sample: &TimingSample, now: SystemTime, ux: &Ux, log: &Log) {
-        let Some(d) = self.analyze(sample, now) else {
+        let diagnostic = self.analyze(sample, now);
+        self.record_diagnostic(sample, now, ux, log, diagnostic);
+    }
+
+    pub fn record_diagnostic(
+        &self,
+        sample: &TimingSample,
+        now: SystemTime,
+        ux: &Ux,
+        log: &Log,
+        diagnostic: Option<HitchDiagnostic>,
+    ) {
+        let (trim_notice, slow_notice, large_notice) = self.notices(sample, now);
+        if trim_notice {
+            let line = format!(
+                "playlist trimmed{} host={} req={}",
+                media_details(sample.media.as_ref()),
+                describe_url(&sample.target_url),
+                sample.request_id
+            );
+            if log.dev_console() {
+                ux.write(Component::Relay, &line);
+            } else {
+                log.line(&format!("[relay] {line}"));
+            }
+        }
+        let Some(mut d) = diagnostic else {
             return;
         };
+        if !slow_notice && sample.media.is_some_and(|media| media.live) {
+            d.reasons = d
+                .reasons
+                .split(',')
+                .filter(|reason| {
+                    !matches!(
+                        *reason,
+                        "slow-live-playlist-reload"
+                            | "slow-manifest-total"
+                            | "slow-manifest-headers"
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            if d.reasons.is_empty() {
+                return;
+            }
+        }
+        if !large_notice {
+            d.reasons = d
+                .reasons
+                .split(',')
+                .filter(|reason| *reason != "large-media-playlist")
+                .collect::<Vec<_>>()
+                .join(",");
+            if d.reasons.is_empty() {
+                return;
+            }
+        }
         let lazy = safe(sample.lazy_state.as_deref().unwrap_or("unknown"), 32);
         let file_line = format!(
-            "[relay][hitch] reasons={} kind={} stream={}{}{} status={} lazy={lazy}{}{} header_ms={} total_ms={} bytes={}{} target={}",
+            "[relay][hitch] reasons={} kind={} stream={}{}{} status={} lazy={lazy}{}{} header_ms={} total_ms={} bytes={}{}{} target={} req={} sent={}",
             d.reasons,
             d.kind,
             safe(&d.stream_id, 64),
@@ -84,22 +161,15 @@ impl HitchDetector {
             d.total_ms,
             sample.bytes_out,
             failure_part(sample.failure.as_deref()),
+            media_details(sample.media.as_ref()),
             describe_url(&sample.target_url),
+            sample.request_id,
+            sample.player_status,
         );
         if log.dev_console() {
-            ux.warn(
+            ux.write(
                 Component::Relay,
-                &format!(
-                    "hitch reasons={} kind={}{} status={}{}{} total_ms={}{}",
-                    d.reasons,
-                    d.kind,
-                    segment_part(d.segment),
-                    sample.status,
-                    wait_part(sample.lazy_wait_ms),
-                    generator_part(sample.lazy_generator.as_deref()),
-                    d.total_ms,
-                    failure_part(sample.failure.as_deref()),
-                ),
+                file_line.strip_prefix("[relay]").unwrap_or(&file_line),
             );
         } else {
             log.line(&file_line);
@@ -150,6 +220,20 @@ impl HitchDetector {
             if sample.total_ms >= MANIFEST_SLOW_TOTAL_MS {
                 reasons.push("slow-manifest-total".to_owned());
             }
+            if let Some(media) = sample.media {
+                if media.kept == media.segments
+                    && (sample.bytes_out > 256 * 1024
+                        || (media.segments > 120 && media.untrimmed == "budget"))
+                {
+                    reasons.push("large-media-playlist".to_owned());
+                }
+                if media.live
+                    && media.target_ms > 0
+                    && u64::try_from(sample.total_ms).is_ok_and(|total| total > media.target_ms / 2)
+                {
+                    reasons.push("slow-live-playlist-reload".to_owned());
+                }
+            }
         }
         if reasons.is_empty() {
             return None;
@@ -168,6 +252,68 @@ impl HitchDetector {
             header_ms: sample.header_ms,
             total_ms: sample.total_ms,
         })
+    }
+
+    fn notices(&self, sample: &TimingSample, now: SystemTime) -> (bool, bool, bool) {
+        let Some(media) = sample
+            .media
+            .filter(|_| sample.method.eq_ignore_ascii_case("GET"))
+        else {
+            return (false, true, true);
+        };
+        let key = super::activity::play_id(&sample.local_path)
+            .unwrap_or(&sample.local_path)
+            .to_owned();
+        let mut notices = self
+            .notices
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if !notices.entries.contains_key(&key) {
+            if notices.entries.len() >= MAX_TRACKED_STREAMS
+                && let Some(old) = notices.order.pop_front()
+            {
+                notices.entries.remove(&old);
+            }
+            notices.order.push_back(key.clone());
+        }
+        let notice = notices.entries.entry(key).or_default();
+        let trimmed = media.kept < media.segments
+            && notice.trimmed.is_none_or(|(at, bytes, kept)| {
+                now.duration_since(at)
+                    .is_ok_and(|elapsed| elapsed.as_secs() >= 600)
+                    || bytes.abs_diff(media.bytes) >= (bytes / 4).max(256 * 1024)
+                    || kept.abs_diff(media.kept) >= (kept / 4).max(1)
+            });
+        if trimmed {
+            notice.trimmed = Some((now, media.bytes, media.kept));
+        }
+        let slow = media.live
+            && (sample.header_ms >= MANIFEST_SLOW_HEADER_MS
+                || sample.total_ms >= MANIFEST_SLOW_TOTAL_MS
+                || (media.target_ms > 0
+                    && u64::try_from(sample.total_ms)
+                        .is_ok_and(|total| total > media.target_ms / 2)));
+        let report_slow = !slow
+            || notice.slow.is_none_or(|at| {
+                now.duration_since(at)
+                    .is_ok_and(|elapsed| elapsed.as_secs() >= 60)
+            });
+        if slow && report_slow {
+            notice.slow = Some(now);
+        }
+        let large = media.kept == media.segments
+            && (sample.bytes_out > 256 * 1024
+                || (media.segments > 120 && media.untrimmed == "budget"));
+        let report_large = !large
+            || notice.large.is_none_or(|at| {
+                now.duration_since(at)
+                    .is_ok_and(|elapsed| elapsed.as_secs() >= 60)
+            });
+        if large && report_large {
+            notice.large = Some(now);
+        }
+        drop(notices);
+        (trimmed, report_slow, report_large)
     }
 
     fn sequence(
@@ -217,6 +363,23 @@ impl HitchDetector {
         drop(streams);
         (previous, gap)
     }
+}
+
+pub(crate) fn media_details(media: Option<&MediaInfo>) -> String {
+    media.map_or_else(String::new, |media| {
+        format!(
+            " playlist-bytes={} segments={} trimmed={} kept={}{}",
+            media.bytes,
+            media.segments,
+            media.kept < media.segments,
+            media.kept,
+            if media.kept == media.segments && !media.untrimmed.is_empty() {
+                format!(" untrimmed={}", media.untrimmed)
+            } else {
+                String::new()
+            },
+        )
+    })
 }
 
 pub fn relay_kind(sample: &TimingSample) -> RelayKind {
@@ -298,7 +461,10 @@ fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
 }
 
 fn describe_url(url: &str) -> String {
-    super::short_url(url)
+    Url::parse(url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "?".to_owned())
 }
 
 fn segment_part(segment: i64) -> String {
@@ -339,5 +505,5 @@ fn failure_part(failure: Option<&str>) -> String {
 }
 
 fn safe(value: &str, max: usize) -> String {
-    sanitize_for_console(value, max)
+    crate::diagnostics::token(value).chars().take(max).collect()
 }

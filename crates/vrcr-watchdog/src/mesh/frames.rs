@@ -57,7 +57,7 @@ pub fn describe_connect_failure(
         None => format!("connect to {host} timed out{place}"),
         Some(c) => format!(
             "connect to {host} failed{place}: {}",
-            sanitize_for_console(c, 200)
+            crate::diagnostics::error_kind(c)
         ),
     }
 }
@@ -102,11 +102,15 @@ pub fn playback_quality_line(root: &Value) -> String {
 }
 
 pub fn resolve_log_line(root: &Value) -> String {
+    let message = str_field(root, "message").unwrap_or_default();
+    let detail = message.strip_prefix("trying ").map_or_else(
+        || format!("reason={}", crate::diagnostics::error_kind(message)),
+        |config| format!("phase=trying config={}", crate::diagnostics::token(config)),
+    );
     format!(
-        "[mesh][resolve_log] id={} level={} {}",
-        sanitize_for_console(str_field(root, "id").unwrap_or_default(), 32),
-        sanitize_for_console(str_field(root, "level").unwrap_or("info"), 16),
-        sanitize_for_console(str_field(root, "message").unwrap_or_default(), 240)
+        "[mesh][resolve_log] id={} level={} {detail}",
+        crate::diagnostics::token(str_field(root, "id").unwrap_or_default()),
+        crate::diagnostics::token(str_field(root, "level").unwrap_or("info")),
     )
 }
 #[derive(Clone, Copy)]
@@ -119,6 +123,7 @@ pub struct PlaybackFeedback<'a> {
     pub timestamp: SystemTime,
     pub delivered_height: Option<i32>,
     pub detail: Option<&'a str>,
+    pub context: Option<&'a crate::diagnostics::FailureContext>,
 }
 
 pub fn playback_feedback_payload(input: PlaybackFeedback<'_>) -> String {
@@ -131,6 +136,7 @@ pub fn playback_feedback_payload(input: PlaybackFeedback<'_>) -> String {
         timestamp,
         delivered_height,
         detail,
+        context,
     } = input;
     let frame = PlaybackFeedbackFrame {
         action: action::PLAYBACK_FEEDBACK.to_owned(),
@@ -143,7 +149,61 @@ pub fn playback_feedback_payload(input: PlaybackFeedback<'_>) -> String {
         delivered_height: delivered_height.filter(|h| *h > 0),
         detail: detail.filter(|d| !d.is_empty()).map(str::to_owned),
     };
-    serde_json::to_string(&frame).unwrap_or_default()
+    let mut value = serde_json::to_value(&frame).unwrap_or_default();
+    if let Some(context) = context
+        && let Some(fields) = value.as_object_mut()
+    {
+        fields.insert(
+            "request_id".to_owned(),
+            Value::String(crate::diagnostics::token(&context.request_id)),
+        );
+        fields.insert(
+            "stream_id".to_owned(),
+            Value::String(crate::diagnostics::token(&context.stream_id)),
+        );
+        fields.insert(
+            "playback_id".to_owned(),
+            Value::String(crate::diagnostics::token(&context.playback_id)),
+        );
+        let source = match context.source.as_str() {
+            "client" => "client",
+            "server" => "server",
+            _ => "unknown",
+        };
+        fields.insert(
+            "failure_source".to_owned(),
+            Value::String(source.to_owned()),
+        );
+        let error = crate::diagnostics::player_error(detail.unwrap_or("player_error"));
+        fields.insert("player_error".to_owned(), Value::String(error.clone()));
+        fields.insert(
+            "detail".to_owned(),
+            Value::String(
+                (if context.retry_reason.is_empty() {
+                    format!(
+                        "source={} status={} error={error}",
+                        source, context.upstream_status
+                    )
+                } else {
+                    format!(
+                        "{} s={} n={} r={}",
+                        context.retry_reason,
+                        context.upstream_status,
+                        context.suppressed_requests,
+                        if context.recovery_result.is_empty() {
+                            "none"
+                        } else {
+                            &context.recovery_result
+                        }
+                    )
+                })
+                .chars()
+                .take(64)
+                .collect(),
+            ),
+        );
+    }
+    serde_json::to_string(&value).unwrap_or_default()
 }
 
 #[derive(Debug, Clone, PartialEq)]

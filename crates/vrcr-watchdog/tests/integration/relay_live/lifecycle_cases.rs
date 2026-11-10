@@ -51,21 +51,13 @@ async fn stalls_and_failures_hit_the_timeouts() {
 
     assert!(eventually(|| h.script.open() == 0 && h.server.in_flight() == 0, WITHIN).await);
     let text = h.out.text();
+    assert!(text.contains("reason=upstream_timeout"), "{text}");
+    assert!(text.contains("reason=body_idle_timeout"), "{text}");
     assert!(
-        text.contains("upstream timed out for us1.vrcresolver.com"),
+        text.matches("reason=upstream_timeout").count() >= 2,
         "{text}"
     );
-    assert!(text.contains("stream idle timeout for"), "{text}");
-    assert!(
-        text.matches("upstream timed out for us1.vrcresolver.com")
-            .count()
-            >= 2,
-        "{text}"
-    );
-    assert!(
-        text.contains("request failed for us1.vrcresolver.com: connect_error: refused"),
-        "{text}"
-    );
+    assert!(text.contains("reason=connect_error"), "{text}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -90,7 +82,7 @@ async fn stalled_client_is_aborted_while_the_next_request_is_served() {
 
     assert!(eventually(|| h.script.open() == 0, Duration::from_secs(10)).await);
     assert!(
-        h.out.text().contains("client write stalled for"),
+        h.out.text().contains("reason=body_write_timeout"),
         "{}",
         h.out.text()
     );

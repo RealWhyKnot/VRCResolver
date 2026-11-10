@@ -9,6 +9,7 @@ struct LocalHarness {
     script: Arc<Script>,
     activity: Arc<RelayActivity>,
     path: String,
+    out: Capture,
 }
 
 async fn local_harness() -> LocalHarness {
@@ -26,6 +27,7 @@ async fn local_harness() -> LocalHarness {
         server,
         script,
         activity,
+        out,
         path: format!("{}{token}/{}", local::PATH_PREFIX, local::MANIFEST_NAME),
     }
 }
@@ -53,6 +55,16 @@ async fn a_stored_manifest_is_served_without_going_upstream() {
     assert!(eventually(|| h.server.in_flight() == 0, WITHIN).await);
     let opened = format!("http://localhost.youtube.com:{}{}", h.server.port(), h.path);
     assert_eq!(h.activity.wedged_port(&opened), None);
+    h.server.stop().await;
+    let text = h.out.text();
+    assert_eq!(text.matches("playlist req=").count(), 1, "{text}");
+    assert!(text.contains("kind=master mode=unknown segments=0 target_ms=0"));
+    assert!(text.contains(&format!(
+        "manifests=3 segments=0 other=0 bytes={}",
+        BODY.len() * 2
+    )));
+    assert!(text.contains("ended=shutdown"));
+    assert!(!text.contains("media.example/v.m3u8"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

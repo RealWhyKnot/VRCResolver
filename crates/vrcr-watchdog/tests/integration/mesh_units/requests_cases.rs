@@ -4,7 +4,7 @@ use super::*;
 fn resolve_log_line_defaults_the_level() {
     assert_eq!(
         resolve_log_line(&json!({"id":"r1","message":"trying tv"})),
-        "[mesh][resolve_log] id=r1 level=info trying tv"
+        "[mesh][resolve_log] id=r1 level=info phase=trying config=tv"
     );
 }
 

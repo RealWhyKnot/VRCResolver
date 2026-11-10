@@ -153,11 +153,8 @@ async fn broken_upstream_bodies_end_the_client_response_quickly() {
     assert!(r.complete);
     assert!(eventually(|| h.script.open() == 0 && h.server.in_flight() == 0, WITHIN).await);
     let text = h.out.text();
-    assert!(
-        text.contains("upstream ended early (500/1000 bytes)"),
-        "{text}"
-    );
-    assert!(text.contains("upstream_body_error: boom"), "{text}");
+    assert!(text.contains("reason=upstream_short_body"), "{text}");
+    assert!(text.contains("reason=upstream_body_error"), "{text}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -275,10 +272,7 @@ async fn relay_streams_through_the_real_http_client() {
     assert_eq!(r.status, 502);
     let text = out.text();
     assert!(text.contains("blocked_address"), "{text}");
-    assert!(
-        text.contains("blocked internal address (127.0.0.1)"),
-        "{text}"
-    );
+    assert!(text.contains("sent=502 reason=blocked_address"), "{text}");
 
     let heads = stub.heads.lock().unwrap_or_else(|e| e.into_inner()).clone();
     assert_eq!(heads.len(), 4, "{heads:?}");

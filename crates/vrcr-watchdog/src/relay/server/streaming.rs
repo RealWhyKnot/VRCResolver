@@ -17,19 +17,23 @@ pub(super) fn respond_manifest(
     if let Ok(v) = HeaderValue::from_str(&ct) {
         out.headers_mut().insert(CONTENT_TYPE, v);
     }
-    inner.diag_verbose(
-        &ex.req_id,
-        &format!(
-            "response-headers passed={} dropped={} ct='{ct}' chunked=true",
-            copied.passed, copied.dropped
-        ),
-    );
+
     let (tx, body) = channel_body(&abort);
     *out.body_mut() = body;
     let task_inner = std::sync::Arc::clone(inner);
+    let stream_directly = content_length(&resp.headers).is_some_and(|length| length <= 256 * 1024);
     inner.tasks.spawn(async move {
         let _guard = guard;
-        pump_manifest(task_inner, ex, resp.body, policy, tx, abort).await;
+        pump_manifest(
+            task_inner,
+            ex,
+            resp.body,
+            policy,
+            tx,
+            abort,
+            stream_directly,
+        )
+        .await;
     });
     out
 }
@@ -41,82 +45,79 @@ pub(super) async fn pump_manifest(
     policy: FirstPartyPolicy,
     tx: mpsc::Sender<Bytes>,
     abort: CancellationToken,
+    stream_directly: bool,
 ) {
     let mut sink = ChannelSink {
         tx,
         idle: inner.idle_timeout,
+        written: 0,
     };
-    let work =
-        manifest::localize_stream(&policy, upstream, &mut sink, manifest::MAX_MANIFEST_BYTES);
+    let client = sink.tx.clone();
+    let identity = super::super::live::history::identity(&ex.target);
+    let known_live = inner.live_playlists.contains(&identity, Instant::now());
+    let work = manifest::localize_relay_stream_with_budget(
+        &policy,
+        upstream,
+        &mut sink,
+        manifest::MAX_MANIFEST_BYTES,
+        Duration::from_secs(1).min(inner.manifest_deadline / 4),
+        if known_live {
+            manifest::Buffering::Live
+        } else if stream_directly {
+            manifest::Buffering::Small
+        } else {
+            manifest::Buffering::Unknown
+        },
+    );
     let outcome = tokio::select! {
         () = inner.shutdown.cancelled() => None,
+        () = client.closed() => Some(Ok(Err(io::Error::new(io::ErrorKind::BrokenPipe, "client disconnected")))),
         r = tokio::time::timeout(inner.manifest_deadline, work) => Some(r),
     };
+    let mut media = None;
+    let mut shape = None;
     let (bytes_out, failure): (u64, Option<String>) = match outcome {
-        None => (0, None),
-        Some(Err(_)) => {
-            inner.deps.ux.warn(
-                Component::Relay,
-                &format!("upstream timed out for {}", short_url(&ex.target)),
-            );
-            (0, Some("upstream_timeout".to_owned()))
-        }
-        Some(Ok(Err(e))) => (0, Some(sink_failure(&inner, &ex, &e))),
+        None => (sink.written, Some("shutdown".to_owned())),
+        Some(Err(_)) => (sink.written, Some("upstream_timeout".to_owned())),
+        Some(Ok(Err(e))) => (sink.written, Some(sink_failure(&e))),
         Some(Ok(Ok(result))) => {
-            if result.exceeded {
-                inner.deps.ux.warn(
-                    Component::Relay,
-                    &format!(
-                        "manifest body exceeded sanity cap; truncated upstream={}",
-                        short_url(&ex.target)
-                    ),
-                );
+            media = result.media;
+            shape = Some(result.shape());
+            if !result.exceeded {
+                inner
+                    .live_playlists
+                    .observe(identity, result.media, Instant::now());
             }
-            inner.diag_verbose(
-                &ex.req_id,
-                &format!(
-                    "localized-manifest bytes-in={} bytes-out={} changed={}{}",
-                    result.bytes_in,
-                    result.bytes_out,
-                    result.changed,
-                    if result.exceeded { " EXCEEDED" } else { "" }
-                ),
-            );
-            inner.deps.stats.record_relay_bytes(
-                ex.upstream_class,
+
+            (
                 result.bytes_out,
-                (inner.deps.now)(),
-            );
-            (result.bytes_out, None)
+                result.exceeded.then(|| "manifest_size_limit".to_owned()),
+            )
         }
     };
-    inner.record_hitch(&ex.sample(bytes_out, failure.as_deref()));
-    if failure.is_some() {
+    inner
+        .deps
+        .stats
+        .record_relay_bytes(ex.upstream_class, bytes_out, (inner.deps.now)());
+    let mut sample = ex.sample(bytes_out, failure.as_deref());
+    sample.media = media;
+    sample.playlist_shape = shape;
+    inner.record_hitch(&sample);
+    if failure
+        .as_deref()
+        .is_some_and(|reason| reason != "manifest_size_limit")
+    {
         abort.cancel();
     }
 }
 
-pub(super) fn sink_failure(inner: &Inner, ex: &Exchange, e: &io::Error) -> String {
-    match e.kind() {
-        io::ErrorKind::TimedOut => {
-            inner.deps.ux.warn(
-                Component::Relay,
-                &format!("client write stalled for {}", short_url(&ex.target)),
-            );
-            "body_write_timeout".to_owned()
-        }
-        io::ErrorKind::BrokenPipe => "client_disconnect".to_owned(),
-        _ => {
-            inner.deps.ux.warn(
-                Component::Relay,
-                &format!(
-                    "request failed for {}: upstream_body_error: {e}",
-                    short_url(&ex.target)
-                ),
-            );
-            "upstream_body_error".to_owned()
-        }
+pub(super) fn sink_failure(error: &io::Error) -> String {
+    match error.kind() {
+        io::ErrorKind::TimedOut => "body_write_timeout",
+        io::ErrorKind::BrokenPipe => "client_disconnect",
+        _ => "upstream_body_error",
     }
+    .to_owned()
 }
 
 pub(super) fn respond_stream(
@@ -133,6 +134,10 @@ pub(super) fn respond_stream(
     let mut out = Response::new(Empty::new().map_err(never).boxed());
     *out.status_mut() = resp.status;
     *out.headers_mut() = copied.headers;
+    if ex.retry_reason.as_deref() == Some(crate::relay::retry::RECREATE) {
+        out.headers_mut()
+            .insert(http::header::CONNECTION, HeaderValue::from_static("close"));
+    }
     if let Some(v) = content_type
         .filter(|c| !c.trim().is_empty())
         .and_then(|c| HeaderValue::from_str(&c).ok())
@@ -143,16 +148,8 @@ pub(super) fn respond_stream(
         out.headers_mut()
             .insert(CONTENT_LENGTH, HeaderValue::from(len));
     }
-    inner.diag_verbose(
-        &ex.req_id,
-        &format!(
-            "response-headers passed={} dropped={} len={}",
-            copied.passed,
-            copied.dropped,
-            declared.map_or_else(|| "null".to_owned(), |l| l.to_string())
-        ),
-    );
-    if is_head {
+
+    if is_head || declared == Some(0) {
         inner.record_hitch(&ex.sample(0, None));
         drop(guard);
         return out;
@@ -186,22 +183,11 @@ pub(super) async fn pump_body(
         };
         let chunk = match read {
             Err(_) => {
-                inner.deps.ux.warn(
-                    Component::Relay,
-                    &format!("stream idle timeout for {}", short_url(&ex.target)),
-                );
                 failure = Some("body_idle_timeout".to_owned());
                 break;
             }
             Ok(None) => break,
-            Ok(Some(Err(e))) => {
-                inner.deps.ux.warn(
-                    Component::Relay,
-                    &format!(
-                        "request failed for {}: upstream_body_error: {e}",
-                        short_url(&ex.target)
-                    ),
-                );
+            Ok(Some(Err(_))) => {
                 failure = Some("upstream_body_error".to_owned());
                 break;
             }
@@ -214,10 +200,6 @@ pub(super) async fn pump_body(
         };
         match sent {
             Err(_) => {
-                inner.deps.ux.warn(
-                    Component::Relay,
-                    &format!("client write stalled for {}", short_url(&ex.target)),
-                );
                 failure = Some("body_write_timeout".to_owned());
                 break;
             }
@@ -242,23 +224,12 @@ pub(super) async fn pump_body(
         && let Some(len) = declared
         && bytes_out < len
     {
-        inner.deps.ux.warn(
-            Component::Relay,
-            &format!(
-                "upstream ended early ({bytes_out}/{len} bytes) for {}",
-                short_url(&ex.target)
-            ),
-        );
         failure = Some("upstream_short_body".to_owned());
     }
-    inner.diag_verbose(
-        &ex.req_id,
-        &format!(
-            "-> {} stream bytes-out={bytes_out} elapsed={}ms",
-            ex.status,
-            ms(ex.started.elapsed())
-        ),
-    );
+
+    if stopped && failure.is_none() {
+        failure = Some("shutdown".to_owned());
+    }
     inner.record_hitch(&ex.sample(bytes_out, failure.as_deref()));
     drop(upstream);
     if failure.is_some() || stopped {

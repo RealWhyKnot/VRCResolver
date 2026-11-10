@@ -2,6 +2,7 @@
 mod common;
 
 mod app;
+mod diagnostics;
 mod hosts;
 mod ipc_server;
 mod local;
