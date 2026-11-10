@@ -1,6 +1,6 @@
 # Privacy policy
 
-**Effective 4 November 2026.**
+**Effective 9 November 2026.**
 
 The live version is at [vrcresolver.com/privacy](https://vrcresolver.com/privacy). This copy is
 updated automatically when the live version changes.
