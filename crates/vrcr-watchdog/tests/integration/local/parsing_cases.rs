@@ -72,6 +72,7 @@ fn the_player_request_names_the_video_and_the_visitor() {
     assert_eq!(body["videoId"], VIDEO);
     assert_eq!(body["context"]["client"]["visitorData"], VISITOR);
     assert_eq!(body["context"]["client"]["clientName"], "VISIONOS");
+    assert_eq!(body["context"]["client"]["hl"], "en");
     assert_eq!(
         body["context"]["client"]["clientVersion"],
         youtube::CLIENT_VERSION
@@ -126,7 +127,7 @@ fn only_a_playable_recorded_video_yields_a_manifest() {
 }
 
 #[test]
-fn the_best_h264_variant_is_picked_with_one_english_audio_track() {
+fn the_best_h264_variant_is_picked_with_the_default_audio_track() {
     let picked = master::pick(MASTER, &base(), None).unwrap_or_else(|| panic!("nothing picked"));
     assert_eq!(picked.height, 1080);
     assert_eq!(picked.video_codec, "avc1.64002A");
@@ -139,14 +140,14 @@ fn the_best_h264_variant_is_picked_with_one_english_audio_track() {
         picked.manifest,
         "#EXTM3U
 #EXT-X-INDEPENDENT-SEGMENTS
-#EXT-X-MEDIA:URI=\"https://manifest.googlevideo.com/api/manifest/hls_variant/x/audio/en.m3u8\",TYPE=AUDIO,GROUP-ID=\"234\",LANGUAGE=\"en-US\",NAME=\"English, original\",DEFAULT=NO,AUTOSELECT=YES
+#EXT-X-MEDIA:URI=\"https://manifest.googlevideo.com/api/manifest/hls_variant/x/audio/fr.m3u8\",TYPE=AUDIO,GROUP-ID=\"234\",LANGUAGE=\"fr\",NAME=\"French\",DEFAULT=YES,AUTOSELECT=YES
 #EXT-X-STREAM-INF:BANDWIDTH=5500000,CODECS=\"avc1.64002A,mp4a.40.2\",RESOLUTION=1920x1080,FRAME-RATE=60,AUDIO=\"234\"
 https://manifest.googlevideo.com/api/manifest/hls_variant/x/v1080p60.m3u8
 "
     );
     assert_eq!(
         picked.audio_url.as_deref(),
-        Some("https://manifest.googlevideo.com/api/manifest/hls_variant/x/audio/en.m3u8")
+        Some("https://manifest.googlevideo.com/api/manifest/hls_variant/x/audio/fr.m3u8")
     );
 }
 
@@ -171,9 +172,8 @@ fn the_height_limit_is_honoured() {
 }
 
 #[test]
-fn the_default_track_wins_when_no_english_one_exists() {
-    let master = MASTER.replace("LANGUAGE=\"en-US\"", "LANGUAGE=\"de\"");
-    let picked = master::pick(&master, &base(), None).unwrap_or_else(|| panic!("nothing picked"));
+fn the_default_track_wins_even_when_english_exists() {
+    let picked = master::pick(MASTER, &base(), None).unwrap_or_else(|| panic!("nothing picked"));
     assert!(picked.manifest.contains("audio/fr.m3u8"), "{picked:?}");
     assert!(!picked.manifest.contains("audio/en.m3u8"), "{picked:?}");
 }

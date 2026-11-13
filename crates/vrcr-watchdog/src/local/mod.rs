@@ -10,6 +10,7 @@ use vrcr_shared::trust_gateway::is_local_gateway_host;
 
 pub mod master;
 pub mod store;
+mod xtags;
 pub mod youtube;
 
 use store::Manifests;

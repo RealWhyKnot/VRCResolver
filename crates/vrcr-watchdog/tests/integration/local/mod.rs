@@ -136,7 +136,13 @@ async fn serve(
     ));
     let (status, reply) = match path.as_str() {
         "/sw.js_data" if mode == Mode::VisitorDown => (503, String::new()),
-        "/sw.js_data" => (200, visitor_reply()),
+        "/sw.js_data" => {
+            assert!(
+                head.to_ascii_lowercase()
+                    .contains("accept-language: en-us,en;q=0.9")
+            );
+            (200, visitor_reply())
+        }
         "/youtubei/v1/player?prettyPrint=false" => {
             let is_known = has_visitor && body.contains(VIDEO) && body.contains("VISIONOS");
             let is_refused = !is_known || is_walled.load(Ordering::SeqCst);
@@ -145,7 +151,7 @@ async fn serve(
         "/hls/master.m3u8" if mode == Mode::Vp9Only => (200, VP9_ONLY.to_owned()),
         "/hls/master.m3u8" if mode == Mode::ForeignAudio => (
             200,
-            MASTER.replace("audio/en.m3u8", "http://example.invalid/en.m3u8"),
+            MASTER.replace("audio/fr.m3u8", "http://example.invalid/fr.m3u8"),
         ),
         "/hls/master.m3u8" => (200, MASTER.to_owned()),
         "/hls/v1080p60.m3u8" | "/hls/v720.m3u8" => (200, PLAYLIST.to_owned()),
@@ -219,5 +225,7 @@ fn base() -> Url {
         .unwrap_or_else(|e| panic!("{e}"))
 }
 
+mod audio_cases;
 mod origin_cases;
 mod parsing_cases;
+mod variant_audio_cases;

@@ -1,7 +1,8 @@
 use url::Url;
 
+use super::xtags;
+
 const DEFAULT_MAX_HEIGHT: u32 = 1080;
-const PREFERRED_LANGUAGE: &str = "en";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Picked {
@@ -24,13 +25,16 @@ struct Variant {
     video_codec: String,
     audio_codec: Option<String>,
     audio_group: Option<String>,
+    content: Option<String>,
+    has_content_id: bool,
 }
 
 struct Audio {
     line: String,
     url: String,
     group: String,
-    language: Option<String>,
+    content: Option<String>,
+    has_content_id: bool,
     is_default: bool,
 }
 
@@ -40,10 +44,7 @@ pub fn pick(master: &str, base: &Url, max_height: Option<i32>) -> Option<Picked>
         .filter(|height| *height > 0)
         .unwrap_or(DEFAULT_MAX_HEIGHT);
     let (variants, audio) = parse(master, base);
-    let variant = variants
-        .iter()
-        .filter(|variant| variant.height <= limit)
-        .max_by_key(|variant| (variant.height, variant.frame_rate, variant.bandwidth))?;
+    let variant = pick_variant(&variants, limit)?;
     let mut manifest = String::from("#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n");
     let mut audio_url = None;
     if let Some(group) = variant.audio_group.as_deref() {
@@ -92,28 +93,40 @@ pub fn first_segment(playlist: &str, base: &Url) -> Option<Url> {
     web_url(segment, base)
 }
 
-fn pick_audio<'a>(audio: &'a [Audio], group: &str) -> Option<&'a Audio> {
-    let renditions: Vec<&Audio> = audio.iter().filter(|a| a.group == group).collect();
-    let preferred: Vec<&Audio> = renditions
+fn pick_variant(variants: &[Variant], limit: u32) -> Option<&Variant> {
+    let height = variants
         .iter()
-        .copied()
-        .filter(|a| {
-            a.language.as_deref().is_some_and(|language| {
-                language
-                    .to_ascii_lowercase()
-                    .starts_with(PREFERRED_LANGUAGE)
+        .map(|variant| variant.height)
+        .filter(|height| *height <= limit)
+        .max()?;
+    let candidates = || variants.iter().filter(|variant| variant.height == height);
+    let has_youtube_audio =
+        candidates().any(|variant| variant.content.is_some() || variant.has_content_id);
+    candidates().max_by_key(|variant| {
+        let audio_priority = if variant.content.as_deref() == Some("original") {
+            2
+        } else if has_youtube_audio && variant.content.is_none() && !variant.has_content_id {
+            1
+        } else {
+            0
+        };
+        (audio_priority, variant.frame_rate, variant.bandwidth)
+    })
+}
+
+fn pick_audio<'a>(audio: &'a [Audio], group: &str) -> Option<&'a Audio> {
+    let renditions = || audio.iter().filter(|rendition| rendition.group == group);
+    let has_youtube_audio =
+        renditions().any(|rendition| rendition.content.is_some() || rendition.has_content_id);
+    renditions()
+        .find(|rendition| rendition.content.as_deref() == Some("original"))
+        .or_else(|| {
+            renditions().find(|rendition| {
+                has_youtube_audio && rendition.content.is_none() && !rendition.has_content_id
             })
         })
-        .collect();
-    let pool = if preferred.is_empty() {
-        &renditions
-    } else {
-        &preferred
-    };
-    pool.iter()
-        .copied()
-        .find(|a| a.is_default)
-        .or_else(|| pool.first().copied())
+        .or_else(|| renditions().find(|rendition| rendition.is_default))
+        .or_else(|| renditions().next())
 }
 
 fn parse(master: &str, base: &Url) -> (Vec<Variant>, Vec<Audio>) {
@@ -150,7 +163,8 @@ fn parse_audio(line: &str, attributes: &str, base: &Url) -> Option<Audio> {
         line: line.replacen(&quoted, &format!("URI=\"{absolute}\""), 1),
         url: absolute.to_string(),
         group: value(&attributes, "GROUP-ID")?.to_owned(),
-        language: value(&attributes, "LANGUAGE").map(str::to_owned),
+        content: value(&attributes, "YT-EXT-XTAGS").and_then(xtags::audio_content),
+        has_content_id: value(&attributes, "YT-EXT-AUDIO-CONTENT-ID").is_some(),
         is_default: value(&attributes, "DEFAULT") == Some("YES"),
     })
 }
@@ -183,6 +197,8 @@ fn parse_variant(attributes: &str, target: &str, base: &Url) -> Option<Variant> 
         video_codec: (*video_codec).to_owned(),
         audio_codec: audio_codec.map(|codec| (*codec).to_owned()),
         audio_group: value(&attributes, "AUDIO").map(str::to_owned),
+        content: value(&attributes, "YT-EXT-XTAGS").and_then(xtags::audio_content),
+        has_content_id: value(&attributes, "YT-EXT-AUDIO-CONTENT-ID").is_some(),
     })
 }
 

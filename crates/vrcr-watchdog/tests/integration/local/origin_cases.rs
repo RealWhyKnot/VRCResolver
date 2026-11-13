@@ -32,7 +32,7 @@ async fn a_video_resolves_to_a_manifest_the_relay_can_serve() {
         "{manifest}"
     );
     assert!(
-        manifest.contains(&format!("URI=\"{media}/audio/en.m3u8\"")),
+        manifest.contains(&format!("URI=\"{media}/audio/fr.m3u8\"")),
         "{manifest}"
     );
     assert_eq!(manifest.matches("#EXT-X-STREAM-INF").count(), 1);

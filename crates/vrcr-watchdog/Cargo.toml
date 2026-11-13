@@ -14,6 +14,7 @@ name = "vrcresolver"
 path = "src/main.rs"
 
 [dependencies]
+base64.workspace = true
 num-traits.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
@@ -50,6 +51,7 @@ windows-sys.workspace = true
 vrcr-build.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
 
