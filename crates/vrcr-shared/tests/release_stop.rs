@@ -201,10 +201,13 @@ fn helper_mode_only_claims_its_own_argument() {
 #[cfg(windows)]
 #[test]
 fn real_process_helpers_terminate_and_wait() {
+    use std::os::windows::process::CommandExt as _;
+
     use vrcr_shared::win;
     let mut child = std::process::Command::new("ping")
         .args(["-n", "30", "127.0.0.1"])
         .stdout(std::process::Stdio::null())
+        .creation_flags(0x0800_0000)
         .spawn()
         .unwrap_or_else(|e| panic!("{e}"));
     let pid = child.id();

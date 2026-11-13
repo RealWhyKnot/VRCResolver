@@ -101,6 +101,8 @@ fn restore(d: &Dir, ops: &dyn RestoreOps) -> (RestoreOutcome, String) {
 #[cfg(windows)]
 #[test]
 fn restore_moves_a_running_wrapper_aside() {
+    use std::os::windows::process::CommandExt as _;
+
     let d = Dir::new();
     let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
     fs::copy(Path::new(&system).join(r"System32\PING.EXE"), d.target())
@@ -110,6 +112,7 @@ fn restore_moves_a_running_wrapper_aside() {
     let mut child = std::process::Command::new(d.target())
         .args(["-n", "30", "127.0.0.1"])
         .stdout(std::process::Stdio::null())
+        .creation_flags(0x0800_0000)
         .spawn()
         .unwrap_or_else(|e| panic!("{e}"));
 
