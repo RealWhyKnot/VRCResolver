@@ -34,9 +34,9 @@ It doesn't bypass DRM, host any content or log in to YouTube.
 1. Launch VRChat once. The patcher needs `Tools/yt-dlp.exe` to exist so it can back it up.
 2. Download the latest `vrcresolver-*.zip` release and extract it anywhere except `Program Files`.
 3. Run `vrcresolver.exe` and accept the one-time UAC prompt. It adds `127.0.0.1 localhost.youtube.com` to your hosts file, which public-world playback needs.
-4. Launch VRChat. When the console shows `[mesh] connected`, paste a video URL into any in-world player.
+4. Launch VRChat. When the console says `Ready.`, paste a video URL into any in-world player.
 
-To update, type `/update` in the console.
+The console tells you when a new version is out. Type `update` to install it.
 
 To uninstall, run `vrcresolver.Uninstaller.exe`. It restores the original `yt-dlp.exe`, removes the hosts entry and deletes `%LOCALAPPDATA%Low\vrcresolver\`. It doesn't ask for confirmation.
 
@@ -44,7 +44,7 @@ Needs 64-bit Windows 10 or 11.
 
 ## Troubleshooting
 
-The console prints one line per resolve: green means resolved, yellow means it fell back to stock yt-dlp, red is an error. Full logs are in `%LOCALAPPDATA%Low\vrcresolver\logs\`. When you file a bug, include the correlation-ID block for the failed resolve.
+The console prints one line per video. `Playing` (green) means it worked. `Skipped` (yellow) means VRChat's own yt-dlp got the video instead, and the line says why. `Failed` (red) means that didn't work either. Full logs are in `%LOCALAPPDATA%Low\vrcresolver\logs\`. When you file a bug, include the log lines for the failed video.
 
 ## How it works
 
