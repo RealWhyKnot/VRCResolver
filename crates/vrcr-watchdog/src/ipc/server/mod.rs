@@ -389,15 +389,8 @@ impl<M: Mesh> Ipc<M> {
 
     #[cfg(windows)]
     async fn accept_loop(self: Arc<Self>, pipe_name: String) {
-        let sddl = match super::pipe::current_user_sid() {
-            Ok(sid) => super::pipe::pipe_sddl(&sid),
-            Err(e) => {
-                self.ux.log_error(
-                    Component::Ipc,
-                    &format!("could not resolve current user SID: {e}"),
-                );
-                return;
-            }
+        let Some(sddl) = startup::pipe_security(super::pipe::current_user_sid(), &self.ux) else {
+            return;
         };
         let path = format!(r"\\.\pipe\{pipe_name}");
         let mut clients = tokio::task::JoinSet::new();
@@ -483,3 +476,6 @@ fn remaining_ms(deadline: Instant) -> i64 {
 }
 
 mod resolution;
+
+#[cfg(windows)]
+mod startup;

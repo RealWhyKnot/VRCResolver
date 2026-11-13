@@ -23,7 +23,7 @@ const REPEAT: Duration = Duration::from_secs(60);
 #[derive(Default)]
 pub struct PlaybackLog {
     plays: Mutex<HashMap<String, Play>>,
-    video_failures: Mutex<HashMap<String, SystemTime>>,
+    video_failures: Mutex<video_failures::VideoFailures>,
 }
 
 struct Play {
@@ -318,6 +318,7 @@ impl PlaybackLog {
             return;
         };
         if let Some(url) = &response.url {
+            self.remember_video_source(&request.url, url, now);
             play.resolved_url = Some(url.clone());
             play.alias(url_key(url));
             play.context.stream_id = stream_id(url);

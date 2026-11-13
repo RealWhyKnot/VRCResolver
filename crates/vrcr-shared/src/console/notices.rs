@@ -66,7 +66,7 @@ impl Ux {
             ),
             Notice::HostsSetupSlow => (
                 Color::Yellow,
-                "Windows is still setting up public-world playback. VRCResolver will continue without it for now.",
+                "Windows is still setting up public-world playback. VRCResolver will carry on without it.",
             ),
             Notice::HostsPermissionDeclined => (
                 Color::Yellow,

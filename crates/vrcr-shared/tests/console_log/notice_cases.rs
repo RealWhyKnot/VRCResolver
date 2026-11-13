@@ -41,7 +41,7 @@ event_case!(
     hosts_setup_slow,
     HostsSetupSlow,
     Yellow,
-    "Windows is still setting up public-world playback. VRCResolver will continue without it for now."
+    "Windows is still setting up public-world playback. VRCResolver will carry on without it."
 );
 event_case!(
     hosts_permission_declined,

@@ -314,20 +314,9 @@ fn banner_keeps_build_details_in_the_log() {
 
 #[test]
 fn widths_preserve_all_sentence_characters_and_column_alignment() {
-    type Width = fn() -> Option<usize>;
-    let widths: [(Option<usize>, Width); 10] = [
-        (Some(20), || Some(20)),
-        (Some(40), || Some(40)),
-        (Some(60), || Some(60)),
-        (Some(69), || Some(69)),
-        (Some(70), || Some(70)),
-        (Some(80), || Some(80)),
-        (Some(120), || Some(120)),
-        (Some(160), || Some(160)),
-        (Some(300), || Some(300)),
-        (None, || None),
-    ];
-    for (width, get_width) in widths {
+    thread_local! { static WIDTH: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) }; }
+    for width in (20..=200).map(Some).chain([Some(300), None]) {
+        WIDTH.set(width);
         for length in [11, 27, 28, 300] {
             let host = "a".repeat(length);
             let displayed = if length >= 27 {
@@ -335,62 +324,83 @@ fn widths_preserve_all_sentence_characters_and_column_alignment() {
             } else {
                 host.clone()
             };
-            for message in ["word ".repeat(40), "x".repeat(200), "x".repeat(2000)] {
+            let narrow = width.is_some_and(|width| width < 80);
+            let room = width.map_or(usize::MAX, |width| width - 1 - if narrow { 10 } else { 49 });
+            let displayed = if narrow && displayed.len() > room {
+                format!("{}...", &displayed[..room - 3])
+            } else {
+                displayed
+            };
+            for message in [
+                "word ".repeat(40),
+                "complete enormous carefully private ".repeat(6),
+                "x".repeat(200),
+                "x".repeat(2000),
+                format!("prefix {} tail", "b".repeat(room.min(180))),
+            ] {
                 let clean = vrcr_shared::logutil::public_message(&message);
                 let sentence = format!("{clean} VRChat will try it on its own.");
                 let (ux, buf) = ux(Style::plain());
-                let ux = ux.with_width(get_width);
-                ux.resolve_outcome(&Outcome {
+                ux.with_width(|| WIDTH.get()).resolve_outcome(&Outcome {
                     host: &host,
                     public_message: Some(&message),
                     ..outcome(ResolveStatus::Fallback)
                 });
                 let text = buf.text();
                 let lines: Vec<_> = text.lines().collect();
-                let host_width = width.map_or(28, |w| w.saturating_sub(42).min(28));
-                let displayed = if host_width == 0 {
-                    String::new()
-                } else if displayed.len() >= host_width {
-                    format!("{}...", &displayed[..host_width - 4])
-                } else {
-                    displayed.clone()
-                };
-                let narrow = width == Some(20);
-                let indent = if narrow { 10 } else { 21 + host_width };
-                let mut body = if narrow {
-                    String::new()
-                } else {
-                    lines[0][21..].to_owned()
-                };
-                let mut sentence_lines = Vec::new();
-                if !narrow {
-                    sentence_lines.push(&lines[0][indent..]);
-                }
-                for line in &lines[1..] {
-                    assert!(line.starts_with(&sp(indent)), "{width:?}: {line:?}");
-                    body.push_str(&line[indent..]);
-                    sentence_lines.push(&line[indent..]);
-                }
-                if message.starts_with("word ") {
-                    assert_eq!(sentence_lines.join(" "), sentence, "{width:?}: {text}");
-                }
-                let body: String = body.chars().filter(|c| !c.is_whitespace()).collect();
-                let expected: String = format!("{displayed}{sentence}")
-                    .chars()
-                    .filter(|c| !c.is_whitespace())
-                    .collect();
-                assert_eq!(body, expected, "width={width:?}, host={length}");
                 assert!(lines[0].starts_with("12:34:56  Skipped"));
                 assert_eq!(text.matches("12:34:56").count(), 1);
                 assert_eq!(text.matches("Skipped").count(), 1);
+                let column = if narrow { 10 } else { 49 };
+                let mut parts: Vec<&str> = Vec::new();
                 if narrow {
-                    assert_eq!(lines[0], "12:34:56  Skipped");
+                    if lines[0] == "12:34:56  Skipped" {
+                        assert!(
+                            lines[1].starts_with(&format!("{}{}", sp(10), displayed)),
+                            "{text}"
+                        );
+                        let first = lines[1][10 + displayed.len()..].trim_start();
+                        if !first.is_empty() {
+                            parts.push(first);
+                        }
+                        parts.extend(lines[2..].iter().map(|line| &line[column..]));
+                    } else {
+                        assert_eq!(lines[0], format!("12:34:56  Skipped  {displayed}"));
+                        parts.extend(lines[1..].iter().map(|line| &line[column..]));
+                    }
                 } else {
-                    assert_eq!(&lines[0][21..21 + displayed.len()], displayed);
-                    assert!(
-                        lines[0].len() > indent,
-                        "sentence starts on the event row: {text}"
+                    assert_eq!(&lines[0][21..49], format!("{displayed:<28}"));
+                    assert!(lines[0].len() > column, "{text}");
+                    parts.extend(lines.iter().map(|line| &line[column..]));
+                }
+                for line in &lines[1..] {
+                    assert!(line.starts_with(&sp(column)), "{width:?}: {line:?}");
+                }
+                if width.is_some_and(|width| width >= 30) {
+                    assert!(text.contains(&displayed), "{text}");
+                }
+                let joined = parts.join(" ");
+                let body: String = joined.chars().filter(|c| !c.is_whitespace()).collect();
+                let expected: String = sentence.chars().filter(|c| !c.is_whitespace()).collect();
+                assert_eq!(body, expected, "width={width:?}, host={length}");
+                for word in sentence
+                    .split_whitespace()
+                    .filter(|word| word.len() <= room)
+                {
+                    assert_eq!(
+                        joined
+                            .split_whitespace()
+                            .filter(|part| *part == word)
+                            .count(),
+                        sentence
+                            .split_whitespace()
+                            .filter(|part| *part == word)
+                            .count(),
+                        "word split at width={width:?}: {word}: {text}"
                     );
+                }
+                if sentence.split_whitespace().all(|word| word.len() <= room) {
+                    assert_eq!(joined, sentence, "{width:?}: {text}");
                 }
                 if let Some(width) = width {
                     assert!(lines.iter().all(|line| line.len() < width), "{text}");
@@ -433,12 +443,8 @@ fn all_video_statuses_share_one_header_row_and_hanging_sentence_columns() {
     ];
     let sentence = "The video is private. VRChat will try it on its own.";
     for (width, get_width) in widths {
-        let column = match width {
-            Some(40) => 21,
-            Some(60) => 39,
-            Some(69) => 48,
-            _ => 49,
-        };
+        let narrow = width.is_some_and(|width| width < 80);
+        let column = if narrow { 10 } else { 49 };
         for status in [
             VideoStatus::Playing,
             VideoStatus::Skipped,
@@ -451,13 +457,20 @@ fn all_video_statuses_share_one_header_row_and_hanging_sentence_columns() {
                 .video(status, "youtube.com", sentence);
             let text = buf.text();
             let lines: Vec<_> = text.lines().collect();
-            assert!(lines[0].starts_with(&format!("12:34:56  {:<11}", status.word())));
-            if column > 21 {
+            if narrow {
+                assert_eq!(
+                    lines[0],
+                    format!("12:34:56  {}  youtube.com", status.word())
+                );
+            } else {
+                assert!(lines[0].starts_with(&format!("12:34:56  {:<11}", status.word())));
                 assert_eq!(lines[0][21..column].trim(), "youtube.com");
             }
+            assert!(width.is_none_or(|width| lines[0].len() < width));
             let words: Vec<_> = lines
                 .iter()
                 .enumerate()
+                .skip(usize::from(narrow))
                 .flat_map(|(i, line)| {
                     if let Some(width) = width {
                         assert!(line.len() < width, "{text}");

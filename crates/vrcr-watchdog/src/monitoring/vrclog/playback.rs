@@ -68,6 +68,9 @@ impl VrcLogMonitor {
 
     pub(super) fn on_opening(&mut self, opened: String, now: SystemTime) {
         let canonical = self.canonical(&opened);
+        if let Some(stats) = &self.deps.stats {
+            stats.playback.reset_video_failure(&canonical);
+        }
         if let Some((previous, _)) = &self.active
             && let Some(stats) = &self.deps.stats
         {

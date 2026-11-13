@@ -119,43 +119,49 @@ impl Ux {
         } else {
             host
         };
-        let host_width = (self.width)().map_or(28, |width| width.saturating_sub(42).min(28));
-        let host = if host_width == 0 {
-            String::new()
-        } else if host.len() >= host_width {
-            let room = host_width.saturating_sub(1);
-            if room >= 3 {
-                format!("{}... ", &host[..room - 3])
-            } else {
-                format!("{} ", &host[..room])
-            }
-        } else {
-            format!("{host:<host_width$}")
-        };
-        let narrow = (self.width)().is_some_and(|width| width < 22);
-        let prefix = [
+        let width = (self.width)().map(|width| width.saturating_sub(1));
+        let narrow = width.is_some_and(|width| width.saturating_sub(49) < 30);
+        let mut prefix = vec![
             (Color::DarkGray, format!("{}  ", (self.clock)())),
             (
                 status.color(),
                 if narrow {
-                    format!("{}\n          ", status.word())
+                    status.word().to_owned()
                 } else {
                     format!("{:<11}", status.word())
                 },
             ),
-            (Color::Gray, host),
         ];
+        if narrow {
+            let room = width.unwrap_or_default().saturating_sub(10);
+            let host = if host.len() > room {
+                if room >= 3 {
+                    format!("{}...", &host[..room - 3])
+                } else {
+                    host[..room].to_owned()
+                }
+            } else {
+                host
+            };
+            if width.is_some_and(|width| 12 + status.word().len() + host.len() <= width) {
+                prefix.push((Color::Gray, format!("  {host}\n          ")));
+            } else {
+                let separator = if host.len() == room {
+                    "\n          "
+                } else {
+                    " "
+                };
+                prefix.push((Color::Gray, format!("\n          {host}{separator}")));
+            }
+        } else {
+            prefix.push((Color::Gray, format!("{host:<28}")));
+        }
         let color = if status == VideoStatus::Playing {
             Color::Gray
         } else {
             Color::White
         };
-        self.present(
-            &prefix,
-            color,
-            sentence,
-            if narrow { 10 } else { 21 + host_width },
-        );
+        self.present(&prefix, color, sentence, if narrow { 10 } else { 49 });
     }
 
     pub fn skipped(&self, host: &str, reason: &str, message: Option<&str>) {

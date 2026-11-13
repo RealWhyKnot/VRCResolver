@@ -1,6 +1,79 @@
 use super::*;
 
 #[tokio::test]
+async fn proxied_player_failures_share_wrapper_dedupe_and_reopening_resets_it() {
+    use std::sync::RwLock;
+    use vrcr_shared::{first_party::FirstPartyPolicy, trust_gateway};
+    use vrcr_watchdog::monitoring::vrclog::{MonitorDeps, VrcLogMonitor};
+    use vrcr_watchdog::stats::Stats;
+
+    const PROXY: &str = "https://us1.vrcresolver.com/api/proxy/stream/video.mp4";
+    for wrapper_first in [true, false] {
+        let dir = TempDir::new().expect("test directory");
+        let out = crate::common::mesh::Capture::default();
+        let ux = out.ux();
+        let stats = Arc::new(Stats::new(SystemTime::now()));
+        let mesh = FakeMesh::always(Step::Reply {
+            action: action::RESOLVED,
+            reason: None,
+            url: Some(PROXY),
+            extra: None,
+            retry_after_ms: None,
+        });
+        let ipc = Ipc::builder(Arc::clone(&mesh), ux.clone(), Log::disabled())
+            .stats(Arc::clone(&stats))
+            .build();
+        let policy = FirstPartyPolicy::default();
+        let opened = trust_gateway::build(&policy, 51234, PROXY, Some("reopen"), "http")
+            .expect("gateway URL");
+        let mut deps = MonitorDeps::new(
+            Arc::<FakeMesh>::clone(&mesh),
+            Arc::new(RwLock::new(policy)),
+            ux,
+            Log::disabled(),
+        );
+        deps.stats = Some(stats);
+        let mut monitor = VrcLogMonitor::new(deps, dir.path().to_owned());
+        assert_eq!(monitor.canonical(&opened), PROXY);
+        assert_ne!(PROXY, URL);
+        assert_eq!(
+            ask(&ipc, &req("avpro", "")).await["action"],
+            action::RESOLVED
+        );
+        let notification = serde_json::json!({"action": action::WRAPPER_OG_FAILED, "url": URL, "reason": "timeout", "rid": "same-video"}).to_string();
+        let started = SystemTime::now();
+        for expected in 1..=2 {
+            monitor.process_text(
+                &format!("[AVProVideo] Opening {opened}\n"),
+                SystemTime::now(),
+            );
+            if wrapper_first {
+                exchange(&ipc, &notification).await;
+            }
+            monitor.process_text("[AVProVideo] Error: Loading failed\n", SystemTime::now());
+            exchange(&ipc, &notification).await;
+            exchange(&ipc, &notification).await;
+            let text = out.text();
+            assert_eq!(text.matches("Failed").count(), expected, "{text}");
+            let sentence = if wrapper_first {
+                "VRChat couldn't play it either."
+            } else {
+                "VRChat couldn't load the video."
+            };
+            assert_eq!(text.matches(sentence).count(), expected);
+            let log = out.logs();
+            assert_eq!(log.matches("[vrclog] load_failure ms=").count(), expected);
+            assert_eq!(
+                log.matches("[wrapper][warn] !! og also failed").count(),
+                expected * if wrapper_first { 3 } else { 2 }
+            );
+            assert_eq!(mesh.resolves().len(), 1);
+        }
+        assert!(started.elapsed().expect("elapsed time") < Duration::from_secs(300));
+    }
+}
+
+#[tokio::test]
 async fn wrapper_and_player_failure_print_only_the_first_row_and_keep_both_logs() {
     use std::sync::RwLock;
     use vrcr_shared::first_party::FirstPartyPolicy;
