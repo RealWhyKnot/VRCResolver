@@ -48,6 +48,6 @@ Rust code follows the surrounding file and `rustfmt.toml`. For decisions that ar
 
 ## Bugs and questions
 
-- Bugs: use the [bug report template](https://github.com/RealWhyKnot/VRCResolver/issues/new?template=bug_report.yml) and paste the watchdog console output around the failure exactly as it appeared.
+- Bugs: [open an issue](https://github.com/RealWhyKnot/VRCResolver/issues/new) and paste the watchdog console output around the failure exactly as it appeared.
 - Questions and setup help: open a [Discussion](https://github.com/RealWhyKnot/VRCResolver/discussions). I'll convert it to an issue if it turns out to be a bug.
 - Security issues: see [SECURITY.md](.github/SECURITY.md) and use the private GitHub advisory flow, never a public issue.

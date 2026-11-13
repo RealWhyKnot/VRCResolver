@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://github.com/RealWhyKnot/VRCResolver/releases/latest">Download</a> ·
   <a href="https://vrcresolver.com">Website</a> ·
-  <a href="https://github.com/RealWhyKnot/VRCResolver/issues/new?template=bug_report.yml">Report a bug</a> ·
+  <a href="https://github.com/RealWhyKnot/VRCResolver/issues/new">Report a bug</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href=".github/SECURITY.md">Security</a>
 </p>
