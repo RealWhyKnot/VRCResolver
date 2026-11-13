@@ -16,7 +16,7 @@ impl App {
         self.hook_console();
         let settings = Arc::new(Store::new(state_root.join("settings.json"), {
             let ux = self.ux.clone();
-            Box::new(move |msg: &str| ux.warn(Component::Terminal, msg))
+            Box::new(move |msg: &str| ux.log_warn(Component::Terminal, msg))
         }));
         let prefs = settings.snapshot();
         self.banner(&state_root);
@@ -112,7 +112,7 @@ impl App {
         let relay = if ports.initialize() {
             let https_allowed = prefs.https_enabled();
             if !https_allowed {
-                self.ux.write(
+                self.ux.log_write(
                     Component::Relay,
                     "secure local video disabled in settings; using local HTTP fallback.",
                 );
@@ -141,14 +141,18 @@ impl App {
                 },
             ));
             if relay_started.is_none() {
-                self.ux.warn(
+                self.ux
+                    .event(vrcr_shared::console::Notice::RelayStartFailed);
+                self.ux.log_warn(
                     Component::Relay,
                     "local video relay could not start -- public-instance local video disabled.",
                 );
             }
             relay_started
         } else {
-            self.ux.warn(
+            self.ux
+                .event(vrcr_shared::console::Notice::LocalPortUnavailable);
+            self.ux.log_warn(
                 Component::Relay,
                 "could not reserve a local video port -- public-instance local video disabled.",
             );
@@ -166,7 +170,7 @@ impl App {
             Ok(false) => "missing",
             Err(_) => "unknown",
         };
-        self.ux.write(
+        self.ux.log_write(
             Component::Relay,
             &crate::diagnostics::startup::line(&crate::diagnostics::startup::Environment {
                 version: &self.build.version,
@@ -227,15 +231,16 @@ impl App {
         }
         phases.mark("patch");
 
-        self.ux.success(
+        self.ux.event(vrcr_shared::console::Notice::Ready);
+        self.ux.log_success(
             Component::Patch,
             "VRChat video hook ready; watching for game updates.",
         );
-        self.ux.write(
+        self.ux.log_write(
             Component::Terminal,
             "type /help for commands, /status for activity, /settings for options.",
         );
-        self.ux.write(
+        self.ux.log_write(
             Component::Terminal,
             "to uninstall, run vrcresolver.Uninstaller.exe from this folder.",
         );
@@ -309,7 +314,7 @@ impl App {
         }
 
         self.life.wait_quit();
-        self.ux.write(
+        self.ux.log_write(
             Component::Shutdown,
             "shutting down; restoring VRChat tools and closing local services.",
         );

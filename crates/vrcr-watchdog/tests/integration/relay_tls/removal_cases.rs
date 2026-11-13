@@ -34,7 +34,7 @@ fn remove_child_clears_every_trace() {
         tls::run_remove(&host, &host.paths, &ux),
         0,
         "{}",
-        out.text()
+        out.logs()
     );
     assert_eq!(host.certs(MachineStore::Root), vec![foreign]);
     assert_eq!(
@@ -61,7 +61,7 @@ fn remove_child_clears_every_trace() {
     let (ux, out) = capture_ux();
     assert_eq!(tls::run_remove(&failing, &failing.paths, &ux), 1);
     assert!(
-        out.text()
+        out.logs()
             .contains("HTTPS cleanup could not remove sslcert for port 50006: netsh failed")
     );
 }

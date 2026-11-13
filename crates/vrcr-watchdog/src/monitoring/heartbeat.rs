@@ -80,7 +80,7 @@ impl Heartbeat {
             &self.stats.activity(),
             (self.cache_size)(),
         );
-        self.ux.write(Component::Heartbeat, &text);
+        self.ux.log_write(Component::Heartbeat, &text);
         Some(text)
     }
 

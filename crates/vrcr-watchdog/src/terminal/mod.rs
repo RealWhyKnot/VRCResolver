@@ -1,5 +1,6 @@
 pub mod blocks;
 pub mod commands;
+mod diagnostics;
 pub mod input;
 pub mod interactive;
 pub mod overlay;

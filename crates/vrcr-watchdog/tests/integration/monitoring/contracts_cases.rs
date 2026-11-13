@@ -85,7 +85,7 @@ fn repeated_failures_on_our_urls_open_the_gate() {
     assert!(!r.gate_open());
     m.mark_playback_failure("https://node1.whyknot.dev/api/proxy/manifest.m3u8?q=c");
     assert!(r.gate_open());
-    assert!(r.out.text().contains(
+    assert!(r.out.logs().contains(
         "resolver paused -- 3 playbacks failed in a row; VRChat's own resolver takes over while things recover"
     ));
 

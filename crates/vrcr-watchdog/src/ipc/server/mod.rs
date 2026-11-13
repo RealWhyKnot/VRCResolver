@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use tokio::time::Instant;
 
@@ -254,7 +254,7 @@ impl<M: Mesh> Ipc<M> {
     }
 
     fn ingress_failure(&self, id: &str, started: Instant, bytes: usize, reason: &str, sent: &str) {
-        self.ux.write(Component::Ipc, &format!("resolve failed req={id} kind=resolve host=unknown status=unknown elapsed_ms={} bytes=0 read_bytes={bytes} retry=false sent={sent} reason={reason}", started.elapsed().as_millis()));
+        self.ux.log_write(Component::Ipc, &format!("resolve failed req={id} kind=resolve host=unknown status=unknown elapsed_ms={} bytes=0 read_bytes={bytes} retry=false sent={sent} reason={reason}", started.elapsed().as_millis()));
     }
 
     pub fn handle_wrapper_event(&self, n: &WrapperEventNotify) {
@@ -274,8 +274,9 @@ impl<M: Mesh> Ipc<M> {
         };
         let reason = sanitize_for_console(n.reason.as_deref().unwrap_or("?"), 32);
         if let Some(msg) = n.public_message.as_deref().filter(|m| !m.is_empty()) {
+            self.ux.skipped(&host, &reason, Some(msg));
             self.ux
-                .warn(Component::Wrapper, &sanitize_for_console(msg, 160));
+                .log_warn(Component::Wrapper, &sanitize_for_console(msg, 160));
         }
         self.ux
             .wrapper_fallback(&host, &reason, u64::try_from(n.elapsed_ms).unwrap_or(0));
@@ -325,6 +326,17 @@ impl<M: Mesh> Ipc<M> {
                 hint_cleared = h.try_clear(url);
             }
         }
+        if self
+            .stats
+            .playback
+            .first_video_failure(url, SystemTime::now())
+        {
+            self.ux.video(
+                vrcr_shared::console::VideoStatus::Failed,
+                &host,
+                "VRChat couldn't play it either.",
+            );
+        }
         let suffix = match reason.as_str() {
             "content_not_found" => " (video unavailable upstream)",
             "cf_403" => " (403 blocked)",
@@ -332,7 +344,7 @@ impl<M: Mesh> Ipc<M> {
             "sign_in_required" => " (auth gate)",
             _ => "",
         };
-        self.ux.warn(
+        self.ux.log_warn(
             Component::Wrapper,
             &format!(
                 "!! og also failed {host} reason={reason} exit={}{suffix}",
@@ -341,7 +353,7 @@ impl<M: Mesh> Ipc<M> {
         );
         if newly_blocked {
             let site = og_hint::site_key(url);
-            self.ux.warn(
+            self.ux.log_warn(
                 Component::Wrapper,
                 &format!(
                     "VRChat's own resolver is blocked on {site}, so {site} videos stay on our resolver for {} min",
@@ -380,7 +392,7 @@ impl<M: Mesh> Ipc<M> {
         let sddl = match super::pipe::current_user_sid() {
             Ok(sid) => super::pipe::pipe_sddl(&sid),
             Err(e) => {
-                self.ux.error(
+                self.ux.log_error(
                     Component::Ipc,
                     &format!("could not resolve current user SID: {e}"),
                 );
@@ -394,7 +406,7 @@ impl<M: Mesh> Ipc<M> {
             let mut server = match super::pipe::create(&path, &sddl) {
                 Ok(s) => s,
                 Err(e) => {
-                    self.ux.warn(
+                    self.ux.log_warn(
                         Component::Ipc,
                         &format!("could not create pipe instance: {e}"),
                     );
@@ -403,7 +415,8 @@ impl<M: Mesh> Ipc<M> {
                 }
             };
             if let Err(e) = server.connect().await {
-                self.ux.warn(Component::Ipc, &format!("accept failed: {e}"));
+                self.ux
+                    .log_warn(Component::Ipc, &format!("accept failed: {e}"));
                 continue;
             }
             while clients.try_join_next().is_some() {}

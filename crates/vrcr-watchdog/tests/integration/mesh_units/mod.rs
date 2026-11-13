@@ -242,7 +242,7 @@ fn recording_post(status: u16) -> (Post, Sent) {
 
 fn reporter(enabled: bool, post: Post) -> (Reporter, Capture) {
     let out = Capture::default();
-    let ux = Ux::new(Box::new(out.clone()), Style::plain(), String::new);
+    let ux = out.ux();
     (Reporter::new(enabled, "1.2.3", ux, machine(), post), out)
 }
 

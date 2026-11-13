@@ -20,7 +20,7 @@ fn missing_wrapper_with_backup_restores_once_and_never_moves_target_again() {
     assert_eq!(read(&r.target), vrc);
     assert_eq!(
         r.out
-            .text()
+            .logs()
             .matches("our yt-dlp wrapper is missing")
             .count(),
         1
@@ -163,7 +163,7 @@ fn restore_helper_fails_when_the_target_is_fully_locked() {
     drop(lock);
     assert!(!ok);
     assert!(r.backup.is_file());
-    assert!(r.out.text().contains("restore error: "));
+    assert!(r.out.logs().contains("restore error: "));
 }
 
 #[test]

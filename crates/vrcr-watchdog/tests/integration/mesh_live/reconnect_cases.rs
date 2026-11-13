@@ -196,7 +196,7 @@ async fn resolve_in_flight_at_a_drop_is_resent_on_the_next_connection() {
 {}
 {}",
         result.reason,
-        t.out.text(),
+        t.out.logs(),
         t.log()
     );
     assert_eq!(
@@ -382,7 +382,7 @@ async fn only_the_first_failed_connect_reaches_the_console() {
     )
     .await;
 
-    let out = t.out.text();
+    let out = t.out.logs();
     let failures: Vec<&str> = out.lines().filter(|l| l.contains("failed after")).collect();
     assert_eq!(failures.len(), 1, "{out}");
     assert!(failures[0].contains("during upgrade"));

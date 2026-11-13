@@ -1,20 +1,18 @@
 use super::*;
 
 #[test]
-fn wrapper_fallback_line_is_stamped_and_yellow() {
-    let (ux, buf) = ux(Style {
-        color: true,
-        unicode: false,
-    });
+fn wrapper_fallback_detail_is_file_only() {
+    let (ux, buf) = ux(Style::plain());
+    let dir = TempDir::new().expect("valid console fixture");
+    let path = dir.path().join("detail.log");
+    ux.tee_to(Log::to_file(&path));
     ux.wrapper_fallback("youtube.com", "pipe_down", 42);
-    assert_eq!(
-        buf.text(),
-        format!(
-            "{}[12:34:56] * [wrapper] !!  fallback  youtube.com{}pipe_down   elapsed=42ms\x1b[0m\n",
-            Color::Yellow.sgr(),
-            sp(24)
-        )
-    );
+    assert_eq!(buf.text(), "");
+    let logged = fs::read_to_string(path).expect("valid console fixture");
+    assert!(logged.contains(&format!(
+        "[12:34:56] * [wrapper] !!  fallback  youtube.com{}pipe_down   elapsed=42ms",
+        sp(24)
+    )));
 }
 
 #[test]

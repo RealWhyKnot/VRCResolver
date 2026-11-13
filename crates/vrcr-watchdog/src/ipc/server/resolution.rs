@@ -15,7 +15,7 @@ impl<M: Mesh> Ipc<M> {
             .resolver_origin(&id, &self.mesh.current_node_host());
         let mut cid = req.correlation_id.clone();
         if req.action != action::RESOLVE {
-            self.ux.warn(
+            self.ux.log_warn(
                 Component::Ipc,
                 &format!(
                     "rejecting request id={id} action={} -- only \"resolve\" is accepted on this pipe",
@@ -28,7 +28,7 @@ impl<M: Mesh> Ipc<M> {
             return;
         }
         if !matches!(req.player, Some(Player::AvPro | Player::Unity)) {
-            self.ux.warn(
+            self.ux.log_warn(
                 Component::Ipc,
                 &format!(
                     "rejecting request id={id}{} player={} -- must be \"avpro\" or \"unity\" (case-sensitive)",
@@ -87,10 +87,11 @@ impl<M: Mesh> Ipc<M> {
                 h.try_clear(&req.url);
             }
         } else if hint.is_some_and(|h| h.should_prefer_og(&req.url)) {
+            self.ux.skipped(&host, "prior_load_failure", None);
             trace.reason = "prior_load_failure";
             trace.sent = "fallback_native";
             framing::write_fallback(pipe, &id, og_reason::PRIOR_LOAD_FAILURE).await;
-            self.ux.write(
+            self.ux.log_write(
                 Component::Ipc,
                 &format!(
                     "og-fallback (prior load_failure) id={id}{} host={host}",
@@ -106,16 +107,28 @@ impl<M: Mesh> Ipc<M> {
         {
             let (paused, shift) = gate.should_short_circuit(self.mesh.is_connected());
             if shift == Transition::Closed {
-                self.ux.success(
+                self.ux.resolver_restored();
+                self.ux.log_success(
                     Component::Ipc,
                     "resolver restored -- mesh resolving re-enabled",
                 );
             }
             if paused {
                 if let Some(frame) = self.local_frame(&req, &id, deadline).await {
+                    self.ux.resolve_outcome(&Outcome {
+                        host: &host,
+                        player: &player_label,
+                        height: response_height(&frame),
+                        status: ResolveStatus::Local,
+                        via_cache: false,
+                        via_lh_yt,
+                        elapsed: started.elapsed(),
+                        reason: None,
+                        public_message: None,
+                    });
                     trace.reply(&frame, false);
                     let _ = framing::write_frame(pipe, &frame).await;
-                    self.ux.write(
+                    self.ux.log_write(
                         Component::Ipc,
                         &format!(
                             "local resolve (resolver paused) id={id}{} host={host}",
@@ -124,10 +137,11 @@ impl<M: Mesh> Ipc<M> {
                     );
                     return;
                 }
+                self.ux.skipped(&host, "resolver_paused", None);
                 trace.reason = "resolver_paused";
                 trace.sent = "fallback_native";
                 framing::write_fallback(pipe, &id, og_reason::RESOLVER_UNHEALTHY).await;
-                self.ux.write(
+                self.ux.log_write(
                     Component::Ipc,
                     &format!(
                         "og-fallback (resolver paused) id={id}{} host={host}",
@@ -143,6 +157,7 @@ impl<M: Mesh> Ipc<M> {
         let mut outcome = "?".to_owned();
         let mut server_reason: Option<String> = None;
         let mut public_message = None;
+        let mut height = None;
         let mut via_cache = false;
         let mut via_local = false;
         let mut failure: Option<Failure> = None;
@@ -165,6 +180,7 @@ impl<M: Mesh> Ipc<M> {
         };
 
         if let Some(hit) = cached {
+            height = response_height(&hit.frame);
             trace.reply(&hit.frame, true);
             if framing::write_frame(pipe, &hit.frame).await.is_err() {
                 trace.finished = false;
@@ -219,6 +235,7 @@ impl<M: Mesh> Ipc<M> {
                     via_local = local.is_some();
                     let frame = local.as_deref().unwrap_or(&result.frame);
                     trace.retried = req.id != trace.request.id;
+                    height = response_height(frame);
                     trace.reply(frame, false);
                     if framing::write_frame(pipe, frame).await.is_err() {
                         trace.finished = false;
@@ -249,6 +266,7 @@ impl<M: Mesh> Ipc<M> {
             match local {
                 Some(frame) => {
                     via_local = true;
+                    height = response_height(&frame);
                     trace.reply(&frame, false);
                     let _ = framing::write_frame(pipe, &frame).await;
                 }
@@ -291,6 +309,7 @@ impl<M: Mesh> Ipc<M> {
         self.stats.perf.record_resolve(status, via_cache, elapsed);
         self.ux.resolve_outcome(&Outcome {
             host: &host,
+            height,
             player: &player_label,
             status,
             via_cache,
@@ -305,15 +324,27 @@ impl<M: Mesh> Ipc<M> {
         {
             let healthy =
                 is_healthy_outcome(fail_reason, &outcome, server_reason.as_deref(), budget_ms);
-            match gate.record_resolve_outcome(crate::health::ResolveOutcome { healthy, resolved: outcome == action::RESOLVED }) {
-                Transition::Opened => self.ux.warn(
+            match gate.record_resolve_outcome(crate::health::ResolveOutcome {
+                healthy,
+                resolved: outcome == action::RESOLVED,
+            }) {
+                Transition::Opened => {
+                    self.ux.resolver_paused();
+                    self.ux.log_warn(
                     Component::Ipc,
                     &format!(
                         "resolver paused -- {} resolves failed in a row; VRChat's own resolver takes over while the connection recovers",
                         health::OPEN_THRESHOLD
                     ),
-                ),
-                Transition::Closed => self.ux.success(Component::Ipc, "resolver restored -- mesh resolving re-enabled"),
+                )
+                }
+                Transition::Closed => {
+                    self.ux.resolver_restored();
+                    self.ux.log_success(
+                        Component::Ipc,
+                        "resolver restored -- mesh resolving re-enabled",
+                    )
+                }
                 Transition::None => {}
             }
         }
@@ -476,4 +507,10 @@ impl<M: Mesh> Ipc<M> {
                 .line(&format!("[resolve-cache] store failed id={id}: {e}")),
         }
     }
+}
+
+fn response_height(frame: &[u8]) -> Option<i32> {
+    serde_json::from_slice::<ResolveResponse>(frame)
+        .ok()?
+        .resolved_height
 }

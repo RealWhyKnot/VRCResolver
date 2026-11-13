@@ -44,7 +44,8 @@ impl VrcLogMonitor {
         if missing && !self.audio_missing {
             let audio = (self.deps.audio)();
             if audio.blocks_playback() {
-                ux.error(
+                ux.event(vrcr_shared::console::Notice::NoSound);
+                ux.log_error(
                     Component::VrcLog,
                     &format!(
                         "VRChat has no sound output: {}. Videos will fail to load until you {NO_SOUND_FIX}",
@@ -52,13 +53,15 @@ impl VrcLogMonitor {
                     ),
                 );
             } else {
-                ux.warn(
+                ux.event(vrcr_shared::console::Notice::AudioUnavailable);
+                ux.log_warn(
                     Component::VrcLog,
                     "VRChat found no audio devices; AVPro videos can fail to load until Windows audio recovers",
                 );
             }
         } else if !missing && self.audio_missing {
-            ux.write(Component::VrcLog, "VRChat's audio devices are back");
+            ux.event(vrcr_shared::console::Notice::AudioRestored);
+            ux.log_write(Component::VrcLog, "VRChat's audio devices are back");
         }
         self.audio_missing = missing;
     }
@@ -120,10 +123,22 @@ impl VrcLogMonitor {
 
     pub(super) fn report_load_failure(&mut self, observed: &str, ms: i32, now: SystemTime) {
         let failed = self.canonical(observed);
+        if self
+            .deps
+            .stats
+            .as_ref()
+            .is_none_or(|stats| stats.playback.first_video_failure(&failed, now))
+        {
+            self.deps.ux.video(
+                vrcr_shared::console::VideoStatus::Failed,
+                &failed,
+                "VRChat couldn't load the video.",
+            );
+        }
         if self.audio_missing {
             let audio = (self.deps.audio)();
             if audio.blocks_playback() {
-                self.deps.ux.error(
+                self.deps.ux.log_error(
                     Component::VrcLog,
                     &format!(
                         "video failed to load because VRChat has no sound output: {}. To fix it, {NO_SOUND_FIX} (not a resolver fault)",
@@ -141,7 +156,7 @@ impl VrcLogMonitor {
         let height = self.delivered_height(&failed, now);
         self.send(&failed, feedback::LOAD_FAILURE, ms, height);
         let recovery = self.mark_playback_failure(&failed);
-        self.deps.ux.write(
+        self.deps.ux.log_write(
             Component::VrcLog,
             &format!(
                 "load_failure ms={ms} url={}{} error={}",
@@ -201,12 +216,17 @@ impl VrcLogMonitor {
     }
 
     pub(super) fn on_silent_stall(&mut self, opened: &str, ms: i32, now: SystemTime) {
+        let reported = self.canonical(opened);
+        self.deps.ux.video(
+            vrcr_shared::console::VideoStatus::Stalled,
+            &reported,
+            "The video stopped loading in VRChat.",
+        );
         if self.handle_wedged_relay(opened, ms) {
             self.playing = None;
             self.active = None;
             return;
         }
-        let reported = self.canonical(opened);
         let height = self.delivered_height(&reported, now);
         self.send(&reported, feedback::SILENT_STALL, ms, height);
         if let Some(stats) = &self.deps.stats {
@@ -220,7 +240,7 @@ impl VrcLogMonitor {
         self.playing = None;
         self.active = None;
         let recovery = self.mark_playback_failure(&reported);
-        self.deps.ux.warn(
+        self.deps.ux.log_warn(
             Component::VrcLog,
             &format!(
                 "silent_stall ms={ms} url={}{}",
@@ -238,7 +258,7 @@ impl VrcLogMonitor {
             return false;
         };
         let handled = (wedge.on_wedged)(port);
-        self.deps.ux.warn(
+        self.deps.ux.log_warn(
             Component::VrcLog,
             &format!(
                 "relay_pool_wedged ms={ms} port={port}: VRChat never reached the local relay{}",
@@ -280,7 +300,8 @@ impl VrcLogMonitor {
             && let Some(gate) = &self.deps.health
             && gate.record_playback_failure() == Transition::Opened
         {
-            self.deps.ux.warn(
+            self.deps.ux.resolver_paused();
+            self.deps.ux.log_warn(
                 Component::VrcLog,
                 &format!(
                     "resolver paused -- {} playbacks failed in a row; VRChat's own resolver takes over while things recover",

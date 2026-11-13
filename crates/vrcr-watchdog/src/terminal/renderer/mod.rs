@@ -1,3 +1,5 @@
+mod replies;
+
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command as Process;
@@ -5,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::SystemTime;
 
-use vrcr_shared::console::{Component, Overlay, OverlayGuard, Ux};
+use vrcr_shared::console::{Color, Component, Overlay, OverlayGuard, Ux};
 use vrcr_shared::paths::AppPaths;
 
 use super::blocks::{self, Item, PaletteCommand};
@@ -115,26 +117,6 @@ impl Renderer {
             &s.settings.snapshot(),
             s.animations_available,
         )
-    }
-
-    pub fn info(&self, message: &str) {
-        self.inner.session.record_output("info", message);
-        self.inner.services.ux.write(Component::Terminal, message);
-    }
-
-    pub fn success(&self, message: &str) {
-        self.inner.session.record_output("success", message);
-        self.inner.services.ux.success(Component::Terminal, message);
-    }
-
-    pub fn warn(&self, message: &str) {
-        self.inner.session.record_output("warn", message);
-        self.inner.services.ux.warn(Component::Terminal, message);
-    }
-
-    pub fn error(&self, message: &str) {
-        self.inner.session.record_output("error", message);
-        self.inner.services.ux.error(Component::Terminal, message);
     }
 
     pub fn echo_command(&self, command: &str) {
@@ -251,17 +233,7 @@ impl Renderer {
     }
 
     pub fn render_diagnostics(&self, session: &SessionStore) {
-        let s = &self.inner.services;
-        let shown = |p: &std::path::Path| p.display().to_string();
-        let rows = vec![
-            ("install".to_owned(), shown(&s.install_dir)),
-            ("state".to_owned(), shown(&s.paths.state_root())),
-            ("settings".to_owned(), shown(s.settings.path())),
-            ("logs".to_owned(), shown(&s.paths.logs_dir())),
-            ("crashes".to_owned(), shown(&s.paths.crashes_dir())),
-            ("terminal history".to_owned(), shown(session.history_path())),
-            ("this session".to_owned(), shown(session.session_path())),
-        ];
+        let rows = super::diagnostics::rows(&self.inner.services, session);
         self.render_frames(
             "diagnostics",
             &blocks::key_value("diagnostics", &rows, self.usable_width(), self.glyphs()),

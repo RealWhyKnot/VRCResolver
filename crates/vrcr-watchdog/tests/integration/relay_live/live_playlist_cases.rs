@@ -145,7 +145,7 @@ async fn large_live_playlist_is_trimmed_before_localizing_and_segments_still_rel
         .await
     );
     assert_eq!(origin.hits.load(Ordering::SeqCst), 2);
-    let diagnostics = output.text();
+    let diagnostics = output.logs();
     assert!(
         !diagnostics.contains("large-media-playlist"),
         "{diagnostics}"
@@ -193,7 +193,7 @@ async fn live_fifty_reloads_log_one_quiet_trim_and_old_segments_survive_window_a
         }
     }
     assert!(eventually(|| server.in_flight() == 0, WITHIN).await);
-    let log = output.text();
+    let log = output.logs();
     assert_eq!(log.matches("playlist trimmed").count(), 1);
     assert!(!log.contains("[warn] playlist trimmed"));
     assert!(!log.contains("large-media-playlist"));

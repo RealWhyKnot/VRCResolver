@@ -83,59 +83,45 @@ fn resolve_public_message_limit_handles_multibyte_input_at_the_boundary() {
 }
 
 #[test]
-fn resolve_public_messages_fit_console_width_without_moving_columns() {
-    let sample = Outcome {
-        reason: Some("all_configs_failed"),
-        public_message: Some("The video is blocked in the country the server connects from."),
-        ..outcome(ResolveStatus::Fallback)
-    };
-    let (wide, full) = ux(Style::plain());
-    wide.resolve_outcome(&sample);
-    for width in [20, 80, 120, 160] {
-        let (narrow, buffer) = ux(Style::plain());
-        let narrow = match width {
-            20 => narrow.with_width(|| Some(20)),
-            80 => narrow.with_width(|| Some(80)),
-            120 => narrow.with_width(|| Some(120)),
-            _ => narrow.with_width(|| Some(160)),
-        };
-        narrow.resolve_outcome(&sample);
-        let text = buffer.text();
-        assert_eq!(text.lines().count(), 1);
-        let line = text.trim_end();
-        assert!(line.len() < width);
-        assert_eq!(
-            line,
-            console::truncate_pad(
-                full.text().trim_end(),
-                full.text().trim_end().len().min(width - 1)
-            )
+fn playback_notices_are_ascii_colored_and_restore_the_prompt() {
+    for style in [
+        Style::plain(),
+        Style {
+            color: true,
+            unicode: true,
+        },
+    ] {
+        let (ux, buffer) = ux(style);
+        let counts = Arc::new(Mutex::new(Counts::default()));
+        let _guard = ux.use_overlay(Box::new(Counting(Arc::clone(&counts))));
+        ux.playback_error(
+            "youtube.com",
+            &console::PlaybackError::proxy("access_denied"),
         );
+        let expected = if style.color {
+            format!(
+                "> {}12:34:56  {}Problem    {}youtube.com{}{}The video site refused the server's request.\x1b[0m\n> ",
+                Color::DarkGray.sgr(),
+                Color::Yellow.sgr(),
+                Color::Gray.sgr(),
+                sp(17),
+                Color::White.sgr()
+            )
+        } else {
+            format!(
+                "> 12:34:56  Problem    youtube.com{}The video site refused the server's request.\n> ",
+                sp(17)
+            )
+        };
+        let text = buffer.text();
+        assert_eq!(text, expected);
+        assert!(text.is_ascii());
+        if style.color {
+            assert!(text.ends_with("\x1b[0m\n> "));
+        }
+        let counts = counts.lock().expect("counts");
+        assert_eq!((counts.clear, counts.render), (1, 2));
     }
-}
-
-#[test]
-fn playback_notices_are_ascii_grey_and_restore_the_prompt() {
-    let (ux, buffer) = ux(Style {
-        color: true,
-        unicode: true,
-    });
-    let counts = Arc::new(Mutex::new(Counts::default()));
-    let _guard = ux.use_overlay(Box::new(Counting(Arc::clone(&counts))));
-    ux.playback_error(
-        "youtube.com",
-        &console::PlaybackError::proxy("access_denied"),
-    );
-    assert_eq!(
-        buffer.text(),
-        format!(
-            "> {}[12:34:56] * [relay][warn] youtube.com{} -- The video site refused the server's request.\x1b[0m\n> ",
-            Color::Gray.sgr(),
-            sp(17)
-        )
-    );
-    let counts = counts.lock().expect("counts");
-    assert_eq!((counts.clear, counts.render), (1, 2));
 }
 
 #[test]
@@ -145,19 +131,19 @@ fn write_clears_and_restores_the_active_overlay() {
     let guard = ux.use_overlay(Box::new(Counting(std::sync::Arc::clone(&counts))));
     assert_eq!(counts.lock().map(|c| c.render).unwrap_or(0), 1);
 
-    ux.write(Component::Terminal, "hello");
+    ux.notice(Color::Gray, "hello");
 
     let (clear, render) = counts
         .lock()
         .map(|c| (c.clear, c.render))
         .unwrap_or_default();
     assert_eq!((clear, render), (1, 2));
-    assert!(buf.text().contains("[12:34:56] * [terminal] hello\n"));
+    assert!(buf.text().contains("12:34:56  hello\n"));
 
     drop(guard);
     let cleared = counts.lock().map(|c| c.clear).unwrap_or(0);
     assert_eq!(cleared, 2);
-    ux.write(Component::Mesh, "after");
+    ux.notice(Color::Gray, "after");
     assert_eq!(counts.lock().map(|c| c.render).unwrap_or(0), 2);
 }
 
@@ -169,7 +155,7 @@ fn a_stale_overlay_guard_does_not_remove_a_newer_overlay() {
     let old = ux.use_overlay(Box::new(Counting(first)));
     let _new = ux.use_overlay(Box::new(Counting(std::sync::Arc::clone(&second))));
     drop(old);
-    ux.write(Component::Ipc, "x");
+    ux.notice(Color::Gray, "x");
     assert_eq!(second.lock().map(|c| c.render).unwrap_or(0), 2);
 }
 
@@ -177,36 +163,38 @@ fn a_stale_overlay_guard_does_not_remove_a_newer_overlay() {
 fn a_failing_overlay_is_dropped_and_writes_continue() {
     let (ux, buf) = ux(Style::plain());
     let _g = ux.use_overlay(Box::new(Broken));
-    ux.write(Component::Relay, "one");
-    ux.write(Component::Relay, "two");
-    assert!(buf.text().contains("[relay] one"));
-    assert!(buf.text().contains("[relay] two"));
+    ux.notice(Color::Gray, "one");
+    ux.notice(Color::Gray, "two");
+    assert!(buf.text().contains("12:34:56  one"));
+    assert!(buf.text().contains("12:34:56  two"));
 }
 
 #[test]
-fn levels_use_their_tags_and_colors() {
+fn notice_levels_use_plain_text_and_colors() {
     let (ux, buf) = ux(Style {
         color: true,
         unicode: true,
     });
-    ux.warn(Component::Hosts, "w");
-    ux.error(Component::Patch, "e");
-    ux.success(Component::Update, "s");
-    ux.fatal("f");
+    ux.notice(Color::Yellow, "w");
+    ux.notice(Color::Red, "e");
+    ux.notice(Color::White, "s");
+    ux.notice(Color::Red, "f");
     let text = buf.text();
-    assert!(text.contains(&format!(
-        "{}[12:34:56] \u{2022} [hosts][warn] w\x1b[0m",
-        Color::Yellow.sgr()
-    )));
-    assert!(text.contains(&format!(
-        "{}[12:34:56] \u{2022} [patch][err] e\x1b[0m",
-        Color::Red.sgr()
-    )));
-    assert!(text.contains(&format!(
-        "{}[12:34:56] \u{2022} [update] s\x1b[0m",
-        Color::Green.sgr()
-    )));
-    assert!(text.contains("\u{2022} [FATAL] f"));
+    for (color, body) in [
+        (Color::Yellow, "w"),
+        (Color::Red, "e"),
+        (Color::White, "s"),
+        (Color::Red, "f"),
+    ] {
+        assert!(text.contains(&format!(
+            "{}12:34:56  {}{body}\x1b[0m\n",
+            Color::DarkGray.sgr(),
+            color.sgr()
+        )));
+    }
+    assert!(!text.contains("[warn]"));
+    assert!(!text.contains("[err]"));
+    assert!(!text.contains('*'));
 }
 
 #[test]

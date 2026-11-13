@@ -218,13 +218,13 @@ where
     let scheme = if secure { "https" } else { "http" };
     ports.write_scheme_file(scheme);
     let ready = |scheme: &str| {
-        ux.success(
+        ux.log_success(
             Component::Relay,
             &format!("local video relay ready: {scheme}://{RELAY_HOST}:{port}"),
         );
     };
     let could_not_start = |e: &io::Error| {
-        ux.warn(
+        ux.log_warn(
             Component::Relay,
             &format!("local video relay could not start on port {port}: {e}"),
         );
@@ -237,7 +237,8 @@ where
         }
         Err(e) if !secure => Err(could_not_start(&e)),
         Err(e) => {
-            ux.warn(
+            ux.event(vrcr_shared::console::Notice::SecurePlaybackRetry);
+            ux.log_warn(
                 Component::Relay,
                 &format!("secure local video failed: {e} -- retrying local HTTP fallback."),
             );

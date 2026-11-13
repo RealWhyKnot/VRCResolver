@@ -18,10 +18,10 @@ fn a_closed_gate_announces_recovery() {
     );
     assert!(
         r.out
-            .text()
+            .logs()
             .contains("resolver restored -- mesh resolving re-enabled"),
         "{}",
-        r.out.text()
+        r.out.logs()
     );
 }
 
@@ -40,7 +40,7 @@ fn audio_device_count_is_tracked_once_per_change() {
     );
     assert!(!m.audio_devices_missing());
     assert_eq!(r.probes.load(Ordering::SeqCst), 1);
-    let text = r.out.text();
+    let text = r.out.logs();
     assert_eq!(text.matches("VRChat found no audio devices").count(), 1);
     assert!(text.contains("VRChat's audio devices are back"));
 }

@@ -185,16 +185,16 @@ fn rejected_and_failed_posts_are_warned_about() {
         .unwrap_or_else(|| panic!("no payload"));
     r.send(&payload);
     assert!(
-        out.text().contains("server rejected report: 429"),
+        out.logs().contains("server rejected report: 429"),
         "{}",
-        out.text()
+        out.logs()
     );
     let failing: Post = Arc::new(|_: &ReportPayload| Err("dns failure".to_owned()));
     let (r, out) = reporter(true, failing);
     r.send(&payload);
     assert!(
-        out.text().contains("post failed: dns failure"),
+        out.logs().contains("post failed: dns failure"),
         "{}",
-        out.text()
+        out.logs()
     );
 }

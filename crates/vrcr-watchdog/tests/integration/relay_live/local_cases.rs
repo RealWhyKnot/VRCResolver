@@ -56,7 +56,7 @@ async fn a_stored_manifest_is_served_without_going_upstream() {
     let opened = format!("http://localhost.youtube.com:{}{}", h.server.port(), h.path);
     assert_eq!(h.activity.wedged_port(&opened), None);
     h.server.stop().await;
-    let text = h.out.text();
+    let text = h.out.logs();
     assert_eq!(text.matches("playlist req=").count(), 1, "{text}");
     assert!(text.contains("kind=master mode=unknown segments=0 target_ms=0"));
     assert!(text.contains(&format!(

@@ -19,7 +19,7 @@ async fn stop_fails_waiting_resolves_and_closes_the_link() {
     assert_eq!(result.reason.as_deref(), Some(fallback::SERVER_UNREACHABLE));
     assert!(
         t.out
-            .text()
+            .logs()
             .contains("failing 1 pending requests reason=server_unreachable ids=r1")
     );
     assert!(!t.client.is_connected());

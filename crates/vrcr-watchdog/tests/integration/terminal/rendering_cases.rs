@@ -114,15 +114,29 @@ fn status_tools_diagnostics_and_update_render() {
     assert!(h.out.text().contains("resolver mesh"));
     h.run("diag");
     let out = h.out.text();
-    assert!(out.contains("* diagnostics"));
+    assert!(out.lines().any(|line| line == "diagnostics"));
     assert!(out.contains("this session"));
+    for label in ["version", "sha", "build time", "os", "rustc", "vrc tools"] {
+        assert!(out.contains(label), "{out}");
+    }
+    h.run("help");
+    assert!(
+        h.out
+            .text()
+            .contains("To uninstall, run vrcresolver.Uninstaller.exe from this folder.")
+    );
     h.run("permissions");
-    assert!(h.out.text().contains("shell execution is not exposed."));
+    assert!(!h.out.text().contains("shell execution isn't exposed."));
+    assert!(
+        h.out
+            .logs()
+            .contains("permissions: local watchdog commands only; shell execution isn't exposed.")
+    );
     h.run("update");
     assert!(
         h.out
             .text()
-            .contains("[terminal][err] updater not found in install folder")
+            .contains("  updater not found in install folder")
     );
 }
 
@@ -157,4 +171,74 @@ fn status_rows_describe_idle_and_disconnected_states() {
     assert_eq!(find("peak speed").1, "none yet");
     assert_eq!(find("resolves").2, "0 local video, 0 cache hits");
     assert_eq!(rows.len(), 8);
+}
+
+#[test]
+fn terminal_ready_is_logged_without_an_extra_console_tip() {
+    let h = harness();
+    h.core.renderer().log_ready();
+    assert_eq!(h.out.text(), "");
+    assert!(
+        h.out
+            .logs()
+            .contains("[terminal] interactive terminal ready; type /help for commands.")
+    );
+}
+
+#[test]
+fn replies_are_plain_and_keep_all_log_levels() {
+    let h = harness();
+    let renderer = h.core.renderer();
+    renderer.info("Information.");
+    renderer.success("Ready.");
+    renderer.warn("Warning.");
+    renderer.error("Error.");
+    assert_eq!(
+        h.out.text(),
+        "  Information.\n  Ready.\n  Warning.\n  Error.\n"
+    );
+    let log = h.out.logs();
+    for line in [
+        "[terminal] Information.",
+        "[terminal] Ready.",
+        "[terminal][warn] Warning.",
+        "[terminal][err] Error.",
+    ] {
+        assert!(log.contains(line), "{log}");
+    }
+    for command in ["help", "status", "update", "diagnostics", "unknown-command"] {
+        h.run(command);
+    }
+    let text = h.out.text();
+    for old in ["[terminal]", "[warn]", "[err]", "* "] {
+        assert!(!text.contains(old), "{text}");
+    }
+}
+
+#[test]
+fn command_replies_keep_warning_and_error_colors() {
+    let h = harness_styled(
+        None,
+        vrcr_shared::console::Style {
+            color: true,
+            unicode: false,
+        },
+    );
+    let renderer = h.core.renderer();
+    renderer.info("Information.");
+    renderer.success("Ready.");
+    renderer.warn("Warning.");
+    renderer.error("Error.");
+    let expected: String = [
+        (Color::Gray, "Information."),
+        (Color::White, "Ready."),
+        (Color::Yellow, "Warning."),
+        (Color::Red, "Error."),
+    ]
+    .into_iter()
+    .map(|(color, text)| format!("{}  {}{text}\x1b[0m\n", Color::DarkGray.sgr(), color.sgr()))
+    .collect();
+    assert_eq!(h.out.text(), expected);
+    assert!(h.out.logs().contains("[terminal][warn] Warning."));
+    assert!(h.out.logs().contains("[terminal][err] Error."));
 }

@@ -146,6 +146,23 @@ fn check_asks_the_channel_endpoint() {
 }
 
 #[test]
+fn update_announcement_uses_the_release_tag_and_keeps_the_log_detail() {
+    let release = block_on(update::check(true, "1.0", |_| async {
+        Some(r#"[{"tag_name":"v2.0-rc","html_url":"https://example.test/releases/v2.0-rc","prerelease":true}]"#.to_owned())
+    })).expect("newer release");
+    assert_eq!(release.tag, "v2.0-rc");
+    let (ux, out) = capture_ux();
+    release.announce(&ux);
+    assert_eq!(
+        out.text(),
+        "  Version v2.0-rc is available. Type update to install it.\n"
+    );
+    assert!(out.logs().contains(
+        "[update] version v2.0-rc (prerelease) is available; type /update to install (example.test"
+    ));
+}
+
+#[test]
 fn disabled_update_check_logs_and_spawns_nothing() {
     let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
     let log_path = dir.path().join("w.log");
@@ -241,7 +258,7 @@ fn staged_updater_replaces_the_stale_one() {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(names, vec!["vrcresolver.Updater.exe".to_owned()]);
-    assert!(out.text().contains("updater refreshed for future updates."));
+    assert!(out.logs().contains("updater refreshed for future updates."));
 }
 
 #[test]
@@ -306,7 +323,7 @@ fn staged_updater_keeps_the_old_one_when_the_stage_cannot_move_in() {
     );
     assert!(root.join("vrcresolver.Updater.next.exe").is_file());
     assert!(
-        out.text()
+        out.logs()
             .contains("could not refresh updater yet; it will retry on next launch.")
     );
     assert!(

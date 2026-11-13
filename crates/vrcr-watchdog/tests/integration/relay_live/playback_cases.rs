@@ -27,7 +27,7 @@ async fn playback_proxy_sentences_repeat_only_after_recovery() {
         ),
         ("request_failed", "A request to the server failed."),
         ("invalid_range", ""),
-        ("new_reason!/.?", "playback error: new_reason"),
+        ("new_reason!/.?", "A request to the server failed."),
     ] {
         let upstream = origin(403, None, Some(reason), b"");
         let output = Capture::default();
@@ -44,7 +44,7 @@ async fn playback_proxy_sentences_repeat_only_after_recovery() {
             output
                 .text()
                 .lines()
-                .filter(|line| line.contains("[relay][warn]"))
+                .filter(|line| line.contains("Problem"))
                 .map(str::to_owned)
                 .collect::<Vec<_>>()
         };
@@ -52,7 +52,7 @@ async fn playback_proxy_sentences_repeat_only_after_recovery() {
             assert_eq!(notices(), Vec::<String>::new());
         } else {
             assert_eq!(notices().len(), 1, "{reason}");
-            assert!(notices()[0].contains(&format!("{:<28} -- {sentence}", "us1.vrcresolver.com")));
+            assert!(notices()[0].contains(&format!("{:<28}{sentence}", "us1.vrcresolver.com")));
             assert!(!notices()[0].contains("/api/"));
         }
         upstream.status.store(200, Ordering::SeqCst);

@@ -27,7 +27,7 @@ impl Inner {
             self.stats.record_reconnect();
             let wait_ms = (self.cfg.next_backoff_ms)(attempt);
             if attempt <= 5 || attempt.is_multiple_of(10) {
-                self.ux.write(
+                self.ux.log_write(
                     Component::Mesh,
                     &format!("reconnect attempt {attempt} in {} s", wait_ms / 1000),
                 );
@@ -86,13 +86,34 @@ impl Inner {
     pub(super) fn report_failure(&self, text: &str) {
         let attempt = self.reconnect_attempt.load(Ordering::SeqCst);
         if self.was_connected.load(Ordering::SeqCst) || attempt == 0 {
-            self.ux.warn(Component::Mesh, text);
+            self.ux.log_warn(Component::Mesh, text);
         } else {
             self.log.line(&format!(
                 "[mesh] reconnect attempt {attempt} failed: {text}"
             ));
         }
-        self.was_connected.store(false, Ordering::SeqCst);
+        self.console_disconnected();
+    }
+
+    pub(super) fn console_disconnected(&self) {
+        if self.was_connected.swap(false, Ordering::SeqCst) && !*self.shutdown.borrow() {
+            *lock(&self.console_outage) = Some(Self::now());
+            self.ux.event(vrcr_shared::console::Notice::Disconnected);
+        }
+    }
+
+    pub(super) fn console_connected(&self) {
+        self.was_connected.store(true, Ordering::SeqCst);
+        let message = lock(&self.console_outage).take().map_or_else(
+            || "Connected to the server.".to_owned(),
+            |start| {
+                format!(
+                    "Connected again after {}.",
+                    vrcr_shared::console::connection_duration(start.elapsed())
+                )
+            },
+        );
+        self.ux.notice(vrcr_shared::console::Color::Gray, &message);
     }
 
     pub(super) async fn attempt(self: &Arc<Self>, shutdown: &mut watch::Receiver<bool>) -> Attempt {
@@ -156,24 +177,27 @@ impl Inner {
                 sanitize_for_console(&e, 160)
             ));
         }
-        self.was_connected.store(true, Ordering::SeqCst);
+        self.console_connected();
         *lock(&self.last_pong) = Some(Self::now());
         self.arm_welcome(&link);
         self.ux
-            .write(Component::Mesh, &format!("connected node={node}"));
+            .log_write(Component::Mesh, &format!("connected node={node}"));
 
         let pumped = tokio::select! {
             r = self.pump(&link, stream) => Some(r),
             _ = shutdown.wait_for(|s| *s) => None,
         };
         match &pumped {
-            Some(Ok(())) => self.ux.write(Component::Mesh, "disconnected (clean close)"),
+            Some(Ok(())) => self
+                .ux
+                .log_write(Component::Mesh, "disconnected (clean close)"),
             Some(Err(e)) => self.report_failure(&format!(
                 "disconnected (error): {}",
                 sanitize_for_console(e, 160)
             )),
             None => {}
         }
+        self.console_disconnected();
         self.mark_link_down(&link);
         self.settle_connect();
         link.settle_welcome();
@@ -278,7 +302,7 @@ impl Inner {
             Ok(Ok(())) => Ok(true),
             Ok(Err(e)) => Err(e.to_string()),
             Err(_) => {
-                self.ux.warn(
+                self.ux.log_warn(
                     Component::Mesh,
                     &format!(
                         "send stalled for {}s; dropping the connection to reconnect",
@@ -315,7 +339,7 @@ impl Inner {
                     if self.is_msgpack() {
                         self.dispatch_binary(Some(link), &b).await;
                     } else {
-                        self.ux.warn(
+                        self.ux.log_warn(
                             Component::Mesh,
                             "unexpected Binary frame on json-negotiated connection -- aborting + reconnecting",
                         );

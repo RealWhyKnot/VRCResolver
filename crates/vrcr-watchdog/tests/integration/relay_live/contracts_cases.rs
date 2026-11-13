@@ -76,8 +76,8 @@ async fn https_without_a_certificate_refuses_to_start() {
     cfg.scheme = "https".to_owned();
     assert!(RelayServer::start(cfg, deps).await.is_err());
     assert!(
-        out.text().contains("no certificate loaded"),
+        out.logs().contains("no certificate loaded"),
         "{}",
-        out.text()
+        out.logs()
     );
 }

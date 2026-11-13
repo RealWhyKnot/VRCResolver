@@ -152,7 +152,7 @@ async fn broken_upstream_bodies_end_the_client_response_quickly() {
         .await;
     assert!(r.complete);
     assert!(eventually(|| h.script.open() == 0 && h.server.in_flight() == 0, WITHIN).await);
-    let text = h.out.text();
+    let text = h.out.logs();
     assert!(text.contains("reason=upstream_short_body"), "{text}");
     assert!(text.contains("reason=upstream_body_error"), "{text}");
 }
@@ -270,7 +270,7 @@ async fn relay_streams_through_the_real_http_client() {
         ))
         .await;
     assert_eq!(r.status, 502);
-    let text = out.text();
+    let text = out.logs();
     assert!(text.contains("blocked_address"), "{text}");
     assert!(text.contains("sent=502 reason=blocked_address"), "{text}");
 

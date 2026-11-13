@@ -83,11 +83,7 @@ async fn a_server_fallback_is_answered_locally() {
     let step = FakeStep::new(Answer::Plays);
     let reported = Arc::new(Mutex::new(Vec::new()));
     let output = crate::common::mesh::Capture::default();
-    let ux = Ux::new(
-        Box::new(output.clone()),
-        vrcr_shared::console::Style::plain(),
-        String::new,
-    );
+    let ux = output.ux();
     let ipc = Ipc::builder(Arc::clone(&mesh), ux, Log::disabled())
         .local(Some(Arc::<FakeStep>::clone(&step)))
         .report_fallback({
@@ -111,9 +107,13 @@ async fn a_server_fallback_is_answered_locally() {
     assert_eq!(v["resolved_height"], 1080);
     assert_eq!(step.calls(), 1);
     let text = output.text();
-    assert_eq!(text.matches("[resolve]").count(), 1);
-    assert!(text.contains("OK  local"));
-    assert!(text.contains("all_configs_failed -- The video is private."));
+    assert_eq!(text.matches("Playing").count(), 1);
+    assert!(text.contains("1080p, ready in"));
+    assert!(
+        output
+            .logs()
+            .contains("all_configs_failed -- The video is private.")
+    );
     assert_eq!(
         *reported.lock().unwrap_or_else(|e| e.into_inner()),
         Vec::<String>::new()

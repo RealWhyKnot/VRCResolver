@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 
 use tempfile::TempDir;
-use vrcr_shared::console::{Style, Ux};
+use vrcr_shared::console::Ux;
 use vrcr_shared::first_party::FirstPartyPolicy;
 use vrcr_shared::log::Log;
 use vrcr_shared::wire::{Player, ResolveRequest, ResolveResponse};
@@ -21,10 +21,7 @@ fn now(seconds: u64) -> SystemTime {
 
 fn output() -> (Ux, Capture) {
     let capture = Capture::default();
-    (
-        Ux::new(Box::new(capture.clone()), Style::plain(), String::new),
-        capture,
-    )
+    (capture.ux(), capture)
 }
 
 fn resolve(playback: &PlaybackLog, ux: &Ux) {
@@ -113,7 +110,7 @@ fn diagnostics_resolve_playlist_and_closing_session_share_one_playback() {
     assert_eq!(context.stream_id, "wk_fixture");
     assert_eq!(context.source, "server");
     playback.close(TARGET, "player_closed", now(5), &ux);
-    let text = capture.text();
+    let text = capture.logs();
     assert!(
         text.contains("resolve start req=resolve-one host=source.example player=avpro"),
         "{text}"
@@ -136,7 +133,7 @@ fn diagnostics_repeats_flush_exact_counts_and_preserve_active_playbacks() {
         playback.request(&request, "manifest-http-404", now(index / 5), &ux);
     }
     playback.close(TARGET, "error", now(101), &ux);
-    let text = capture.text();
+    let text = capture.logs();
     assert_eq!(text.matches("request failed").count(), 3, "{text}");
     assert!(text.contains("count=301"));
     assert!(text.contains("count=500"));
@@ -153,12 +150,12 @@ fn diagnostics_repeats_flush_exact_counts_and_preserve_active_playbacks() {
         &ux,
     );
     playback.expire(now(999), &ux);
-    assert_eq!(capture.text(), "");
+    assert_eq!(capture.logs(), "");
     playback.close(TARGET, "replaced", now(1000), &ux);
-    assert_eq!(capture.text(), "");
+    assert_eq!(capture.logs(), "");
     request.local_path = "/play/active/file.mp4".to_owned();
     playback.request(&request, "manifest-http-404", now(1001), &ux);
-    assert!(capture.text().contains("ended=replaced"));
+    assert!(capture.logs().contains("ended=replaced"));
 }
 
 #[test]
@@ -272,14 +269,14 @@ fn diagnostics_monitor_closes_after_a_short_simulated_playback() {
         Some("loading_failed,code=0x80004005")
     );
     drop(messages);
-    assert!(capture.text().contains("ended=error"));
+    assert!(capture.logs().contains("ended=error"));
     assert!(
         capture
-            .text()
+            .logs()
             .contains("error=loading_failed,code=0x80004005")
     );
-    assert!(!capture.text().contains("[warn]"));
-    private_text_is_absent(&capture.text());
+    assert!(!capture.logs().contains("[warn]"));
+    private_text_is_absent(&capture.logs());
 }
 
 #[test]
@@ -376,16 +373,16 @@ fn diagnostics_pending_repeats_flush_while_playback_is_still_open() {
     let request = sample(502);
     playback.request(&request, "manifest-http-502", now(1), &ux);
     playback.request(&request, "manifest-http-502", now(2), &ux);
-    assert_eq!(capture.text().matches("request failed").count(), 1);
+    assert_eq!(capture.logs().matches("request failed").count(), 1);
     playback.expire(now(61), &ux);
-    assert_eq!(capture.text().matches("request failed").count(), 2);
-    assert!(capture.text().contains("count=2"));
-    assert!(!capture.text().contains("session playback="));
+    assert_eq!(capture.logs().matches("request failed").count(), 2);
+    assert!(capture.logs().contains("count=2"));
+    assert!(!capture.logs().contains("session playback="));
     playback.close(TARGET, "player_closed", now(62), &ux);
-    assert_eq!(capture.text().matches("request failed").count(), 2);
+    assert_eq!(capture.logs().matches("request failed").count(), 2);
     assert!(
         capture
-            .text()
+            .logs()
             .contains("statuses=502:2 ended=player_closed")
     );
 }
@@ -406,7 +403,7 @@ fn diagnostics_resolve_failure_has_a_disposition_and_closes_only_its_playback() 
         trace.sent = "fallback_native";
         trace.retried = true;
     }
-    let text = capture.text();
+    let text = capture.logs();
     assert!(text.contains(
         "resolve failed req=failed-one kind=resolve host=source.example status=unknown elapsed_ms="
     ));
@@ -439,8 +436,8 @@ fn diagnostics_first_failure_is_visible_when_repeat_memory_is_full() {
     for status in 400..465 {
         playback.request(&sample(status), "", now(u64::from(status)), &ux);
     }
-    assert_eq!(capture.text().matches("request failed").count(), 65);
-    assert!(capture.text().contains("status=464"));
+    assert_eq!(capture.logs().matches("request failed").count(), 65);
+    assert!(capture.logs().contains("status=464"));
 }
 
 #[test]

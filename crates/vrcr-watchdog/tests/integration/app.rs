@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use tempfile::TempDir;
-use vrcr_shared::console::{Style, Ux};
+use vrcr_shared::console::Ux;
 use vrcr_shared::{legacy, wire};
 use vrcr_watchdog::app::{
     self, BuildInfo, Channel, ChildMode, CreateError, Instance, InstanceMutex, MeshSnapshot,
@@ -19,10 +19,7 @@ use crate::common::mesh::Capture;
 
 fn capture_ux() -> (Ux, Capture) {
     let out = Capture::default();
-    (
-        Ux::new(Box::new(out.clone()), Style::plain(), String::new),
-        out,
-    )
+    (out.ux(), out)
 }
 
 fn args(list: &[&str]) -> Vec<String> {
@@ -296,11 +293,10 @@ async fn relay_starts_https_when_the_cert_is_ready() {
     assert_eq!(started, Some((Attempt { port, secure: true }, "https")));
     assert_eq!(scheme_file(&dir), "https");
     assert!(
-        out.text().contains(&format!(
-            "local video relay ready: https://localhost.youtube.com:{port}"
-        )),
+        out.logs()
+            .contains("local video relay ready: localhost.youtube.com"),
         "{}",
-        out.text()
+        out.logs()
     );
 }
 
@@ -377,16 +373,14 @@ async fn failed_https_bind_retries_http_on_the_same_port() {
         ]
     );
     assert_eq!(scheme_file(&dir), "http");
-    let text = out.text();
+    let text = out.logs();
     assert!(
         text.contains(
             "secure local video failed: tls handshake setup failed -- retrying local HTTP fallback."
         ),
         "{text}"
     );
-    assert!(text.contains(&format!(
-        "local video relay ready: http://localhost.youtube.com:{port}"
-    )));
+    assert!(text.contains("local video relay ready: localhost.youtube.com"));
 }
 
 #[tokio::test]
@@ -419,7 +413,7 @@ async fn busy_port_moves_to_a_fresh_one() {
     assert_ne!(first, second);
     assert_eq!(started, Some((second, "http")));
     assert_eq!(*attempts.borrow(), vec![first, second]);
-    let text = out.text();
+    let text = out.logs();
     assert!(
         text.contains(&format!(
             "local video relay could not start on port {first}: address in use"

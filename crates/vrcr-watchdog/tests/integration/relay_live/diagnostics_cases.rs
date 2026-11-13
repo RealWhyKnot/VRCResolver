@@ -62,7 +62,7 @@ async fn diagnostics_five_hundred_missing_segments_have_two_counted_lines_and_on
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
     }));
-    let text = output.text();
+    let text = output.logs();
     assert!(text.contains(&format!("req={}", ids[0])));
     assert!(text.contains(&format!("req={}", ids[499])));
     drop(ids);
@@ -104,8 +104,8 @@ async fn diagnostics_refusals_and_http_parse_failures_have_ids_and_dispositions(
         .await
         .expect("write");
     assert_eq!(malformed.reply(false).await.status, 400);
-    assert!(eventually(|| harness.out.text().contains("http_parse_failed"), WITHIN).await);
-    let text = harness.out.text();
+    assert!(eventually(|| harness.out.logs().contains("http_parse_failed"), WITHIN).await);
+    let text = harness.out.logs();
     assert!(text.contains("request failed req=relay-"));
     assert!(text.contains("bytes=0 retry=false sent=405 reason=method_refused"));
     assert!(text.contains("bytes=0 retry=false sent=403 reason=origin_refused"));
@@ -153,5 +153,5 @@ async fn diagnostics_verbose_completion_is_one_file_line_without_a_url() {
     assert!(text.contains("sent=200"));
     assert!(!text.contains("/api/"));
     assert!(!text.contains("https://"));
-    assert!(!output.text().contains("[debug]"));
+    assert!(!output.logs().contains("[debug]"));
 }

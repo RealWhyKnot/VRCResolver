@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use tempfile::TempDir;
-use vrcr_shared::console::{Style, Ux};
+use vrcr_shared::console::Ux;
 use vrcr_shared::log::Log;
 use vrcr_shared::win::Elevated;
 use vrcr_watchdog::hosts::{
@@ -17,10 +17,7 @@ const GIVE_UP: &str = "won't ask again";
 
 fn capture_ux() -> (Ux, Capture) {
     let out = Capture::default();
-    (
-        Ux::new(Box::new(out.clone()), Style::plain(), String::new),
-        out,
-    )
+    (out.ux(), out)
 }
 
 #[test]
@@ -86,15 +83,15 @@ fn add_child_appends_once_with_crlf() {
         "# hosts\r\n127.0.0.1 localhost\r\n127.0.0.1 localhost.youtube.com # VRCResolver\r\n"
     );
     assert_eq!(hosts::read_bypass_state(&path), Ok(true));
-    assert_eq!(out.text(), "");
+    assert_eq!(out.logs(), "");
 
     let missing = dir.path().join("etc").join("hosts");
     assert_eq!(hosts::read_bypass_state(&missing), Ok(false));
     assert_eq!(hosts::run_add(&missing, &ux), 1);
     assert!(
-        out.text().contains("[hosts]") && out.text().contains("add failed: "),
+        out.logs().contains("[hosts]") && out.logs().contains("add failed: "),
         "{}",
-        out.text()
+        out.logs()
     );
 }
 
@@ -113,7 +110,7 @@ fn remove_child_drops_every_entry_and_keeps_the_rest() {
     assert_eq!(hosts::run_remove(&path, &ux), 0);
     assert_eq!(fs::metadata(&path).and_then(|m| m.modified()).ok(), before);
     assert_eq!(hosts::run_remove(&dir.path().join("absent"), &ux), 0);
-    assert_eq!(out.text(), "");
+    assert_eq!(out.logs(), "");
 
     let lf = hosts_file(&dir, "a\n127.0.0.1 localhost.youtube.com\nb\n");
     assert_eq!(hosts::run_remove(&lf, &ux), 0);
@@ -176,7 +173,7 @@ fn declined_elevation_is_recorded_for_the_session() {
     assert_eq!(s.args(), vec![ADD_ARG]);
     assert!(m.declined_this_session());
     assert!(!m.prompt_in_flight());
-    let text = out.text();
+    let text = out.logs();
     assert!(text.contains("adding entry for public-instance support -- UAC prompt incoming."));
     assert!(text.contains("UAC declined -- entry not modified."));
     assert!(!text.contains("entry not present after elevation"));
@@ -195,7 +192,7 @@ fn prompt_that_leaves_no_entry_is_a_decline() {
         );
         m.ensure_entry();
         assert!(m.declined_this_session());
-        let text = out.text();
+        let text = out.logs();
         assert!(text.contains(
             "entry not present after elevation -- public-instance support may not work."
         ));
@@ -215,8 +212,8 @@ fn prompt_that_leaves_no_entry_is_a_decline() {
     );
     m.ensure_entry();
     assert!(m.declined_this_session());
-    assert!(out.text().contains("elevation error: no shell"));
-    assert!(!out.text().contains("entry not present"));
+    assert!(out.logs().contains("elevation error: no shell"));
+    assert!(!out.logs().contains("entry not present"));
 }
 
 #[test]
@@ -231,7 +228,7 @@ fn prompt_that_adds_the_entry_is_not_a_decline() {
     m.ensure_entry();
     assert!(!m.declined_this_session());
     assert!(s.active.load(Ordering::SeqCst));
-    assert!(out.text().contains("added 127.0.0.1 localhost.youtube.com"));
+    assert!(out.logs().contains("added 127.0.0.1 localhost.youtube.com"));
 }
 
 #[test]
@@ -246,7 +243,7 @@ fn existing_entry_never_prompts() {
     m.ensure_entry();
     assert_eq!(s.args(), <[std::string::String; 0]>::default());
     assert!(!m.declined_this_session());
-    assert_eq!(out.text(), "");
+    assert_eq!(out.logs(), "");
 }
 
 #[test]
@@ -398,7 +395,7 @@ fn ticker_does_not_reprompt_after_a_decline() {
     h.advance(3600);
     t.tick();
     assert_eq!(h.calls(), 1);
-    let text = out.text();
+    let text = out.logs();
     assert_single_ascii_give_up(&text);
     assert!(text.contains("tick: re-add failed (UAC declined or write blocked)"));
     assert!(!text.contains("next attempt in"));
@@ -413,8 +410,8 @@ fn ticker_waits_while_the_startup_prompt_is_open() {
     h.advance(60);
     t.tick();
     assert_eq!(h.calls(), 0);
-    assert!(!out.text().contains("failed"));
-    assert!(!out.text().contains(GIVE_UP));
+    assert!(!out.logs().contains("failed"));
+    assert!(!out.logs().contains(GIVE_UP));
 
     Harness::set(&h.in_flight, false);
     h.set_on_ensure(Some(Box::new(|h| {
@@ -425,9 +422,9 @@ fn ticker_waits_while_the_startup_prompt_is_open() {
     t.tick();
     assert_eq!(h.calls(), 1);
     assert!(
-        out.text().contains("tick: re-add succeeded in 1000 ms"),
+        out.logs().contains("tick: re-add succeeded in 1000 ms"),
         "{}",
-        out.text()
+        out.logs()
     );
 }
 
@@ -437,7 +434,7 @@ fn declined_startup_prompt_is_not_followed_by_another() {
     Harness::set(&h.in_flight, true);
     let (t, out) = ticker(&h);
     t.tick();
-    assert!(!out.text().contains(GIVE_UP));
+    assert!(!out.logs().contains(GIVE_UP));
     Harness::set(&h.in_flight, false);
     Harness::set(&h.declined, true);
     t.tick();
@@ -445,8 +442,8 @@ fn declined_startup_prompt_is_not_followed_by_another() {
     t.tick();
     t.tick();
     assert_eq!(h.calls(), 0);
-    assert_single_ascii_give_up(&out.text());
-    assert!(!out.text().contains("re-adding"));
+    assert_single_ascii_give_up(&out.logs());
+    assert!(!out.logs().contains("re-adding"));
 }
 
 #[test]
@@ -459,12 +456,12 @@ fn prompt_taken_over_by_another_caller_is_not_a_failed_attempt() {
     })));
     t.tick();
     assert_eq!(h.calls(), 1);
-    assert!(!out.text().contains(GIVE_UP));
+    assert!(!out.logs().contains(GIVE_UP));
     Harness::set(&h.in_flight, false);
     h.set_on_ensure(None);
     t.tick();
     assert_eq!(h.calls(), 2);
-    assert!(out.text().contains(GIVE_UP));
+    assert!(out.logs().contains(GIVE_UP));
 }
 
 #[test]
@@ -480,7 +477,7 @@ fn successful_readd_is_not_repeated() {
     h.advance(3600);
     t.tick();
     assert_eq!(h.calls(), 1);
-    let text = out.text();
+    let text = out.logs();
     assert!(text.contains("tick: localhost.youtube.com missing -- re-adding"));
     assert!(text.contains("re-add succeeded"));
     assert_eq!(text.matches("entry present").count(), 0);
@@ -505,9 +502,9 @@ fn readd_that_errors_counts_as_the_failed_attempt() {
     t.tick();
     log.close();
     assert_eq!(h.calls(), 1);
-    assert_single_ascii_give_up(&out.text());
-    assert!(out.text().contains("tick: re-add failed (boom)"));
-    assert!(!out.text().contains("re-add threw"));
+    assert_single_ascii_give_up(&out.logs());
+    assert!(out.logs().contains("tick: re-add failed (boom)"));
+    assert!(!out.logs().contains("re-add threw"));
     assert!(
         fs::read_to_string(&log_path)
             .unwrap_or_default()
@@ -527,7 +524,7 @@ fn present_and_unreadable_states_log_only_on_change() {
     t.tick();
     Harness::set(&h.unreadable, false);
     t.tick();
-    let text = out.text();
+    let text = out.logs();
     assert_eq!(
         text.matches("tick: localhost.youtube.com entry present")
             .count(),
@@ -546,7 +543,7 @@ fn present_and_unreadable_states_log_only_on_change() {
     Harness::set(&fresh.unreadable, true);
     let (t, out) = ticker(&fresh);
     t.tick();
-    assert_eq!(out.text(), "");
+    assert_eq!(out.logs(), "");
 }
 
 #[test]

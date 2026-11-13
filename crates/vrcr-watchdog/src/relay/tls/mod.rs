@@ -110,12 +110,14 @@ impl<'a> RelayTls<'a> {
         match self.trusted(&thumb) {
             Ok(true) => return self.config(&material),
             Ok(false) => {}
-            Err(e) => self.ux.warn(
+            Err(e) => self.ux.log_warn(
                 Component::Relay,
                 &format!("HTTPS readiness check failed: {e}"),
             ),
         }
-        self.ux.write(
+        self.ux
+            .event(vrcr_shared::console::Notice::SecurePermissionNeeded);
+        self.ux.log_write(
             Component::Relay,
             "configuring HTTPS for localhost.youtube.com -- UAC prompt incoming.",
         );
@@ -124,14 +126,17 @@ impl<'a> RelayTls<'a> {
             Elevated::Exited(0) => {}
             Elevated::Exited(_) => return None,
             Elevated::Declined => {
-                self.ux.write(
+                self.ux
+                    .event(vrcr_shared::console::Notice::SecurePermissionDeclined);
+                self.ux.log_write(
                     Component::Relay,
                     "UAC declined -- HTTPS relay not configured.",
                 );
                 return None;
             }
             Elevated::TimedOut => {
-                self.ux.warn(
+                self.ux.event(vrcr_shared::console::Notice::SecureSetupSlow);
+                self.ux.log_warn(
                     Component::Relay,
                     "HTTPS elevation child still running after 60s -- falling back to HTTP.",
                 );
@@ -139,25 +144,29 @@ impl<'a> RelayTls<'a> {
             }
             Elevated::Failed(e) => {
                 self.ux
-                    .warn(Component::Relay, &format!("HTTPS elevation error: {e}"));
+                    .event(vrcr_shared::console::Notice::SecureSetupLaunchFailed);
+                self.ux
+                    .log_warn(Component::Relay, &format!("HTTPS elevation error: {e}"));
                 return None;
             }
         }
         match self.trusted(&thumb) {
             Ok(true) => {
-                self.ux.write(
+                self.ux.log_write(
                     Component::Relay,
                     &format!("HTTPS ready for localhost.youtube.com:{port}"),
                 );
                 return self.config(&material);
             }
             Ok(false) => {}
-            Err(e) => self.ux.warn(
+            Err(e) => self.ux.log_warn(
                 Component::Relay,
                 &format!("HTTPS verification failed after elevation: {e}"),
             ),
         }
-        self.ux.warn(
+        self.ux
+            .event(vrcr_shared::console::Notice::SecureSetupIncomplete);
+        self.ux.log_warn(
             Component::Relay,
             "HTTPS setup did not complete; falling back to HTTP relay.",
         );
@@ -168,7 +177,9 @@ impl<'a> RelayTls<'a> {
         match server_config(material) {
             Ok(c) => Some(c),
             Err(e) => {
-                self.ux.warn(
+                self.ux
+                    .event(vrcr_shared::console::Notice::CertificateReadFailed);
+                self.ux.log_warn(
                     Component::Relay,
                     &format!("HTTPS certificate could not be loaded: {e}"),
                 );
@@ -205,7 +216,9 @@ impl<'a> RelayTls<'a> {
         let material = match generate((self.now)()) {
             Ok(m) => m,
             Err(e) => {
-                self.ux.warn(
+                self.ux
+                    .event(vrcr_shared::console::Notice::CertificateCreateFailed);
+                self.ux.log_warn(
                     Component::Relay,
                     &format!("HTTPS certificate could not be created: {e}"),
                 );
@@ -213,7 +226,9 @@ impl<'a> RelayTls<'a> {
             }
         };
         if let Err(e) = self.save(&material) {
-            self.ux.warn(
+            self.ux
+                .event(vrcr_shared::console::Notice::CertificateSaveFailed);
+            self.ux.log_warn(
                 Component::Relay,
                 &format!("HTTPS certificate could not be saved: {e}"),
             );
@@ -255,18 +270,21 @@ pub fn run_bootstrap(
         .and_then(|p| p.trim().parse::<u16>().ok())
         .is_some_and(valid_port);
     if !port_ok {
-        ux.error(Component::Relay, "HTTPS setup failed: invalid port.");
+        ux.event(vrcr_shared::console::Notice::SecurePortInvalid);
+        ux.log_error(Component::Relay, "HTTPS setup failed: invalid port.");
         return 2;
     }
     let der = match args.get(1).map(|h| hex::decode(h.trim())) {
         Some(Ok(der)) => der,
         _ => {
-            ux.error(Component::Relay, "HTTPS setup failed: invalid certificate.");
+            ux.event(vrcr_shared::console::Notice::CertificateInvalid);
+            ux.log_error(Component::Relay, "HTTPS setup failed: invalid certificate.");
             return 2;
         }
     };
     if let Err(e) = validate_for_trust(&der, now) {
-        ux.error(Component::Relay, &format!("HTTPS setup failed: {e}"));
+        ux.event(vrcr_shared::console::Notice::SecureSetupFailed);
+        ux.log_error(Component::Relay, &format!("HTTPS setup failed: {e}"));
         return 2;
     }
     let keep = thumbprint(&der);
@@ -274,11 +292,13 @@ pub fn run_bootstrap(
         host.store_remove(MachineStore::Root, &|c| is_ours(c) && thumbprint(c) != keep)
     });
     if let Err(e) = trusted {
-        ux.error(Component::Relay, &format!("HTTPS setup failed: {e}"));
+        ux.event(vrcr_shared::console::Notice::SecureSetupFailed);
+        ux.log_error(Component::Relay, &format!("HTTPS setup failed: {e}"));
         return 1;
     }
     if let Err(e) = host.store_remove(MachineStore::My, &is_ours) {
-        ux.warn(
+        ux.event(vrcr_shared::console::Notice::OldCertificateRemoveFailed);
+        ux.log_warn(
             Component::Relay,
             &format!("HTTPS setup could not remove the old personal certificate: {e}"),
         );
@@ -319,7 +339,8 @@ pub fn run_remove(host: &dyn TlsHost, paths: &ChildPaths, ux: &Ux) -> i32 {
     for port in legacy_ports(paths) {
         if let Err(e) = host.delete_legacy_binding(port) {
             errors += 1;
-            ux.warn(
+            ux.event(vrcr_shared::console::Notice::OldConnectionRemoveFailed);
+            ux.log_warn(
                 Component::Relay,
                 &format!("HTTPS cleanup could not remove sslcert for port {port}: {e}"),
             );
@@ -328,7 +349,8 @@ pub fn run_remove(host: &dyn TlsHost, paths: &ChildPaths, ux: &Ux) -> i32 {
     let mut step = |result: io::Result<()>, what: &str| {
         if let Err(e) = result {
             errors += 1;
-            ux.warn(
+            ux.event(vrcr_shared::console::Notice::SecureCleanupFailed);
+            ux.log_warn(
                 Component::Relay,
                 &format!("HTTPS cleanup could not {what}: {e}"),
             );

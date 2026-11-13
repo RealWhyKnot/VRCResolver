@@ -1,6 +1,11 @@
 use url::Url;
 
 pub fn public_message(value: &str) -> String {
+    let plain = console_sentence(value);
+    crate::console::truncate_pad(&plain, plain.len().min(200))
+}
+
+pub fn console_sentence(value: &str) -> String {
     let mut plain = String::new();
     let mut chars = value.chars().peekable();
     while let Some(character) = chars.next() {
@@ -50,8 +55,7 @@ pub fn public_message(value: &str) -> String {
         }
     }
     let redacted = redact_message_urls(&plain);
-    let collapsed = redacted.split_whitespace().collect::<Vec<_>>().join(" ");
-    crate::console::truncate_pad(&collapsed, collapsed.len().min(200))
+    redacted.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub fn playback_reason(value: &str) -> String {

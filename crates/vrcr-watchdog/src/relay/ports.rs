@@ -31,7 +31,7 @@ impl RelayPortManager {
 
     pub fn initialize(&self) -> bool {
         if let Err(e) = fs::create_dir_all(&self.state_root) {
-            self.ux.warn(
+            self.ux.log_warn(
                 Component::Relay,
                 &format!("could not create {}: {e}", self.state_root.display()),
             );
@@ -39,7 +39,7 @@ impl RelayPortManager {
         let previous = self.read_previous_port();
         if let Some(prev) = previous.filter(|p| claim_specific(*p)) {
             self.publish(prev);
-            self.ux.write(
+            self.ux.log_write(
                 Component::Relay,
                 &format!("reserved local video port {prev} (reused)"),
             );
@@ -47,7 +47,7 @@ impl RelayPortManager {
         }
         let Some(fresh) = claim_ephemeral() else {
             self.ux
-                .error(Component::Relay, "could not reserve a local video port");
+                .log_error(Component::Relay, "could not reserve a local video port");
             return false;
         };
         self.publish(fresh);
@@ -56,7 +56,7 @@ impl RelayPortManager {
         } else {
             ""
         };
-        self.ux.write(
+        self.ux.log_write(
             Component::Relay,
             &format!("reserved local video port {fresh}{suffix}"),
         );
@@ -65,7 +65,7 @@ impl RelayPortManager {
 
     pub fn try_reserve_fresh_port(&self, reason: &str) -> bool {
         let Some(fresh) = claim_ephemeral() else {
-            self.ux.error(
+            self.ux.log_error(
                 Component::Relay,
                 "could not reserve a replacement local video port",
             );
@@ -83,7 +83,7 @@ impl RelayPortManager {
         } else {
             String::new()
         };
-        self.ux.write(
+        self.ux.log_write(
             Component::Relay,
             &format!("reserved local video port {fresh}{detail}"),
         );
@@ -126,7 +126,7 @@ impl RelayPortManager {
         let result = fs::write(&tmp, content).and_then(|()| fs::rename(&tmp, &path));
         if let Err(e) = result {
             self.ux
-                .warn(Component::Relay, &format!("could not write {name}: {e}"));
+                .log_warn(Component::Relay, &format!("could not write {name}: {e}"));
         }
     }
 }

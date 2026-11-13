@@ -219,7 +219,7 @@ fn live_trim_notices_and_slow_hitches_are_bounded_per_stream() {
     for reload in 0..50 {
         detector.record(&timing, utc(reload * 5), &ux, &log);
     }
-    let text = output.text();
+    let text = output.logs();
     assert_eq!(text.matches("playlist trimmed").count(), 1);
     assert_eq!(text.matches("slow-live-playlist-reload").count(), 5);
     assert!(!text.contains("large-media-playlist"));
@@ -227,15 +227,15 @@ fn live_trim_notices_and_slow_hitches_are_bounded_per_stream() {
     assert!(!text.contains("private/path"));
     assert!(!text.contains("secret"));
     detector.record(&timing, utc(600), &ux, &log);
-    assert_eq!(output.text().matches("playlist trimmed").count(), 2);
+    assert_eq!(output.logs().matches("playlist trimmed").count(), 2);
     timing.media.as_mut().expect("media").bytes += 2_000_000;
     detector.record(&timing, utc(601), &ux, &log);
     timing.media.as_mut().expect("media").kept = 30;
     detector.record(&timing, utc(602), &ux, &log);
-    assert_eq!(output.text().matches("playlist trimmed").count(), 4);
+    assert_eq!(output.logs().matches("playlist trimmed").count(), 4);
     timing.local_path = "/play/another/index.m3u8".to_owned();
     detector.record(&timing, utc(603), &ux, &log);
-    assert_eq!(output.text().matches("playlist trimmed").count(), 5);
+    assert_eq!(output.logs().matches("playlist trimmed").count(), 5);
     timing.total_ms = 10;
     timing.bytes_out = 5_600_000;
     timing.media.as_mut().expect("media").kept = 2880;
@@ -243,8 +243,8 @@ fn live_trim_notices_and_slow_hitches_are_bounded_per_stream() {
     for reload in 0..50 {
         detector.record(&timing, utc(1000 + reload * 5), &ux, &log);
     }
-    assert_eq!(output.text().matches("large-media-playlist").count(), 5);
-    assert_eq!(output.text().matches("untrimmed=budget").count(), 5);
+    assert_eq!(output.logs().matches("large-media-playlist").count(), 5);
+    assert_eq!(output.logs().matches("untrimmed=budget").count(), 5);
 }
 
 fn tag_number(body: &str, tag: &str) -> usize {

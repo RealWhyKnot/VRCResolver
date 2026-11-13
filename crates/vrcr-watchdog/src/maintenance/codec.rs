@@ -521,11 +521,20 @@ pub async fn run_check<E: CodecEnv>(
     let dirty = installer
         .run(&REQUIRED, &mut state, |outcome| {
             let (ok, text) = report_message(outcome);
+            let name = match outcome.codec.probe {
+                "av1" => "AV1",
+                "h265" => "HEVC",
+                "vp9" => "VP9",
+                _ => outcome.codec.name,
+            };
             if ok {
-                ux.success(Component::Codec, &text);
+                ux.log_success(Component::Codec, &text);
+                ux.notice(vrcr_shared::console::Color::Gray, &format!("{name} video support is ready."));
                 capabilities.refresh();
             } else {
-                ux.warn(Component::Codec, &text);
+                ux.log_warn(Component::Codec, &text);
+                let when = if is_transient(outcome.detail) { "tomorrow" } else { "next week" };
+                ux.notice(vrcr_shared::console::Color::Yellow, &format!("{name} video support couldn't be installed. VRCResolver will try again {when}."));
             }
         })
         .await;

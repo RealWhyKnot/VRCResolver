@@ -56,7 +56,7 @@ pub fn pick_highest(list: &Value) -> Option<Release> {
     pick_highest_entry(list).and_then(release_of)
 }
 
-pub fn available_message(doc: &Value, include_prereleases: bool, local: &str) -> Option<String> {
+pub fn available_release(doc: &Value, include_prereleases: bool, local: &str) -> Option<Release> {
     let best = if include_prereleases {
         pick_highest(doc)
     } else {
@@ -70,19 +70,41 @@ pub fn available_message(doc: &Value, include_prereleases: bool, local: &str) ->
     if remote <= local {
         return None;
     }
-    let channel = if best.prerelease { " (prerelease)" } else { "" };
-    let link = if best.html_url.is_empty() {
-        String::new()
-    } else {
-        format!(" ({})", best.html_url)
-    };
-    Some(format!(
-        "version {}{channel} is available; type /update to install{link}",
-        best.tag
-    ))
+    Some(best)
 }
 
-pub async fn check<F, Fut>(include_prereleases: bool, local: &str, fetch: F) -> Option<String>
+pub fn available_message(doc: &Value, include_prereleases: bool, local: &str) -> Option<String> {
+    available_release(doc, include_prereleases, local).map(|release| release.log_message())
+}
+
+impl Release {
+    pub fn announce(&self, ux: &Ux) {
+        ux.log_success(Component::Update, &self.log_message());
+        ux.notice(
+            vrcr_shared::console::Color::White,
+            &format!(
+                "Version {} is available. Type update to install it.",
+                self.tag
+            ),
+        );
+    }
+
+    fn log_message(&self) -> String {
+        let best = self;
+        let channel = if best.prerelease { " (prerelease)" } else { "" };
+        let link = if best.html_url.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", best.html_url)
+        };
+        format!(
+            "version {}{channel} is available; type /update to install{link}",
+            best.tag
+        )
+    }
+}
+
+pub async fn check<F, Fut>(include_prereleases: bool, local: &str, fetch: F) -> Option<Release>
 where
     F: FnOnce(&'static str) -> Fut,
     Fut: Future<Output = Option<String>>,
@@ -94,7 +116,7 @@ where
     };
     let body = fetch(url).await?;
     let doc: Value = serde_json::from_str(&body).ok()?;
-    available_message(&doc, include_prereleases, local)
+    available_release(&doc, include_prereleases, local)
 }
 
 async fn github_get(url: &'static str, local: String) -> Option<String> {
@@ -134,12 +156,12 @@ pub fn start_background_check(
     let local = local.to_owned();
     Some(tokio::spawn(async move {
         let fetch_version = local.clone();
-        if let Some(text) = check(include_prereleases, &local, |url| {
+        if let Some(release) = check(include_prereleases, &local, |url| {
             github_get(url, fetch_version)
         })
         .await
         {
-            ux.success(Component::Update, &text);
+            release.announce(&ux);
         }
     }))
 }
@@ -233,7 +255,7 @@ fn apply_pair(
             if backup.is_file() {
                 let _ = fs::remove_file(&backup);
             }
-            ux.success(Component::Update, "updater refreshed for future updates.");
+            ux.log_success(Component::Update, "updater refreshed for future updates.");
             true
         }
         Err(e) => {
@@ -244,7 +266,7 @@ fn apply_pair(
                 "[update] staged updater repair failed: {:?}: {e}",
                 e.kind()
             ));
-            ux.warn(
+            ux.log_warn(
                 Component::Update,
                 "could not refresh updater yet; it will retry on next launch.",
             );

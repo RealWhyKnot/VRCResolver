@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::common::mesh::Capture;
 use tempfile::TempDir;
-use vrcr_shared::console::{Color, Style, Ux};
+use vrcr_shared::console::Color;
 use vrcr_shared::paths::AppPaths;
 use vrcr_shared::win::KeyEvent;
 use vrcr_watchdog::settings::{AppSettings, Store};
@@ -80,9 +80,13 @@ struct Harness {
 }
 
 fn harness_with(width: Option<usize>) -> Harness {
+    harness_styled(width, vrcr_shared::console::Style::plain())
+}
+
+fn harness_styled(width: Option<usize>, style: vrcr_shared::console::Style) -> Harness {
     let dir = tmp();
     let out = Capture::default();
-    let ux = Ux::new(Box::new(out.clone()), Style::plain(), String::new);
+    let ux = out.ux_with_style(style);
     let settings = Arc::new(Store::new(
         dir.path().join("settings.json"),
         Box::new(|_| {}),

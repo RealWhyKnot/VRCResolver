@@ -53,6 +53,7 @@ impl Harness {
         let out = Capture::default();
         let ux = Ux::new(Box::new(out.clone()), Style::plain(), String::new);
         let log_path = dir.path().join("watchdog.log");
+        ux.tee_to(Log::to_file(&log_path));
         let cfg = Config::new(dir.path(), "test");
         let client = MeshClient::new(
             cfg,

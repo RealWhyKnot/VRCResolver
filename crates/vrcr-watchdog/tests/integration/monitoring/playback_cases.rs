@@ -63,7 +63,14 @@ fn load_failure_arms_the_og_hint_before_evicting_the_cache() {
         r.sink.all(),
         vec![(PLAYBACK.to_owned(), feedback::LOAD_FAILURE, 2500, None)]
     );
-    let text = r.out.text();
+    let text = r.out.logs();
+    assert_eq!(
+        r.out.text(),
+        format!(
+            "  Failed     {:<28}VRChat couldn't load the video.\n",
+            "us1.vrcresolver.com"
+        )
+    );
     assert!(text.contains("load_failure ms=2500 url="), "{text}");
     assert!(text.contains(" evicted=1 og_hint=armed"), "{text}");
     assert!(!m.stall_armed());
@@ -80,7 +87,7 @@ fn a_late_load_failure_is_not_attributed_to_the_old_open() {
         r.sink.all(),
         <[(std::string::String, &str, i32, std::option::Option<i32>); 0]>::default()
     );
-    assert!(!r.out.text().contains("load_failure"));
+    assert!(!r.out.logs().contains("load_failure"));
     assert_eq!(m.last_opened_url(), Some(PLAYBACK));
     assert!(!m.stall_armed());
 }
@@ -147,7 +154,14 @@ fn a_stalled_play_in_the_same_world_still_counts() {
             None
         )]
     );
-    assert!(r.out.text().contains("silent_stall ms=300000 url="));
+    assert_eq!(
+        r.out.text(),
+        format!(
+            "  Stalled    {:<28}The video stopped loading in VRChat.\n  Too many videos failed in a row. VRChat plays videos on its own until the server is back.\n",
+            "us1.vrcresolver.com"
+        )
+    );
+    assert!(r.out.logs().contains("silent_stall ms=300000 url="));
 }
 
 #[test]
@@ -239,7 +253,7 @@ fn a_wedged_relay_is_handed_to_the_bypass_instead_of_counting() {
             *ports.lock().unwrap_or_else(|e| e.into_inner()),
             vec![51234]
         );
-        let text = r.out.text();
+        let text = r.out.logs();
         assert!(text.contains(
             "relay_pool_wedged ms=300000 port=51234: VRChat never reached the local relay"
         ));
@@ -299,7 +313,7 @@ fn load_failures_are_only_blamed_when_sound_output_works() {
             0
         };
         assert_eq!(r.probes.load(Ordering::SeqCst), probes, "{label}");
-        let text = r.out.text();
+        let text = r.out.logs();
         if !blamed {
             assert!(text.contains("VRChat has no sound output: "), "{text}");
             assert!(

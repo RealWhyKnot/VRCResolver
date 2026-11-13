@@ -32,7 +32,7 @@ impl RelayBypass {
         }
         if !self.active.swap(true, Ordering::SeqCst) {
             self.ports.delete_port_file();
-            self.ux.warn(
+            self.ux.log_warn(
                 Component::Relay,
                 &format!(
                     "VRChat can no longer reach the local video relay on port {wedged_port}; sending direct links until VRChat restarts"
@@ -47,7 +47,7 @@ impl RelayBypass {
             return;
         }
         self.ports.republish(&self.scheme);
-        self.ux.write(
+        self.ux.log_write(
             Component::Relay,
             &format!(
                 "new VRChat session; local video relay back on port {}",

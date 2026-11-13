@@ -34,7 +34,7 @@ fn unknown_target_is_never_mutated() {
     assert!(!r.backup.exists());
     assert_eq!(
         r.out
-            .text()
+            .logs()
             .matches("not classified as ours or VRChat-bundled")
             .count(),
         1

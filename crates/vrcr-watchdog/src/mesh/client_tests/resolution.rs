@@ -29,8 +29,7 @@ async fn rate_limited_resolve_without_id_fails_all_pending() {
     assert!(done(&mut b).is_some());
     assert_eq!(a.reason.as_deref(), Some(fallback::RATE_LIMITED));
     assert!(
-        h.out
-            .text()
+        h.log()
             .contains("failing 2 pending requests reason=rate_limited ids=a,b")
     );
 }
@@ -124,7 +123,7 @@ async fn failing_many_pending_requests_lists_only_the_first_eight_ids() {
         .fail_all_pending(fallback::SERVER_UNREACHABLE);
 
     assert!(receivers.iter_mut().all(|rx| done(rx).is_some()));
-    assert!(h.out.text().contains(
+    assert!(h.log().contains(
         "failing 10 pending requests reason=server_unreachable ids=id00,id01,id02,id03,id04,id05,id06,id07,...(+2)"
     ));
 }

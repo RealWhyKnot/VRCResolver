@@ -87,6 +87,7 @@ fn sp(n: usize) -> String {
 
 fn outcome(status: ResolveStatus) -> Outcome<'static> {
     Outcome {
+        height: None,
         host: "youtube.com",
         player: "avpro",
         status,
@@ -139,3 +140,7 @@ mod console_cases;
 mod logging_cases;
 
 mod wininet_cases;
+
+mod presentation_cases;
+
+mod notice_cases;

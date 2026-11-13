@@ -16,7 +16,6 @@ use http::{HeaderMap, Method, StatusCode};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use url::Url;
-use vrcr_shared::console::{Style, Ux};
 use vrcr_shared::first_party::FirstPartyPolicy;
 use vrcr_shared::log::Log;
 use vrcr_watchdog::clock;
@@ -294,7 +293,7 @@ fn deps(upstream: Arc<dyn Upstream>, out: &Capture) -> (RelayDeps, Arc<Stats>, A
         stats: std::sync::Arc::clone(&stats),
         manifests: Arc::default(),
         now: clock::system(),
-        ux: Ux::new(Box::new(out.clone()), Style::plain(), String::new),
+        ux: out.ux(),
         log: Log::disabled(),
     };
     (deps, stats, activity)

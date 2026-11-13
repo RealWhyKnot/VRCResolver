@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::common::mesh::Capture;
 use tempfile::TempDir;
-use vrcr_shared::console::{Style, Ux};
+use vrcr_shared::console::Ux;
 use vrcr_shared::log::Log;
 use vrcr_shared::wrapper_identity;
 use vrcr_watchdog::maintenance::patch::{
@@ -115,7 +115,7 @@ impl Rig {
     }
 
     fn ux(&self) -> Ux {
-        Ux::new(Box::new(self.out.clone()), Style::plain(), String::new)
+        self.out.ux()
     }
 
     fn log_path(&self) -> PathBuf {

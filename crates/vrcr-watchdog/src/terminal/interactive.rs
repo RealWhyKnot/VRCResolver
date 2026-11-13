@@ -312,9 +312,7 @@ impl Terminal {
         }
         self.core.session.start();
         *self.overlay.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.core.renderer.attach());
-        self.core
-            .renderer
-            .success("interactive terminal ready; type /help for commands.");
+        self.core.renderer.log_ready();
         let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
         done.push(self.spawn("terminal-input", input_loop));
         done.push(self.spawn("terminal-render", render_loop));

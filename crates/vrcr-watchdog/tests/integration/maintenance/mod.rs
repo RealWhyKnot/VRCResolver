@@ -9,7 +9,7 @@ use crate::common::mesh::Capture;
 use serde_json::json;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
-use vrcr_shared::console::{Style, Ux};
+use vrcr_shared::console::Ux;
 use vrcr_shared::log::Log;
 use vrcr_shared::wire;
 use vrcr_watchdog::maintenance::codec::{
@@ -25,10 +25,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 fn capture_ux() -> (Ux, Capture) {
     let out = Capture::default();
-    (
-        Ux::new(Box::new(out.clone()), Style::plain(), String::new),
-        out,
-    )
+    (out.ux(), out)
 }
 
 fn block_on<F: std::future::Future>(f: F) -> F::Output {

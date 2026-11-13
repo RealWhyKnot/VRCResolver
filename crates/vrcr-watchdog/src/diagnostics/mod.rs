@@ -1,4 +1,5 @@
 mod requests;
+mod video_failures;
 
 pub mod resolve;
 pub mod startup;
@@ -22,6 +23,7 @@ const REPEAT: Duration = Duration::from_secs(60);
 #[derive(Default)]
 pub struct PlaybackLog {
     plays: Mutex<HashMap<String, Play>>,
+    video_failures: Mutex<HashMap<String, SystemTime>>,
 }
 
 struct Play {
@@ -199,7 +201,7 @@ pub(crate) fn count(values: &mut BTreeMap<String, u64>, key: String) {
 
 fn emit(ux: &Ux, lines: Vec<String>) {
     for line in lines {
-        ux.write(Component::Relay, &line);
+        ux.log_write(Component::Relay, &line);
     }
 }
 
@@ -287,6 +289,7 @@ impl PlaybackLog {
     }
 
     pub fn resolving(&self, request: &ResolveRequest, now: SystemTime, ux: &Ux) {
+        self.reset_video_failure(&request.url);
         let id = token(&request.id);
         let mut plays = self.lock();
         let mut lines = Self::make_room(&mut plays, now);
@@ -345,7 +348,7 @@ impl PlaybackLog {
             token(&response.action),
         );
         drop(plays);
-        ux.write(Component::Ipc, &line);
+        ux.log_write(Component::Ipc, &line);
     }
 
     pub fn resolver_origin(&self, id: &str, host: &str) {

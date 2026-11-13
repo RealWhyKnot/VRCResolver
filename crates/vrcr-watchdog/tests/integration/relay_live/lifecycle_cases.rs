@@ -50,7 +50,7 @@ async fn stalls_and_failures_hit_the_timeouts() {
     }
 
     assert!(eventually(|| h.script.open() == 0 && h.server.in_flight() == 0, WITHIN).await);
-    let text = h.out.text();
+    let text = h.out.logs();
     assert!(text.contains("reason=upstream_timeout"), "{text}");
     assert!(text.contains("reason=body_idle_timeout"), "{text}");
     assert!(
@@ -82,9 +82,9 @@ async fn stalled_client_is_aborted_while_the_next_request_is_served() {
 
     assert!(eventually(|| h.script.open() == 0, Duration::from_secs(10)).await);
     assert!(
-        h.out.text().contains("reason=body_write_timeout"),
+        h.out.logs().contains("reason=body_write_timeout"),
         "{}",
-        h.out.text()
+        h.out.logs()
     );
     let r = tokio::time::timeout(Duration::from_secs(10), stalled.read_reply(false))
         .await

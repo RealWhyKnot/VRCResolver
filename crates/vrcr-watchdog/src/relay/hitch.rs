@@ -109,7 +109,7 @@ impl HitchDetector {
                 sample.request_id
             );
             if log.dev_console() {
-                ux.write(Component::Relay, &line);
+                ux.log_write(Component::Relay, &line);
             } else {
                 log.line(&format!("[relay] {line}"));
             }
@@ -167,7 +167,7 @@ impl HitchDetector {
             sample.player_status,
         );
         if log.dev_console() {
-            ux.write(
+            ux.log_write(
                 Component::Relay,
                 file_line.strip_prefix("[relay]").unwrap_or(&file_line),
             );

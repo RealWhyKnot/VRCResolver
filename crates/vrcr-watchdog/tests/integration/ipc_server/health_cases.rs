@@ -220,11 +220,7 @@ async fn deadline_outcomes_open_the_gate_only_for_a_full_window() {
         };
         let mesh = FakeMesh::always(step);
         let output = crate::common::mesh::Capture::default();
-        let ux = Ux::new(
-            Box::new(output.clone()),
-            vrcr_shared::console::Style::plain(),
-            String::new,
-        );
+        let ux = output.ux();
         let ipc = Ipc::builder(mesh, ux, Log::disabled())
             .health(std::sync::Arc::clone(&gate))
             .build();
@@ -236,7 +232,10 @@ async fn deadline_outcomes_open_the_gate_only_for_a_full_window() {
             assert_eq!(reason(&v), fallback::CLIENT_DEADLINE_EXCEEDED);
             assert!(v.get("public_message").is_none());
             assert_eq!(
-                output.text().matches(" -- scripted").count(),
+                output
+                    .text()
+                    .matches("scripted VRChat will try it on its own.")
+                    .count(),
                 if server_answers {
                     usize::try_from(i + 1).expect("small resolve count")
                 } else {

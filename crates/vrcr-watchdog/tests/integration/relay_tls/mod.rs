@@ -13,7 +13,7 @@ use rustls::pki_types::ServerName;
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use vrcr_shared::console::{Style, Ux};
+use vrcr_shared::console::Ux;
 use vrcr_shared::first_party::FirstPartyPolicy;
 use vrcr_shared::log::Log;
 use vrcr_shared::win::{Elevated, MachineStore};
@@ -40,10 +40,7 @@ fn now() -> SystemTime {
 
 fn capture_ux() -> (Ux, Capture) {
     let out = Capture::default();
-    (
-        Ux::new(Box::new(out.clone()), Style::plain(), String::new),
-        out,
-    )
+    (out.ux(), out)
 }
 
 fn custom_cert(cn: &str, sans: &[&str], ca: bool, eku: ExtendedKeyUsagePurpose) -> Vec<u8> {

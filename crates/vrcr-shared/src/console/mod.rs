@@ -1,3 +1,8 @@
+mod notices;
+pub use notices::Notice;
+mod presentation;
+pub use presentation::{VideoStatus, connection_duration, fallback_sentence};
+
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -254,67 +259,40 @@ impl Ux {
         render_overlay(&mut st);
     }
 
-    pub fn write(&self, c: Component, body: &str) {
-        self.stamped(
-            c.color(),
-            &format!("{} {} {body}", self.style.bullet(), c.tag()),
-        );
-    }
-
-    pub fn success(&self, c: Component, body: &str) {
-        self.stamped(
-            Color::Green,
-            &format!("{} {} {body}", self.style.bullet(), c.tag()),
-        );
-    }
-
-    pub fn warn(&self, c: Component, body: &str) {
-        self.stamped(
-            Color::Yellow,
-            &format!("{} {}[warn] {body}", self.style.bullet(), c.tag()),
-        );
-    }
-
-    pub fn error(&self, c: Component, body: &str) {
-        self.stamped(
-            Color::Red,
-            &format!("{} {}[err] {body}", self.style.bullet(), c.tag()),
-        );
-    }
-
-    pub fn fatal(&self, body: &str) {
-        self.stamped(
-            Color::Red,
-            &format!("{} [FATAL] {body}", self.style.bullet()),
-        );
-    }
-
     pub fn resolve_outcome(&self, o: &Outcome<'_>) {
-        let (color, line) = resolve_outcome_line("*", o);
-        self.stamped_fitted(color, &line);
+        let (_, line) = resolve_outcome_line("*", o);
+        self.log_stamped(&line);
+        match o.status {
+            ResolveStatus::Resolved | ResolveStatus::Local => {
+                let quality = o
+                    .height
+                    .filter(|h| *h > 0)
+                    .map(|h| format!("{h}p, "))
+                    .unwrap_or_default();
+                self.video(
+                    VideoStatus::Playing,
+                    o.host,
+                    &format!("{quality}ready in {:.1}s", o.elapsed.as_secs_f64()),
+                );
+            }
+            _ => self.skipped(o.host, o.reason.unwrap_or_default(), o.public_message),
+        }
     }
 
     pub fn playback_error(&self, host: &str, error: &PlaybackError) {
         let Some(message) = error.message() else {
             return;
         };
-        let host = crate::logutil::public_message(host);
-        self.stamped_fitted(
-            Color::Gray,
-            &format!(
-                "* [relay][warn] {} -- {message}",
-                truncate_pad(&host, HOST_WIDTH)
-            ),
-        );
-    }
-
-    fn stamped_fitted(&self, color: Color, body: &str) {
-        let mut line = format!("[{}] {body}", (self.clock)());
-        if let Some(width) = (self.width)() {
-            line = truncate_pad(&line, line.chars().count().min(width.saturating_sub(1)));
-        }
-        let mut state = self.state();
-        raw(&mut state, self.style, color, &line);
+        self.log_stamped(&format!(
+            "* [relay][warn] {} -- {message}",
+            truncate_pad(host, HOST_WIDTH)
+        ));
+        let sentence = if message.starts_with("playback error:") {
+            "A request to the server failed."
+        } else {
+            &message
+        };
+        self.video(VideoStatus::Problem, host, sentence);
     }
 
     pub fn wrapper_fallback(&self, host: &str, reason: &str, elapsed_ms: u64) {
@@ -324,24 +302,43 @@ impl Ux {
             "fallback",
             truncate_pad(host, HOST_WIDTH)
         );
-        self.stamped(Color::Yellow, &line);
+        self.log_stamped(&line);
     }
 
     pub fn banner(&self, b: &Banner<'_>) {
         let mut st = self.state();
-        for (color, line) in banner_lines(b) {
-            raw(&mut st, self.style, color, &line);
+        for (_, line) in banner_lines(b) {
+            if let Some(log) = &st.tee {
+                log.line(&line);
+            }
         }
+        let tee = st.tee.take();
+        raw(
+            &mut st,
+            self.style,
+            Color::White,
+            &format!("VRCResolver {}", b.version),
+        );
+        raw(
+            &mut st,
+            self.style,
+            Color::DarkGray,
+            "Type help for commands.",
+        );
+        if b.dev {
+            raw(
+                &mut st,
+                self.style,
+                Color::DarkGray,
+                "Debug build: timings and relay detail go to the log.",
+            );
+        }
+        raw(&mut st, self.style, Color::Gray, "");
+        st.tee = tee;
     }
 
     pub fn phase_divider(&self, label: &str) {
-        self.stamped(Color::DarkGray, &phase_divider_line(label));
-    }
-
-    fn stamped(&self, color: Color, body: &str) {
-        let line = format!("[{}] {body}", (self.clock)());
-        let mut st = self.state();
-        raw(&mut st, self.style, color, &line);
+        self.log_stamped(&phase_divider_line(label));
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -383,6 +380,7 @@ fn render_overlay(st: &mut State) {
 
 pub struct Outcome<'a> {
     pub host: &'a str,
+    pub height: Option<i32>,
     pub player: &'a str,
     pub status: ResolveStatus,
     pub via_cache: bool,

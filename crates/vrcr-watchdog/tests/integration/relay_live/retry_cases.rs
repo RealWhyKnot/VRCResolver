@@ -143,7 +143,7 @@ async fn retry_five_hundred_player_requests_use_one_upstream_call_per_window() {
         for index in 0..500 {
             clock.store(index * (window / 500), Ordering::SeqCst);
             let reply = client.get(&path).await;
-            assert_eq!(reply.status, status, "request {index}: {}", output.text());
+            assert_eq!(reply.status, status, "request {index}: {}", output.logs());
             assert!(reply.complete);
             assert_eq!(reply.body, Vec::<u8>::new());
             if index == 0 {
@@ -159,7 +159,7 @@ async fn retry_five_hundred_player_requests_use_one_upstream_call_per_window() {
         assert_eq!(client.get(&path).await.status, status);
         assert_eq!(upstream.hits.load(Ordering::SeqCst), 2);
         server.stop().await;
-        let text = output.text();
+        let text = output.logs();
         assert!(text.contains("count=501 suppressed=499"), "{text}");
         assert!(
             text.contains("suppressed=499 recovery_attempts=0 recovery=none"),
@@ -377,11 +377,11 @@ async fn retry_concurrent_requests_share_the_failure_and_retirement_is_once_per_
         assert!(!reports.lock().expect("reports").is_empty());
         assert!(
             output
-                .text()
+                .logs()
                 .contains("recovery_attempts=1 recovery=clean_failure")
         );
-        assert!(!output.text().contains("private"));
-        assert!(!output.text().contains("secret"));
+        assert!(!output.logs().contains("private"));
+        assert!(!output.logs().contains("secret"));
     }
 }
 
@@ -452,7 +452,7 @@ async fn retry_slow_healthy_headers_do_not_serialize_repeated_requests() {
         assert_eq!(reply.body, b"played");
         assert!(reply.complete);
     }
-    assert!(!output.text().contains("retry_wait_timeout"));
+    assert!(!output.logs().contains("retry_wait_timeout"));
     server.stop().await;
 }
 
@@ -472,7 +472,7 @@ async fn retry_untrusted_recreation_empty_ids_and_fresh_playbacks() {
             .expect("relay");
         let path = play("untrusted", "seg.ts", &upstream_url("dead", "seg.ts"));
         assert_eq!(Conn::open(server.port()).await.get(&path).await.status, 503);
-        assert!(!output.text().contains("recovery=clean_failure"));
+        assert!(!output.logs().contains("recovery=clean_failure"));
         assert_eq!(
             Conn::open(server.port()).await.get("/play//x").await.status,
             404

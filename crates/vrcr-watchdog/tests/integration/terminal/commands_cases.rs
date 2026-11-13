@@ -124,10 +124,13 @@ fn typing_help_echoes_and_lists_every_command() {
     h.run("/help");
     let out = h.out.text();
     assert!(out.contains("vrcr> /help\n"));
-    assert!(out.contains("* commands  tab completes a unique match"));
+    assert!(
+        out.lines()
+            .any(|line| line == "commands  tab completes a unique match")
+    );
     assert!(out.contains("/settings"));
     assert!(out.contains("/stats, /activity, /dashboard"));
-    assert!(out.contains("[terminal] tab completes as you type; help <command> explains one."));
+    assert!(out.contains("  tab completes as you type; help <command> explains one."));
     assert_eq!(h.session.recent_commands(), vec!["/help"]);
 }
 
@@ -136,13 +139,13 @@ fn help_for_one_command_and_unknown_commands() {
     let h = harness();
     h.run("help settings");
     let out = h.out.text();
-    assert!(out.contains("* help"));
+    assert!(out.lines().any(|line| line == "help"));
     assert!(out.contains("config"));
     assert!(out.contains("tab completes them"));
     h.run("stauts");
     let out = h.out.text();
-    assert!(out.contains("[terminal][warn] unknown command: stauts"));
-    assert!(out.contains("* matches"));
+    assert!(out.contains("  unknown command: stauts"));
+    assert!(out.lines().any(|line| line == "matches"));
     h.run("zzzzzzzzzz");
     assert!(h.out.text().contains("type help for the full list."));
 }
@@ -177,7 +180,7 @@ fn settings_commands_change_and_reset_the_store() {
     h.run("settings reset");
     assert!(h.out.text().contains("usage: settings reset <name|all>"));
     h.run("settings animations");
-    assert!(h.out.text().contains("* setting"));
+    assert!(h.out.text().lines().any(|line| line == "setting"));
     h.run("settings");
     assert!(h.out.text().contains("secure-local-video"));
     h.run("settings help");
@@ -209,7 +212,7 @@ fn tab_completes_and_right_accepts_the_ghost() {
     h.typed("s");
     h.core.handle_key(Key::Tab);
     assert_eq!(h.core.input_text(), "s");
-    assert!(h.out.text().contains("vrcr> s\n* matches"));
+    assert!(h.out.text().contains("vrcr> s\nmatches"));
     h.core.handle_key(Key::Left);
     assert_eq!(h.core.ghost(), "");
     h.core.handle_key(Key::End);
@@ -259,6 +262,6 @@ fn key_decoder_maps_keys_ctrl_and_surrogates() {
 #[test]
 fn completion_palette_and_items_render() {
     let frames = blocks::completion_palette(&[Item::new("status", "Show status.")], 60, &ASCII);
-    assert_eq!(frames[0].plain, "* matches");
+    assert_eq!(frames[0].plain, "matches");
     assert!(frames[1].plain.starts_with("  - status"));
 }

@@ -264,7 +264,7 @@ async fn seek_aborts_leave_followup_segments_prompt_and_complete() {
         }
     }
     assert_eq!(stats.activity().upstream_relay_requests, 160 * 20);
-    let diagnostics = output.text();
+    let diagnostics = output.logs();
     assert_eq!(
         diagnostics.matches("segment-client_disconnect").count(),
         320

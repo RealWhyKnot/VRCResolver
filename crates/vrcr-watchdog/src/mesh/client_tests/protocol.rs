@@ -56,9 +56,9 @@ async fn fallback_public_message_reaches_one_ipc_outcome_and_resolve_logs_stay_i
         client.write_all(b"{\"action\":\"resolve\",\"id\":\"r1\",\"url\":\"https://youtube.com/watch?v=secret\",\"player\":\"avpro\"}\n").await.expect("request");
         ipc.handle(&mut server).await;
         let text = harness.out.text();
-        assert_eq!(text.matches("[resolve]").count(), 1, "{text}");
+        assert_eq!(text.matches("Skipped").count(), 1, "{text}");
         assert!(
-            text.contains("all_configs_failed -- The video is private."),
+            text.contains("The video is private. VRChat will try it on its own."),
             "{text}"
         );
         assert!(text.is_ascii());
@@ -82,8 +82,7 @@ async fn rate_limited_non_resolve_action_sets_no_cooldown() {
 
     assert!(h.cooldown().is_none());
     assert!(
-        h.out
-            .text()
+        h.log()
             .contains("server rate-limited playback_feedback -- pausing for 2s")
     );
 }
@@ -99,8 +98,7 @@ async fn protocol_error_with_id_fails_that_pending() {
     let result = done(&mut rx).unwrap_or_else(|| panic!("still pending"));
     assert_eq!(result.reason.as_deref(), Some(fallback::PROTOCOL_ERROR));
     assert!(
-        h.out
-            .text()
+        h.log()
             .contains("server protocol_error reason=oversize_field field=url id=bad1")
     );
 }
@@ -162,11 +160,7 @@ async fn unknown_action_is_discarded_with_a_warning() {
 
     h.json(r#"{"action":"frobnicate"}"#).await;
 
-    assert!(
-        h.out
-            .text()
-            .contains("unknown action -- discarding: frobnicate")
-    );
+    assert!(h.log().contains("unknown action -- discarding: frobnicate"));
 }
 
 #[tokio::test]
@@ -176,7 +170,7 @@ async fn repeated_parse_failures_warn_once_a_minute() {
     h.json("{not json").await;
     h.json("{still not json").await;
 
-    let text = h.out.text();
+    let text = h.log();
     assert_eq!(text.matches("frame parse failed").count(), 1, "{text}");
     assert!(text.contains("frame parse failed (json x1 in last min)"));
 }
@@ -264,8 +258,7 @@ async fn binary_unknown_action_falls_through_to_the_default() {
     h.binary(&mp_frame(vec![mp_str("frobnicate_widget")])).await;
 
     assert!(
-        h.out
-            .text()
+        h.log()
             .contains("unknown binary action -- discarding: frobnicate_widget")
     );
 }
@@ -277,11 +270,7 @@ async fn binary_control_frames_that_belong_on_text_are_flagged() {
     h.binary(&mp_frame(vec![mp_str(action::RATE_LIMITED)]))
         .await;
 
-    assert!(
-        h.out
-            .text()
-            .contains("rate_limited received via binary path")
-    );
+    assert!(h.log().contains("rate_limited received via binary path"));
 }
 
 #[tokio::test]
@@ -348,7 +337,7 @@ async fn broken_binary_frames_warn_once_per_kind_a_minute() {
     h.binary(&[0xC1]).await;
     h.binary(&mp_frame(vec![])).await;
 
-    let text = h.out.text();
+    let text = h.log();
     assert_eq!(
         text.matches("binary frame parse failed (binary:action peek")
             .count(),
@@ -383,10 +372,47 @@ async fn every_action_the_watchdog_receives_is_handled() {
     for (name, sample) in samples {
         let h = Harness::v3(true);
         h.json(sample.as_str().unwrap_or_default()).await;
-        let out = h.out.text();
+        let out = h.log();
         if out.contains("unknown action") || out.contains("parse failed") {
             problems.push(format!("{name}: {}", out.trim()));
         }
     }
     assert!(problems.is_empty(), "{problems:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn one_outage_with_ten_failed_attempts_prints_only_loss_and_recovery() {
+    let h = Harness::new();
+    h.client.inner.console_connected();
+    assert_eq!(h.out.text(), "  Connected to the server.\n");
+    h.out.0.lock().expect("capture lock").clear();
+    h.client.inner.report_failure("disconnected (error): test");
+    for attempt in 1..=10 {
+        h.client
+            .inner
+            .reconnect_attempt
+            .store(attempt, std::sync::atomic::Ordering::SeqCst);
+        h.client
+            .inner
+            .report_failure(&format!("attempt_{attempt}_failed"));
+    }
+    tokio::time::advance(Duration::from_secs(147)).await;
+    h.client.inner.console_connected();
+    assert_eq!(
+        h.out.text(),
+        "  Lost the connection to the server. Trying again...\n  Connected again after 2m 27s.\n"
+    );
+    let log = h.log();
+    for attempt in 1..=10 {
+        assert_eq!(
+            log.matches(&format!(
+                "reconnect attempt {attempt} failed: attempt_{attempt}_failed"
+            ))
+            .count(),
+            1
+        );
+    }
+    h.client.inner.shutdown.send_replace(true);
+    h.client.inner.console_disconnected();
+    assert_eq!(h.out.text().lines().count(), 2);
 }

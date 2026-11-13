@@ -13,7 +13,7 @@ fn tick_does_not_back_up_a_truncated_signed_binary() {
     assert_eq!(read(&r.target), truncated);
     assert!(
         r.out
-            .text()
+            .logs()
             .contains("does not look like a complete download yet")
     );
 }
@@ -90,17 +90,21 @@ fn start_refuses_without_a_tools_folder_wrapper_or_vrchat_binary() {
     let r = Rig::new();
     let none = r.manager_with(None, Duration::from_secs(3));
     assert!(!none.start());
-    assert!(r.out.text().contains("VRChat Tools folder not found"));
+    assert!(r.out.logs().contains("VRChat Tools folder not found"));
 
     let m = r.manager();
     assert!(!m.start());
-    assert!(r.out.text().contains("patched yt-dlp.exe is missing"));
+    assert!(r.out.logs().contains("patched yt-dlp.exe is missing"));
 
     r.write_wrapper();
     assert!(!m.start());
+    assert_eq!(
+        r.out.text(),
+        "  VRCResolver couldn't find VRChat's video player. Open VRChat once, then open VRCResolver again.\n  A file VRCResolver needs is missing. Reinstall VRCResolver.\n  VRChat hasn't downloaded its video player yet. Open VRChat once, then open VRCResolver again.\n"
+    );
     assert!(
         r.out
-            .text()
+            .logs()
             .contains("hasn't shipped its own yt-dlp.exe yet")
     );
 
@@ -123,7 +127,7 @@ fn our_wrapper_without_a_backup_is_removed() {
     assert!(!r.target.exists());
     assert!(
         r.out
-            .text()
+            .logs()
             .contains("removed the wrapper so VRChat redownloads")
     );
 }
@@ -138,7 +142,7 @@ fn waiting_state_is_reported_once() {
     }
     assert_eq!(
         r.out
-            .text()
+            .logs()
             .matches("VRChat has not installed yt-dlp yet")
             .count(),
         1

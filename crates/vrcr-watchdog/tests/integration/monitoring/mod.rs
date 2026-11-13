@@ -9,7 +9,7 @@ use crate::common::ManualClock;
 use crate::common::mesh::Capture;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
-use vrcr_shared::console::{ResolveStatus, Style, Ux};
+use vrcr_shared::console::ResolveStatus;
 use vrcr_shared::first_party::FirstPartyPolicy;
 use vrcr_shared::log::Log;
 use vrcr_shared::logutil::iso8601_utc;
@@ -129,7 +129,7 @@ impl Rig {
         let mut d = MonitorDeps::new(
             Arc::<Sink>::clone(&self.sink),
             Arc::new(RwLock::new(FirstPartyPolicy::default())),
-            Ux::new(Box::new(self.out.clone()), Style::plain(), String::new),
+            self.out.ux(),
             self.log.clone(),
         );
         d.cache = self.cache.clone();

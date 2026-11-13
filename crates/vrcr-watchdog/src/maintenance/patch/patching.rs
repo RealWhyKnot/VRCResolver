@@ -6,7 +6,7 @@ impl PatchManager {
             return;
         }
         st.last_outcome = outcome;
-        self.ux.write(Component::Patch, strip_prefix(message));
+        self.ux.log_write(Component::Patch, strip_prefix(message));
     }
 
     pub(super) fn emit_file_only(&self, st: &mut TickState, outcome: TickOutcome, message: &str) {
@@ -44,7 +44,7 @@ impl PatchManager {
         }
         if st.incomplete_reported != stamp {
             st.incomplete_reported = stamp;
-            self.ux.write(
+            self.ux.log_write(
                 Component::Patch,
                 &format!(
                     "{TARGET_NAME} does not look like a complete download yet; leaving it alone until it does"
@@ -62,14 +62,14 @@ impl PatchManager {
             sanitize_for_console(&e.to_string(), 120)
         );
         if st.lock_failures == 3 {
-            self.ux.warn(
+            self.ux.log_warn(
                 Component::Patch,
                 &format!(
                     "{stage} has failed 3 times in a row -- possible antivirus interference or permissions issue. Last error: {detail}"
                 ),
             );
         } else if st.lock_failures > 3 && st.lock_failures.is_multiple_of(20) {
-            self.ux.warn(
+            self.ux.log_warn(
                 Component::Patch,
                 &format!(
                     "{stage} still failing after {} ticks ({detail})",
@@ -164,7 +164,7 @@ impl PatchManager {
             if st.last_outcome != TickOutcome::WrapperMissing {
                 let restored = restore_ytdlp_in_tools(dir, None, &self.ux, &self.log);
                 st.last_outcome = TickOutcome::WrapperMissing;
-                self.ux.warn(
+                self.ux.log_warn(
                     Component::Patch,
                     &format!(
                         "our yt-dlp wrapper is missing from the install; VRChat uses its own resolver until the file is back (restored={restored})"

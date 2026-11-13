@@ -416,8 +416,17 @@ impl Shared {
     }
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct Capture(Arc<Mutex<Vec<u8>>>);
+#[derive(Clone)]
+pub(crate) struct Capture(Arc<Mutex<Vec<u8>>>, Arc<TempDir>);
+
+impl Default for Capture {
+    fn default() -> Self {
+        Self(
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(TempDir::new().expect("capture directory")),
+        )
+    }
+}
 
 impl Write for Capture {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -431,6 +440,25 @@ impl Write for Capture {
 }
 
 impl Capture {
+    pub(crate) fn ux(&self) -> Ux {
+        self.ux_with_style(Style::plain())
+    }
+
+    pub(crate) fn ux_with_style(&self, style: Style) -> Ux {
+        let ux = Ux::new(Box::new(self.clone()), style, String::new);
+        ux.tee_to(Log::to_file(&self.1.path().join("console-detail.log")));
+        ux
+    }
+
+    pub(crate) fn logs(&self) -> String {
+        let console = self.text();
+        assert!(
+            !console.contains(" * ["),
+            "technical console output: {console}"
+        );
+        std::fs::read_to_string(self.1.path().join("console-detail.log")).unwrap_or_default()
+    }
+
     pub(crate) fn text(&self) -> String {
         String::from_utf8_lossy(&lock(&self.0)).into_owned()
     }
@@ -469,7 +497,7 @@ pub(crate) fn client_in(
         url.clone()
     });
     tweak(&mut cfg);
-    let ux = Ux::new(Box::new(out.clone()), Style::plain(), String::new);
+    let ux = out.ux();
     let client = MeshClient::new(
         cfg,
         ux,

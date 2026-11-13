@@ -117,7 +117,7 @@ impl RelayServer {
                     "listener failed on port {} scheme={scheme}: no certificate loaded",
                     cfg.port
                 );
-                deps.ux.error(Component::Relay, &msg);
+                deps.ux.log_error(Component::Relay, &msg);
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
             }
             _ => None,
@@ -125,7 +125,7 @@ impl RelayServer {
         let listener = match TcpListener::bind((Ipv4Addr::LOCALHOST, cfg.port)).await {
             Ok(l) => l,
             Err(e) => {
-                deps.ux.error(
+                deps.ux.log_error(
                     Component::Relay,
                     &format!("listener failed on port {} scheme={scheme}: {e}", cfg.port),
                 );

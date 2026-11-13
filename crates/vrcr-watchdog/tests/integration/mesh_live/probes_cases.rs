@@ -53,7 +53,7 @@ async fn dropping_a_silent_connection_prints_one_console_warning() {
     let result = resolve(&t.client, "r1", Duration::from_secs(10)).await;
 
     assert_eq!(result.action, action::RESOLVED);
-    let out = t.out.text();
+    let out = t.out.logs();
     assert_eq!(out.matches("disconnected (error)").count(), 1, "{out}");
     assert!(!out.contains("no answer to a ping"), "{out}");
     assert!(
@@ -142,7 +142,7 @@ async fn hung_upgrade_is_reported_with_its_phase_and_the_next_probe_starts_fresh
     )
     .await;
 
-    let out = t.out.text();
+    let out = t.out.logs();
     assert!(
         out.contains("connect to vrcresolver.com timed out after"),
         "{out}"

@@ -82,7 +82,7 @@ impl Inner {
             Ok(v) => v,
             Err(e) => {
                 if let Some(count) = self.parse_failure_count("json") {
-                    self.ux.warn(
+                    self.ux.log_warn(
                         Component::Mesh,
                         &format!(
                             "frame parse failed (json x{count} in last min): {:?} line={} column={} bytes={}",
@@ -138,7 +138,7 @@ impl Inner {
             action::PROTOCOL_ERROR => self.on_protocol_error(&root),
             action::PONG => *lock(&self.last_pong) = Some(Self::now()),
             action::PING => self.send_pong(link).await,
-            other => self.ux.warn(
+            other => self.ux.log_warn(
                 Component::Mesh,
                 &format!(
                     "unknown action -- discarding: {}",
@@ -152,7 +152,7 @@ impl Inner {
         let welcome: WelcomeFrame = match serde_json::from_slice(payload) {
             Ok(w) => w,
             Err(e) => {
-                self.ux.warn(
+                self.ux.log_warn(
                     Component::Mesh,
                     &format!(
                         "welcome parse failed -- assuming v1 server: {:?} line={} column={} bytes={}",
@@ -197,7 +197,7 @@ impl Inner {
         ));
         if welcome.features.is_none() {
             self.ux
-                .warn(Component::Mesh, "welcome missing required field: features");
+                .log_warn(Component::Mesh, "welcome missing required field: features");
         }
         self.apply_first_party(
             welcome.features.as_deref(),
@@ -208,7 +208,7 @@ impl Inner {
             Some(f) if !f.is_empty() => format!("[{}]", f.join(",")),
             _ => "[]".to_owned(),
         };
-        self.ux.write(
+        self.ux.log_write(
             Component::Mesh,
             &format!(
                 "welcome node={} v={} (negotiated={negotiated}) server={} yt-dlp={} warp_active={} features={}",
@@ -235,7 +235,7 @@ impl Inner {
             (s.is_v3, s.current_host.clone())
         };
         if !is_v3 {
-            self.ux.warn(
+            self.ux.log_warn(
                 Component::Mesh,
                 "welcome_cached received on non-v3 connection -- protocol error, reconnecting",
             );
@@ -245,7 +245,7 @@ impl Inner {
         let cached: WelcomeCachedFrame = match serde_json::from_slice(payload) {
             Ok(c) => c,
             Err(e) => {
-                self.ux.warn(
+                self.ux.log_warn(
                     Component::Mesh,
                     &format!(
                         "welcome_cached parse failed: {:?} line={} column={} bytes={}",
@@ -267,7 +267,7 @@ impl Inner {
         };
         let Some(entry) = self.welcome_cache.get(&host) else {
             self.welcome_cache.invalidate(&host);
-            self.ux.warn(
+            self.ux.log_warn(
                 Component::Mesh,
                 "welcome_cached but local entry missing -- invalidating + reconnecting",
             );
@@ -314,12 +314,16 @@ impl Inner {
         let limited_id = frames::str_field(root, "id").filter(|i| !i.is_empty());
         let retry_after = frames::i32_field(root, wire::field::RETRY_AFTER_SECONDS).unwrap_or(0);
         let cooldown = retry_after.clamp(1, MAX_RATE_LIMIT_COOLDOWN_SECONDS);
-        self.ux.warn(
+        self.ux.log_warn(
             Component::Mesh,
             &format!(
                 "server rate-limited {} -- pausing for {cooldown}s",
                 sanitize_for_console(mesh_action, 32)
             ),
+        );
+        self.ux.notice(
+            vrcr_shared::console::Color::Yellow,
+            &format!("The server asked VRCResolver to slow down. Waiting {cooldown}s."),
         );
         if mesh_action != action::RESOLVE {
             return;
@@ -349,7 +353,8 @@ impl Inner {
         if let Some(id) = id {
             let _ = write!(line, " id={}", sanitize_for_console(id, 32));
         }
-        self.ux.warn(Component::Mesh, &line);
+        self.ux.log_warn(Component::Mesh, &line);
+        self.ux.event(vrcr_shared::console::Notice::ProtocolError);
         if let Some(id) = id.filter(|i| !i.is_empty()) {
             lock(&self.inflight_cids).remove(id);
             self.complete(id, frames::fallback_result(id, fallback::PROTOCOL_ERROR));
@@ -366,7 +371,7 @@ impl Inner {
             Err(detail) => {
                 let key = format!("binary:{}", detail.split(':').next().unwrap_or_default());
                 if let Some(count) = self.parse_failure_count(&key) {
-                    self.ux.warn(
+                    self.ux.log_warn(
                         Component::Mesh,
                         &format!(
                             "binary frame parse failed ({key} x{count} in last min): {} bytes={}",
@@ -429,14 +434,14 @@ impl Inner {
             BinaryFrame::Other(name)
                 if name == action::PROTOCOL_ERROR || name == action::RATE_LIMITED =>
             {
-                self.ux.warn(
+                self.ux.log_warn(
                     Component::Mesh,
                     &format!(
                         "{name} received via binary path (server should send as Text per v3.1 spec)"
                     ),
                 );
             }
-            BinaryFrame::Other(name) => self.ux.warn(
+            BinaryFrame::Other(name) => self.ux.log_warn(
                 Component::Mesh,
                 &format!(
                     "unknown binary action -- discarding: {}",

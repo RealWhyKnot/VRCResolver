@@ -174,7 +174,7 @@ impl Reporter {
     pub fn from_env(app_version: &str, ux: Ux) -> Reporter {
         let enabled = env_with_fallback("ANONYMOUS_REPORTING").as_deref() == Some("1");
         if enabled {
-            ux.write(
+            ux.log_write(
                 Component::Report,
                 "anonymous failure reporting ON (VRCRESOLVER_ANONYMOUS_REPORTING=1)",
             );
@@ -240,13 +240,19 @@ impl Reporter {
     pub fn send(&self, payload: &ReportPayload) {
         match (self.post)(payload) {
             Ok(code) if (200..300).contains(&code) => {}
-            Ok(code) => self.ux.warn(
-                Component::Report,
-                &format!("server rejected report: {code}"),
-            ),
-            Err(e) => self
-                .ux
-                .warn(Component::Report, &format!("post failed: {e}")),
+            Ok(code) => {
+                self.ux.event(vrcr_shared::console::Notice::ReportRejected);
+                self.ux.log_warn(
+                    Component::Report,
+                    &format!("server rejected report: {code}"),
+                )
+            }
+            Err(e) => {
+                self.ux
+                    .event(vrcr_shared::console::Notice::ReportSendFailed);
+                self.ux
+                    .log_warn(Component::Report, &format!("post failed: {e}"))
+            }
         }
     }
 

@@ -150,7 +150,11 @@ fn run_check_reports_saves_state_and_refreshes_capabilities() {
     env.winget = Box::new(|_| WingetResult::exited(1, "No package found"));
     let (ux, out) = capture_ux();
     block_on(codec::run_check(&Installer::new(&env), &path, &caps, &ux));
-    let text = out.text();
+    assert_eq!(
+        out.text(),
+        "  AV1 video support is ready.\n  HEVC video support couldn't be installed. VRCResolver will try again next week.\n  VP9 video support couldn't be installed. VRCResolver will try again next week.\n"
+    );
+    let text = out.logs();
     assert!(text.contains("AV1 Video Extension ready (mf)."), "{text}");
     assert!(
         text.contains("HEVC Video Extensions install failed (not_found); will retry next week."),

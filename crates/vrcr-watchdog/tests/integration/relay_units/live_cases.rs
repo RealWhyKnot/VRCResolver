@@ -284,7 +284,7 @@ fn live_manifest_hitches_use_strict_size_and_duration_thresholds() {
     detector.record(&timing, utc(0), &ux, &log);
     assert!(
         output
-            .text()
+            .logs()
             .contains("playlist-bytes=262145 segments=200 trimmed=true kept=30")
     );
     timing.media.as_mut().expect("media").live = false;

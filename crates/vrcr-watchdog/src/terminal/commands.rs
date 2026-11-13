@@ -103,9 +103,7 @@ impl Registry {
             "permissions",
             "Show what this terminal is allowed to do.",
             |ctx, _| {
-                ctx.renderer.info(
-                    "permissions: local watchdog commands only; shell execution is not exposed.",
-                );
+                ctx.renderer.log_permissions();
             },
             &[],
         );
@@ -325,6 +323,8 @@ fn help(ctx: &Context<'_>, args: &str) {
     let wanted = normalize_verb(args);
     if wanted.is_empty() {
         ctx.renderer.render_help(ctx.commands.all());
+        ctx.renderer
+            .info("To uninstall, run vrcresolver.Uninstaller.exe from this folder.");
     } else if let Some(target) = ctx.commands.get(&wanted) {
         ctx.renderer.render_command_help(target);
     } else {

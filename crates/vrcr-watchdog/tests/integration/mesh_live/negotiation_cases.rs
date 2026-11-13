@@ -118,7 +118,7 @@ async fn binary_frame_on_a_json_link_drops_the_connection() {
     assert_eq!(server.connections(), 2);
     assert!(
         t.out
-            .text()
+            .logs()
             .contains("unexpected Binary frame on json-negotiated connection")
     );
     t.client.stop().await;

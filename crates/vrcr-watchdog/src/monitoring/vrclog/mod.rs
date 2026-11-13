@@ -290,6 +290,9 @@ impl VrcLogMonitor {
     }
 
     fn confirm_playback(&self, url: &str) {
+        if let Some(stats) = &self.deps.stats {
+            stats.playback.reset_video_failure(&self.canonical(url));
+        }
         if local::is_play_url(url) {
             if let Some(plays) = &self.deps.local {
                 plays.confirmed(url);
@@ -306,7 +309,8 @@ impl VrcLogMonitor {
             return;
         }
         if gate.record_playback_confirmed() == Transition::Closed {
-            self.deps.ux.success(
+            self.deps.ux.resolver_restored();
+            self.deps.ux.log_success(
                 Component::VrcLog,
                 "resolver restored -- mesh resolving re-enabled",
             );

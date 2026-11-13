@@ -131,7 +131,7 @@ impl Inner {
                 Ok(p) => p,
                 Err(e) => {
                     self.forget_pending(&id);
-                    self.ux.warn(
+                    self.ux.log_warn(
                         Component::Mesh,
                         &format!("request serialization failed id={id}: {e}"),
                     );
@@ -141,7 +141,7 @@ impl Inner {
             let sent = match self.send_text(&link, payload).await {
                 Ok(s) => s,
                 Err(e) => {
-                    self.ux.warn(
+                    self.ux.log_warn(
                         Component::Mesh,
                         &format!(
                             "send failed id={id}{cid}: {}",
@@ -220,7 +220,7 @@ impl Inner {
                 ids.len() - MAX_IDS_IN_LINE
             )
         };
-        self.ux.warn(
+        self.ux.log_warn(
             Component::Mesh,
             &format!(
                 "failing {} pending requests reason={reason} ids={list}",

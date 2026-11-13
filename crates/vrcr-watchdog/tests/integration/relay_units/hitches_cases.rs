@@ -203,7 +203,7 @@ fn hitch_flags_segment_retries_but_not_steady_pacing() {
 }
 
 #[test]
-fn hitch_record_writes_the_file_line_or_the_console_line() {
+fn hitch_record_keeps_detail_in_files_with_either_dev_setting() {
     let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
     let log = Log::to_file(&dir.path().join("relay.log"));
     let (ux, out) = capture_ux();
@@ -232,7 +232,8 @@ fn hitch_record_writes_the_file_line_or_the_console_line() {
     log.set_dev_console(true);
     let (ux, out) = capture_ux();
     HitchDetector::new().record(&s, utc(1_790_769_600), &ux, &log);
-    assert!(out.text().contains(
+    assert_eq!(out.text(), "");
+    assert!(out.logs().contains(
         "[hitch] reasons=segment-http-502,segment-body_idle_timeout,slow-segment-total kind=segment stream=wk_abc segment=1 status=502 lazy=HIT lazy_wait_ms=5 lazy_generator=ffmpeg header_ms=10 total_ms=3000 bytes=100 failure=body_idle_timeout"
-    ), "{}", out.text());
+    ), "{}", out.logs());
 }

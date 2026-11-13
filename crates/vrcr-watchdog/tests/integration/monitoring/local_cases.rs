@@ -54,7 +54,7 @@ fn a_failed_local_load_sends_the_next_try_to_the_stock_resolver() {
     r.fail();
     assert!(r.prefers_og());
     assert!(!r.plays.is_resting());
-    let text = r.rig.out.text();
+    let text = r.rig.out.logs();
     assert!(text.contains("load_failure ms=2000 url="), "{text}");
     assert!(text.contains(" og_hint=armed"), "{text}");
 }
@@ -65,7 +65,7 @@ fn a_stalled_local_load_sends_the_next_try_to_the_stock_resolver() {
     r.open();
     r.rig.tick(&mut r.monitor, secs(300));
     assert!(r.prefers_og());
-    let text = r.rig.out.text();
+    let text = r.rig.out.logs();
     assert!(text.contains("silent_stall ms="), "{text}");
 }
 

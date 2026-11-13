@@ -23,11 +23,8 @@ pub struct PaletteCommand<'a> {
     pub aliases: &'a [String],
 }
 
-fn title_frame(glyphs: &Glyphs, title: &str) -> Frame {
-    Frame::from_runs(vec![
-        Run::new(format!("{} ", glyphs.bullet), Color::DarkGray),
-        Run::new(title, Color::White),
-    ])
+fn title_frame(title: &str) -> Frame {
+    Frame::from_runs(vec![Run::new(title, Color::White)])
 }
 
 pub fn key_value(
@@ -44,7 +41,7 @@ pub fn key_value(
         .map_or(0, |m| m.min(24).min((width / 3).max(8)));
     let right_width = width.saturating_sub(left_width + 7).max(8);
 
-    let mut frames = vec![title_frame(glyphs, title)];
+    let mut frames = vec![title_frame(title)];
     for (left, right) in rows {
         let wrapped = wrap(right, right_width);
         let count = wrapped.len().max(1);
@@ -98,7 +95,7 @@ pub fn table(
     }
 
     let mut frames = vec![
-        title_frame(glyphs, title),
+        title_frame(title),
         Frame::from_runs(vec![
             Run::new(
                 format!("  {}", pad_right("setting", name_width)),
@@ -222,7 +219,6 @@ pub fn command_palette(
 ) -> Vec<Frame> {
     let width = width.max(24);
     let mut frames = vec![Frame::from_runs(vec![
-        Run::new(format!("{} ", glyphs.bullet), Color::DarkGray),
         Run::new("commands", Color::White),
         Run::new("  tab completes a unique match", Color::DarkGray),
     ])];
@@ -258,7 +254,7 @@ pub fn command_palette(
 
 pub fn completion_palette(items: &[Item], width: usize, glyphs: &Glyphs) -> Vec<Frame> {
     let width = width.max(24);
-    let mut frames = vec![title_frame(glyphs, "matches")];
+    let mut frames = vec![title_frame("matches")];
     let item_width = items
         .iter()
         .map(|i| clen(&i.text) + 1)

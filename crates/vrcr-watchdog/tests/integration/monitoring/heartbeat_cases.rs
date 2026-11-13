@@ -70,7 +70,7 @@ fn heartbeat_stays_quiet_while_the_log_is_busy() {
         mesh_connected: Box::new(|| true),
         cache_size: Box::new(|| 2),
         now: clock.now(),
-        ux: Ux::new(Box::new(out.clone()), Style::plain(), String::new),
+        ux: out.ux(),
         log: log.clone(),
     };
     log.line("recent activity");
@@ -80,7 +80,7 @@ fn heartbeat_stays_quiet_while_the_log_is_busy() {
         hb.tick().as_deref(),
         Some("up=1h35m mesh=connected resolves=1 (1 local video) cache=2(0hits)")
     );
-    assert!(out.text().contains("[heartbeat]"));
+    assert!(out.logs().contains("[heartbeat]"));
 
     let silent = Heartbeat {
         log: Log::disabled(),

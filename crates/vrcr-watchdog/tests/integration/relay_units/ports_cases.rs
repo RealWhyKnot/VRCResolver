@@ -23,9 +23,9 @@ fn port_manager_replaces_busy_previous_port() {
         ports.current_port().to_string()
     );
     assert!(
-        out.text().contains("(previous port was busy)"),
+        out.logs().contains("(previous port was busy)"),
         "{}",
-        out.text()
+        out.logs()
     );
 }
 
@@ -43,7 +43,7 @@ fn port_manager_reuses_a_free_previous_port() {
     assert!(ports.initialize());
     assert_eq!(ports.current_port(), free);
     assert!(
-        out.text()
+        out.logs()
             .contains(&format!("reserved local video port {free} (reused)"))
     );
 }
@@ -57,7 +57,7 @@ fn port_manager_ignores_privileged_or_garbage_previous_ports() {
         let ports = RelayPortManager::new(dir.path(), ux);
         assert!(ports.initialize());
         assert!(ports.current_port() > 0);
-        assert!(!out.text().contains("busy"), "{junk}: {}", out.text());
+        assert!(!out.logs().contains("busy"), "{junk}: {}", out.logs());
     }
 }
 
@@ -80,7 +80,7 @@ fn port_manager_fresh_port_rewrites_relay_files() {
         read(&dir, "relay_last_port.txt"),
         ports.current_port().to_string()
     );
-    assert!(out.text().contains(&format!(
+    assert!(out.logs().contains(&format!(
         "(previous port {first} failed: test bind failure)"
     )));
     assert!(!dir.path().join("relay_port.txt.tmp").exists());
@@ -115,7 +115,7 @@ fn bypass_hides_port_file_while_wedged_and_restores_on_new_session() {
     assert!(bypass.active());
     assert!(!port_file.exists());
     assert!(bypass.engage(ports.current_port()));
-    assert_eq!(out.text().matches("can no longer reach").count(), 1);
+    assert_eq!(out.logs().matches("can no longer reach").count(), 1);
 
     bypass.release();
     assert!(!bypass.active());
@@ -124,10 +124,10 @@ fn bypass_hides_port_file_while_wedged_and_restores_on_new_session() {
         ports.current_port().to_string()
     );
     assert_eq!(read(&dir, "relay_scheme.txt"), "https");
-    assert!(out.text().contains(&format!(
+    assert!(out.logs().contains(&format!(
         "new VRChat session; local video relay back on port {}",
         ports.current_port()
     )));
     bypass.release();
-    assert_eq!(out.text().matches("new VRChat session").count(), 1);
+    assert_eq!(out.logs().matches("new VRChat session").count(), 1);
 }

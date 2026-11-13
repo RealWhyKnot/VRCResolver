@@ -101,7 +101,7 @@ pub fn run(build: BuildInfo, args: &[String]) -> i32 {
 
     let (instance, local) = acquire_instance(create_mutex);
     if local {
-        ux.warn(
+        ux.log_warn(
             Component::Terminal,
             "could not create global mutex; using session-local mutex.",
         );
@@ -109,11 +109,13 @@ pub fn run(build: BuildInfo, args: &[String]) -> i32 {
     let held = match instance {
         Instance::Acquired(held) => held,
         Instance::AlreadyRunning => {
-            ux.warn(Component::Terminal, "VRCResolver is already running.");
+            ux.event(vrcr_shared::console::Notice::AlreadyRunning);
+            ux.log_warn(Component::Terminal, "VRCResolver is already running.");
             return 1;
         }
         Instance::Failed(e) => {
-            let _ = writeln!(std::io::stderr(), "Mutex creation failed: {e}");
+            log.line(&format!("Mutex creation failed: {e}"));
+            ux.event(vrcr_shared::console::Notice::InstanceCheckFailed);
             return 3;
         }
     };
@@ -127,7 +129,8 @@ pub fn run(build: BuildInfo, args: &[String]) -> i32 {
     {
         Ok(rt) => rt,
         Err(e) => {
-            ux.error(
+            ux.event(vrcr_shared::console::Notice::StartupFailed);
+            ux.log_error(
                 Component::Terminal,
                 &format!("could not start the async runtime: {e}"),
             );
@@ -162,7 +165,8 @@ fn run_child(mode: ChildMode, args: &[String], paths: &AppPaths, ux: &Ux) -> i32
             let host = match WindowsTlsHost::current() {
                 Ok(host) => host,
                 Err(e) => {
-                    ux.error(Component::Relay, &format!("HTTPS setup failed: {e}"));
+                    ux.event(vrcr_shared::console::Notice::SecureSetupFailed);
+                    ux.log_error(Component::Relay, &format!("HTTPS setup failed: {e}"));
                     return 1;
                 }
             };
@@ -398,7 +402,9 @@ impl App {
     fn hook_console(&self) {
         let life = std::sync::Arc::clone(&self.life);
         if !win::install_ctrl_handler(Box::new(move |event| life.on_ctrl(event))) {
-            self.ux.warn(
+            self.ux
+                .event(vrcr_shared::console::Notice::CloseHandlerFailed);
+            self.ux.log_warn(
                 Component::Shutdown,
                 "could not hook console close events; if this window is closed, VRChat's tools are put back on the next start.",
             );
@@ -439,10 +445,16 @@ impl App {
 
     fn install_shutdown(&self, patcher: Arc<PatchManager>) {
         let parts = std::sync::Arc::clone(&self.parts);
+        let ux = self.ux.clone();
         let restore = Arc::new(move |trigger: &str| {
             let restored = patcher.restore_now(trigger);
             if let Some(ports) = peek(&parts.ports) {
                 ports.delete_port_file();
+            }
+            if restored {
+                ux.event(vrcr_shared::console::Notice::Closing);
+            } else {
+                ux.event(vrcr_shared::console::Notice::RestoreFailed);
             }
             Ok::<bool, String>(restored)
         });
@@ -475,11 +487,11 @@ impl App {
             wininet::ensure(
                 &mut store,
                 &state_root.join(wininet::MARKER_FILE),
-                &mut |msg| ux.write(Component::Relay, &msg),
+                &mut |msg| ux.log_write(Component::Relay, &msg),
             )
         });
         if let Err(e) = raised {
-            self.ux.warn(
+            self.ux.log_warn(
                 Component::Relay,
                 &format!("could not raise WinINet connection limit: {e}"),
             );
@@ -491,7 +503,7 @@ impl App {
             Ok(manager) => Arc::new(manager),
             Err(e) => {
                 self.ux
-                    .warn(Component::Hosts, &format!("background check failed: {e}"));
+                    .log_warn(Component::Hosts, &format!("background check failed: {e}"));
                 return;
             }
         };
@@ -499,7 +511,7 @@ impl App {
         let ux = self.ux.clone();
         tokio::spawn(async move {
             if let Err(e) = tokio::task::spawn_blocking(move || ensure.ensure_entry()).await {
-                ux.warn(
+                ux.log_warn(
                     Component::Hosts,
                     &format!("background check failed: {}", panic_text(&e)),
                 );

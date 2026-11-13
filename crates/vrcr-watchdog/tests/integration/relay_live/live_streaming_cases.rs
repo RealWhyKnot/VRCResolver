@@ -151,7 +151,7 @@ async fn live_buffer_budget_preserves_vod_partial_body_at_manifest_deadline() {
     assert!(reply.body.starts_with(b"#EXTM3U"));
     assert!(reply.body.len() > 8192);
     assert!(!origin.finished.load(Ordering::SeqCst));
-    assert!(output.text().contains("reason=upstream_timeout"));
+    assert!(output.logs().contains("reason=upstream_timeout"));
     server.stop().await;
 }
 
@@ -266,7 +266,7 @@ async fn live_truncated_upstream_never_becomes_a_trimmed_complete_playlist() {
         let text = String::from_utf8(reply.body).expect("text");
         assert!(!text.contains("#EXT-X-MEDIA-SEQUENCE:"));
         assert!(!text.contains("#EXT-X-ENDLIST"));
-        assert!(!output.text().contains("playlist trimmed"));
+        assert!(!output.logs().contains("playlist trimmed"));
         server.stop().await;
     }
 }
@@ -384,7 +384,7 @@ async fn live_zero_sequence_is_learned_then_forgotten_after_endlist() {
         assert_eq!(text.contains("#EXT-X-ENDLIST"), index == 2);
         assert!(eventually(|| server.in_flight() == 0, WITHIN).await);
     }
-    let log = output.text();
+    let log = output.logs();
     assert!(log.contains("large-media-playlist"), "{log}");
     assert!(log.contains("untrimmed=budget"), "{log}");
     assert_eq!(log.matches("large-media-playlist").count(), 1, "{log}");

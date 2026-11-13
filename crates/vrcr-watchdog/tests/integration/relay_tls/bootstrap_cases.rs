@@ -17,14 +17,14 @@ fn elevation_outcomes_fall_back_to_http_with_the_csharp_messages() {
         let clock = ManualClock::utc(NOW);
         let (m, out) = manager(&host, &clock);
         assert!(m.ensure_ready(51234).is_none());
-        assert!(out.text().contains(needle), "{}", out.text());
+        assert!(out.logs().contains(needle), "{}", out.logs());
     }
     let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
     let host = FakeHost::new(Behaviour::ExitCode(1), &dir);
     let clock = ManualClock::utc(NOW);
     let (m, out) = manager(&host, &clock);
     assert!(m.ensure_ready(51234).is_none());
-    assert!(!out.text().contains("falling back"), "{}", out.text());
+    assert!(!out.logs().contains("falling back"), "{}", out.logs());
 }
 
 #[test]
@@ -69,7 +69,8 @@ fn bootstrap_child_refuses_bad_input_without_touching_the_store() {
             2,
             "{args:?}"
         );
-        assert!(out.text().contains(needle), "{args:?}: {}", out.text());
+        assert!(out.logs().contains(needle), "{args:?}: {}", out.logs());
+        assert_eq!(out.text(), "  Secure video setup failed.\n", "{args:?}");
     }
     assert_eq!(
         host.certs(MachineStore::Root),

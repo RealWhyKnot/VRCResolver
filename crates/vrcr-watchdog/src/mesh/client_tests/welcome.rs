@@ -42,8 +42,7 @@ async fn cached_welcome_without_a_local_entry_keeps_the_backoff() {
 
     assert_eq!(h.client.reconnect_attempt(), 4);
     assert!(
-        h.out
-            .text()
+        h.log()
             .contains("welcome_cached but local entry missing -- invalidating + reconnecting")
     );
 }
@@ -66,7 +65,7 @@ async fn welcome_records_the_server_and_applies_its_hosts() {
     let policy = policy.read().unwrap_or_else(|e| e.into_inner());
     assert!(policy.host_families().iter().any(|f| f == "example.org"));
     drop(policy);
-    assert!(h.out.text().contains(
+    assert!(h.log().contains(
         "welcome node=node1 v=9 (negotiated=3) server=s1 yt-dlp=y1 warp_active=true features=[welcome_hosts]"
     ));
 }
@@ -85,11 +84,7 @@ async fn welcome_without_features_warns_and_keeps_the_default_hosts() {
     h.json(r#"{"action":"welcome","protocol_version":1,"node":"fake","first_party_hosts":["evil.example"]}"#)
         .await;
 
-    assert!(
-        h.out
-            .text()
-            .contains("welcome missing required field: features")
-    );
+    assert!(h.log().contains("welcome missing required field: features"));
     let after = h
         .client
         .first_party()
@@ -162,8 +157,7 @@ async fn cached_welcome_on_a_non_v3_link_is_a_protocol_error() {
         .await;
 
     assert!(
-        h.out
-            .text()
+        h.log()
             .contains("welcome_cached received on non-v3 connection")
     );
     assert_eq!(h.client.server_protocol_version(), 0);

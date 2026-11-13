@@ -68,7 +68,7 @@ impl Drop for ResolveTrace<'_> {
         if self.finished {
             return;
         }
-        self.ux.write(Component::Ipc, &format!(
+        self.ux.log_write(Component::Ipc, &format!(
             "resolve failed req={} kind=resolve host={} status=unknown elapsed_ms={} bytes=0 retry={} sent={} reason={}",
             token(&self.request.id), host(&self.request.url), self.started.elapsed().as_millis(), self.retried, self.sent, self.reason,
         ));

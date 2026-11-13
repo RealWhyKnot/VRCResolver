@@ -146,7 +146,7 @@ pub fn restore_ytdlp_in_tools(
 ) -> bool {
     let (outcome, detail) = tools::restore(tools_dir, known_hashes, &RealOps);
     if outcome == RestoreOutcome::Failed {
-        ux.warn(Component::Patch, &format!("restore error: {detail}"));
+        ux.log_warn(Component::Patch, &format!("restore error: {detail}"));
         false
     } else {
         log.line(&format!("[patch] restore: {outcome:?} -- {detail}"));
@@ -181,7 +181,10 @@ pub fn log_vrc_process_state(ux: &Ux) {
         .filter(|p| vrcr_shared::win::process_stem(&p.exe).eq_ignore_ascii_case("VRChat"))
         .map(|p| (p.pid, vrcr_shared::win::process_start_time(p.pid)))
         .collect();
-    ux.write(Component::Patch, &vrc_process_state_line(&running));
+    ux.log_write(Component::Patch, &vrc_process_state_line(&running));
+    if !running.is_empty() {
+        ux.event(vrcr_shared::console::Notice::VrchatOpen);
+    }
 }
 
 impl PatchManager {
@@ -256,7 +259,7 @@ impl PatchManager {
         };
         let target = dir.join(TARGET_NAME);
         if dir.join(OG_NAME).is_file() {
-            self.ux.write(
+            self.ux.log_write(
                 Component::Patch,
                 "Recovery: the last run was stopped before it could clean up. Restoring VRChat's yt-dlp from yt-dlp-og.exe.",
             );
@@ -264,7 +267,7 @@ impl PatchManager {
             return;
         }
         if target.is_file() && self.classify(&mut st, &target) == WrapperKind::Ours {
-            self.ux.warn(
+            self.ux.log_warn(
                 Component::Patch,
                 "Recovery: previous run exited uncleanly and left our wrapper in Tools with no backup -- removing it. VRChat will re-download its yt-dlp on next session.",
             );
@@ -277,24 +280,28 @@ impl PatchManager {
         if self.started.swap(true, Ordering::AcqRel) {
             return true;
         }
-        let refuse = |msg: &str| {
-            self.ux.error(Component::Patch, msg);
+        let refuse = |msg: &str, sentence: &str| {
+            self.ux.notice(vrcr_shared::console::Color::Red, sentence);
+            self.ux.log_error(Component::Patch, msg);
             self.started.store(false, Ordering::Release);
             false
         };
         let Some(dir) = self.tools_dir.as_deref() else {
             return refuse(
                 "Cannot apply patch -- VRChat Tools folder not found. Launch VRChat once first, then re-run.",
+                "VRCResolver couldn't find VRChat's video player. Open VRChat once, then open VRCResolver again.",
             );
         };
         if !self.wrapper.is_file() {
             return refuse(
                 "Cannot apply patch -- patched yt-dlp.exe is missing from this install. Reinstall vrcresolver.",
+                "A file VRCResolver needs is missing. Reinstall VRCResolver.",
             );
         }
         if !dir.join(TARGET_NAME).is_file() && !dir.join(OG_NAME).is_file() {
             return refuse(
                 "Cannot apply patch -- VRChat hasn't shipped its own yt-dlp.exe yet, and we have no original to preserve as fallback. Launch VRChat once first, then re-run.",
+                "VRChat hasn't downloaded its video player yet. Open VRChat once, then open VRCResolver again.",
             );
         }
         if self.halt_flag.exists() {
@@ -349,7 +356,7 @@ impl PatchManager {
         };
         let line = format!("restore ({reason}): {outcome:?} {detail}");
         if outcome == RestoreOutcome::Failed {
-            self.ux.warn(Component::Patch, &line);
+            self.ux.log_warn(Component::Patch, &line);
             return false;
         }
         let flag = self.write_clean_exit_flag();

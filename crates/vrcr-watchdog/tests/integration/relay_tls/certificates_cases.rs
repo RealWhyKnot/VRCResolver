@@ -92,7 +92,7 @@ fn first_run_elevates_once_then_reuses_the_trusted_cert() {
     let elevations = host.elevations();
     assert_eq!(elevations.len(), 1);
     assert!(elevations[0].starts_with(&format!("{BOOTSTRAP_ARG} 51234 ")));
-    let text = out.text();
+    let text = out.logs();
     assert!(
         text.contains("configuring HTTPS for localhost.youtube.com -- UAC prompt incoming."),
         "{text}"
@@ -130,7 +130,7 @@ fn disable_switch_skips_https_without_elevating_or_writing_a_cert() {
         <[std::vec::Vec<u8>; 0]>::default()
     );
     assert!(!host.paths.state_dir.join(CERT_FILE).exists());
-    assert!(out.text().is_empty(), "{}", out.text());
+    assert!(out.logs().is_empty(), "{}", out.logs());
 }
 
 #[test]
@@ -141,10 +141,10 @@ fn declined_uac_keeps_the_cert_for_the_next_attempt() {
     let (m, out) = manager(&declined, &clock);
     assert!(m.ensure_ready(51234).is_none());
     assert!(
-        out.text()
+        out.logs()
             .contains("UAC declined -- HTTPS relay not configured.")
     );
-    assert!(!out.text().contains("falling back"));
+    assert!(!out.logs().contains("falling back"));
     let first =
         fs::read(declined.paths.state_dir.join(CERT_FILE)).unwrap_or_else(|e| panic!("{e}"));
 
@@ -167,7 +167,7 @@ fn unreadable_root_store_warns_then_still_tries() {
     let clock = ManualClock::utc(NOW);
     let (m, out) = manager(&host, &clock);
     assert!(m.ensure_ready(51234).is_none());
-    let text = out.text();
+    let text = out.logs();
     assert!(
         text.contains("HTTPS readiness check failed: store unavailable"),
         "{text}"
@@ -281,7 +281,7 @@ async fn relay_serves_https_with_the_generated_cert() {
         stats: Arc::new(Stats::new(SystemTime::now())),
         manifests: Arc::default(),
         now: clock::system(),
-        ux: Ux::new(Box::new(out.clone()), Style::plain(), String::new),
+        ux: out.ux(),
         log: Log::disabled(),
     };
     let mut cfg = RelayConfig::http(0);

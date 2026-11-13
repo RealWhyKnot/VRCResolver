@@ -55,7 +55,8 @@ pub fn run_add(path: &Path, ux: &Ux) -> i32 {
     match appended {
         Ok(()) => 0,
         Err(e) => {
-            ux.error(Component::Hosts, &format!("add failed: {e}"));
+            ux.event(vrcr_shared::console::Notice::HostsAddFailed);
+            ux.log_error(Component::Hosts, &format!("add failed: {e}"));
             1
         }
     }
@@ -66,7 +67,8 @@ pub fn run_remove(path: &Path, ux: &Ux) -> i32 {
         Ok(b) => b,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return 0,
         Err(e) => {
-            ux.error(Component::Hosts, &format!("remove failed: {e}"));
+            ux.event(vrcr_shared::console::Notice::HostsRemoveFailed);
+            ux.log_error(Component::Hosts, &format!("remove failed: {e}"));
             return 1;
         }
     };
@@ -83,7 +85,8 @@ pub fn run_remove(path: &Path, ux: &Ux) -> i32 {
     match fs::write(path, out) {
         Ok(()) => 0,
         Err(e) => {
-            ux.error(Component::Hosts, &format!("remove failed: {e}"));
+            ux.event(vrcr_shared::console::Notice::HostsRemoveFailed);
+            ux.log_error(Component::Hosts, &format!("remove failed: {e}"));
             1
         }
     }
@@ -142,7 +145,8 @@ impl HostsManager {
         match (self.elevate)(arg) {
             Elevated::Exited(_) => true,
             Elevated::TimedOut => {
-                self.ux.warn(
+                self.ux.event(vrcr_shared::console::Notice::HostsSetupSlow);
+                self.ux.log_warn(
                     Component::Hosts,
                     "elevation child still running after 60s -- continuing without hosts entry.",
                 );
@@ -150,12 +154,16 @@ impl HostsManager {
             }
             Elevated::Declined => {
                 self.ux
-                    .write(Component::Hosts, "UAC declined -- entry not modified.");
+                    .event(vrcr_shared::console::Notice::HostsPermissionDeclined);
+                self.ux
+                    .log_write(Component::Hosts, "UAC declined -- entry not modified.");
                 false
             }
             Elevated::Failed(e) => {
                 self.ux
-                    .warn(Component::Hosts, &format!("elevation error: {e}"));
+                    .event(vrcr_shared::console::Notice::HostsSetupLaunchFailed);
+                self.ux
+                    .log_warn(Component::Hosts, &format!("elevation error: {e}"));
                 false
             }
         }
@@ -180,14 +188,16 @@ impl HostsManager {
         if self.is_active() {
             return;
         }
-        self.ux.write(
+        self.ux
+            .event(vrcr_shared::console::Notice::HostsPermissionNeeded);
+        self.ux.log_write(
             Component::Hosts,
             "adding entry for public-instance support -- UAC prompt incoming.",
         );
         let launched = self.reexec(ADD_ARG);
         if self.is_active() {
             if launched {
-                self.ux.write(
+                self.ux.log_write(
                     Component::Hosts,
                     &format!("added {MARKER_IP} {GATEWAY_HOST}"),
                 );
@@ -196,7 +206,9 @@ impl HostsManager {
         }
         self.declined.store(true, Ordering::Release);
         if launched {
-            self.ux.warn(
+            self.ux
+                .event(vrcr_shared::console::Notice::HostsSetupIncomplete);
+            self.ux.log_warn(
                 Component::Hosts,
                 "entry not present after elevation -- public-instance support may not work.",
             );
@@ -272,7 +284,7 @@ impl HostsTicker {
             Ok(p) => p,
             Err(e) => {
                 if st.last_present.is_some() {
-                    self.ux.warn(
+                    self.ux.log_warn(
                         Component::Hosts,
                         &format!("tick: hosts file unreadable ({e}) -- skipping check"),
                     );
@@ -283,7 +295,7 @@ impl HostsTicker {
         };
         if present {
             if st.last_present != Some(true) {
-                self.ux.write(
+                self.ux.log_write(
                     Component::Hosts,
                     &format!("tick: {GATEWAY_HOST} entry present"),
                 );
@@ -304,7 +316,7 @@ impl HostsTicker {
             return;
         }
         if st.last_present != Some(false) {
-            self.ux.write(
+            self.ux.log_write(
                 Component::Hosts,
                 &format!("tick: {GATEWAY_HOST} missing -- re-adding"),
             );
@@ -321,7 +333,7 @@ impl HostsTicker {
                 .duration_since(started)
                 .unwrap_or_default()
                 .as_millis();
-            self.ux.write(
+            self.ux.log_write(
                 Component::Hosts,
                 &format!("tick: re-add succeeded in {ms} ms"),
             );
@@ -337,7 +349,7 @@ impl HostsTicker {
 
     fn give_up(&self, st: &mut TickState, reason: &str) {
         st.gave_up = true;
-        self.ux.warn(
+        self.ux.log_warn(
             Component::Hosts,
             &format!("tick: re-add failed ({reason}) -- won't ask again until the next start"),
         );
