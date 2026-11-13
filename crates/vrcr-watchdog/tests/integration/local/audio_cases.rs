@@ -2,9 +2,12 @@ use super::*;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
-const AUTODUB: &str = include_str!("../../fixtures/youtube_autodub_ja_original_master.m3u8");
 const ORIGINAL: &str = "ChEKBWFjb250EghvcmlnaW5hbAoKCgRsYW5nEgJqYQ";
 const DUB: &str = "ChQKBWFjb250EgtkdWJiZWQtYXV0bwoNCgRsYW5nEgVlbi1VUw";
+
+fn autodub() -> String {
+    include_str!("../../fixtures/youtube_autodub_ja_original_master.m3u8").replace("\r\n", "\n")
+}
 
 fn assert_original_in_both_groups(playlist: &str) {
     for (group, other, expected) in [
@@ -26,7 +29,7 @@ fn assert_original_in_both_groups(playlist: &str) {
 }
 
 fn dub_default() -> String {
-    AUTODUB
+    autodub()
         .replace("DEFAULT=YES", "DEFAULT=TEMP")
         .replace("DEFAULT=NO", "DEFAULT=YES")
         .replace("DEFAULT=TEMP", "DEFAULT=NO")
@@ -47,7 +50,7 @@ fn selected_audio(renditions: &str) -> String {
 
 #[test]
 fn the_real_youtube_master_selects_japanese_in_both_groups() {
-    assert_original_in_both_groups(AUTODUB);
+    assert_original_in_both_groups(&autodub());
 }
 
 #[test]

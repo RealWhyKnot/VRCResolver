@@ -61,6 +61,7 @@ enum Mode {
 struct FakeOrigin {
     port: u16,
     hits: Arc<Mutex<Vec<String>>>,
+    visitor_language: Arc<Mutex<Option<String>>>,
     is_walled: Arc<AtomicBool>,
 }
 
@@ -74,25 +75,38 @@ impl FakeOrigin {
             .unwrap_or_else(|e| panic!("{e}"))
             .port();
         let hits = Arc::new(Mutex::new(Vec::new()));
+        let visitor_language = Arc::new(Mutex::new(None));
         let is_walled = Arc::new(AtomicBool::new(mode == Mode::SignInWall));
         let seen = Arc::clone(&hits);
+        let language = Arc::clone(&visitor_language);
         let walled = Arc::clone(&is_walled);
         tokio::spawn(async move {
             while let Ok((stream, _)) = listener.accept().await {
                 let seen = Arc::clone(&seen);
+                let language = Arc::clone(&language);
                 let walled = Arc::clone(&walled);
-                tokio::spawn(async move { serve(stream, port, mode, &seen, &walled).await });
+                tokio::spawn(
+                    async move { serve(stream, port, mode, &seen, &walled, &language).await },
+                );
             }
         });
         FakeOrigin {
             port,
             hits,
+            visitor_language,
             is_walled,
         }
     }
 
     fn hits(&self) -> Vec<String> {
         self.hits.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn visitor_language(&self) -> Option<String> {
+        self.visitor_language
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     fn local(&self, manifests: &Arc<Manifests>) -> Local {
@@ -121,6 +135,7 @@ async fn serve(
     mode: Mode,
     hits: &Mutex<Vec<String>>,
     is_walled: &AtomicBool,
+    visitor_language: &Mutex<Option<String>>,
 ) {
     let Some((head, body)) = read_request(&mut stream).await else {
         return;
@@ -137,10 +152,11 @@ async fn serve(
     let (status, reply) = match path.as_str() {
         "/sw.js_data" if mode == Mode::VisitorDown => (503, String::new()),
         "/sw.js_data" => {
-            assert!(
-                head.to_ascii_lowercase()
-                    .contains("accept-language: en-us,en;q=0.9")
-            );
+            *visitor_language.lock().unwrap_or_else(|e| e.into_inner()) = head
+                .lines()
+                .filter_map(|line| line.split_once(':'))
+                .find(|(name, _)| name.eq_ignore_ascii_case("accept-language"))
+                .map(|(_, value)| value.trim().to_owned());
             (200, visitor_reply())
         }
         "/youtubei/v1/player?prettyPrint=false" => {

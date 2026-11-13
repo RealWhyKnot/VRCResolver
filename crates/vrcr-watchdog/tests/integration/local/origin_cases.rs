@@ -15,6 +15,7 @@ async fn a_video_resolves_to_a_manifest_the_relay_can_serve() {
     let local = origin.local(&manifests);
     assert!(local.covers(WATCH));
     let played = play(&local).await.unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(origin.visitor_language().as_deref(), Some("en-US,en;q=0.9"));
     assert_eq!(played.height, 1080);
     assert_eq!(played.video_codec, "avc1.64002A");
     assert_eq!(played.audio_codec.as_deref(), Some("mp4a.40.2"));
