@@ -1,5 +1,58 @@
 use super::*;
 
+#[tokio::test]
+async fn fallback_message_is_printed_once_across_resolve_and_wrapper_notification() {
+    let message = "The video is private.";
+    let mesh = FakeMesh::always(Step::Reply {
+        action: action::FALLBACK_NATIVE,
+        reason: Some(fallback::ALL_CONFIGS_FAILED),
+        url: None,
+        extra: Some(("public_message", message)),
+        retry_after_ms: Some(123),
+    });
+    let output = crate::common::mesh::Capture::default();
+    let ux = Ux::new(
+        Box::new(output.clone()),
+        vrcr_shared::console::Style::plain(),
+        String::new,
+    );
+    let ipc = Ipc::builder(mesh, ux, Log::disabled()).build();
+    for expected in 1..=2 {
+        let response = ask(&ipc, &req("avpro", "")).await;
+        assert_eq!(response["action"], action::FALLBACK_NATIVE);
+        assert_eq!(response["reason"], fallback::ALL_CONFIGS_FAILED);
+        assert_eq!(response["retry_after_ms"], 123);
+        assert!(response.get("public_message").is_none());
+        let notification = serde_json::json!({
+            "action": action::OG_FALLBACK_NOTIFY,
+            "url": URL,
+            "reason": og_reason::SERVER_FALLBACK_NATIVE,
+            "rid": "wrapper-run",
+            "public_message": response.get("public_message"),
+        });
+        exchange(&ipc, &notification.to_string()).await;
+        let text = output.text();
+        assert_eq!(text.matches(message).count(), expected);
+        assert_eq!(text.matches("[resolve]").count(), expected);
+        assert_eq!(text.matches("[wrapper] !!").count(), expected);
+        assert!(!text.contains("[wrapper][warn]"));
+    }
+    let standalone = serde_json::json!({
+        "action": action::OG_FALLBACK_NOTIFY,
+        "url": URL,
+        "reason": og_reason::SERVER_FALLBACK_NATIVE,
+        "rid": "another-wrapper",
+        "public_message": message,
+    });
+    exchange(&ipc, &standalone.to_string()).await;
+    assert_eq!(output.text().matches(message).count(), 3);
+    assert!(
+        output
+            .text()
+            .contains("[wrapper][warn] The video is private.")
+    );
+}
+
 #[test]
 fn og_failed_detail_collapses_to_the_server_set() {
     for (input, want) in [

@@ -242,19 +242,17 @@ pub(super) async fn handle(
             Ok(Ok(r)) => r,
         }
     };
-    if !ex.suppressed
+    let playback_error = if !ex.suppressed
         && upstream_class
         && resp.direct
         && (resp.status.is_client_error() || resp.status.is_server_error())
         && let Some(reason) = resp.headers.get("x-vrcr-reason")
     {
         let reason = String::from_utf8_lossy(reason.as_bytes());
-        inner.deps.stats.playback.playback_error(
-            &ex.path,
-            &vrcr_shared::console::PlaybackError::proxy(&reason),
-            &inner.deps.ux,
-        );
-    }
+        Some(vrcr_shared::console::PlaybackError::proxy(&reason))
+    } else {
+        None
+    };
     if eligible && !ex.suppressed {
         if resp.status.is_success() {
             inner.retries.clear(&key);
@@ -315,6 +313,15 @@ pub(super) async fn handle(
                 }
             }
         }
+    }
+    if (resp.status.is_client_error() || resp.status.is_server_error())
+        && let Some(error) = playback_error
+    {
+        inner
+            .deps
+            .stats
+            .playback
+            .playback_error(&ex.path, &error, &inner.deps.ux);
     }
     attempt.complete = true;
     ex.header_ms = ms(ex.started.elapsed());

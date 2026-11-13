@@ -219,7 +219,13 @@ async fn deadline_outcomes_open_the_gate_only_for_a_full_window() {
             Step::Hang
         };
         let mesh = FakeMesh::always(step);
-        let ipc = Ipc::builder(mesh, Ux::sink(), Log::disabled())
+        let output = crate::common::mesh::Capture::default();
+        let ux = Ux::new(
+            Box::new(output.clone()),
+            vrcr_shared::console::Style::plain(),
+            String::new,
+        );
+        let ipc = Ipc::builder(mesh, ux, Log::disabled())
             .health(std::sync::Arc::clone(&gate))
             .build();
         for i in 0..health::OPEN_THRESHOLD {
@@ -228,7 +234,15 @@ async fn deadline_outcomes_open_the_gate_only_for_a_full_window() {
             );
             let v = ask(&ipc, &line).await;
             assert_eq!(reason(&v), fallback::CLIENT_DEADLINE_EXCEEDED);
-            assert_eq!(v.get("public_message").is_some(), server_answers);
+            assert!(v.get("public_message").is_none());
+            assert_eq!(
+                output.text().matches(" -- scripted").count(),
+                if server_answers {
+                    usize::try_from(i + 1).expect("small resolve count")
+                } else {
+                    0
+                }
+            );
         }
         assert_eq!(
             gate.should_short_circuit(true).0,

@@ -40,7 +40,7 @@ fn resolve_public_messages_are_last_and_empty_messages_add_nothing() {
 
 #[test]
 fn resolve_public_messages_strip_terminal_controls_and_private_urls() {
-    let message = "\x1b[31mThe\x1b[0m\t video\r\n is\x00 private. \u{2603}\x1b]0;title\x07\u{9b}31m\u{9d}title\u{9c}\x1b(B https://example.com/secret?token=secret";
+    let message = "\x1b\x1b[31mThe\x1b[0m\t video\r\n is\x00 private. \u{2603}\x1b]0;title\x07\u{9b}31m\u{9d}title\u{9c}\x1b(B https://example.com/secret?token=secret";
     let sample = Outcome {
         public_message: Some(message),
         ..outcome(ResolveStatus::Fallback)
@@ -63,6 +63,23 @@ fn resolve_public_messages_are_capped_at_two_hundred_characters() {
     let shown = line.split_once(" -- ").expect("message").1;
     assert_eq!(shown.len(), 200);
     assert!(shown.ends_with(".."));
+}
+
+#[test]
+fn resolve_public_message_limit_handles_multibyte_input_at_the_boundary() {
+    for position in 197..=201 {
+        let message = format!("{}\u{e9}\u{1f642}{}", "x".repeat(position), "y".repeat(50));
+        let sample = Outcome {
+            public_message: Some(&message),
+            ..outcome(ResolveStatus::Fallback)
+        };
+        let (_, line) = console::resolve_outcome_line("*", &sample);
+        let shown = line.split_once(" -- ").expect("message").1;
+        assert_eq!(shown.len(), 200);
+        assert!(shown.is_ascii());
+        assert!(shown.ends_with(".."));
+        assert!(shown.starts_with(&"x".repeat(position.min(198))));
+    }
 }
 
 #[test]

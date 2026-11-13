@@ -202,11 +202,16 @@ impl<M: Mesh> Ipc<M> {
                 .resolve_with_retries(&mut req, deadline, cid.as_deref())
                 .await
             {
-                Ok(result) => {
+                Ok(mut result) => {
                     let local = if result.action == action::FALLBACK_NATIVE {
-                        public_message = serde_json::from_slice::<ResolveResponse>(&result.frame)
-                            .ok()
-                            .and_then(|response| response.public_message);
+                        if let Ok(mut response) =
+                            serde_json::from_slice::<ResolveResponse>(&result.frame)
+                            && let Some(message) = response.public_message.take()
+                            && let Ok(frame) = serde_json::to_vec(&response)
+                        {
+                            public_message = Some(message);
+                            result.frame = frame;
+                        }
                         self.local_frame(&req, &id, deadline).await
                     } else {
                         None

@@ -8,7 +8,12 @@ pub fn public_message(value: &str) -> String {
             let introducer = match character {
                 '\u{9b}' => Some('['),
                 '\u{9d}' => Some(']'),
-                _ => chars.next(),
+                _ => {
+                    while chars.peek() == Some(&'\u{1b}') {
+                        chars.next();
+                    }
+                    chars.next()
+                }
             };
             match introducer {
                 Some('[') => {
