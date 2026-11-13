@@ -11,7 +11,14 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
-_No notable changes since the last release._
+### Added
+- **console:** Rewrite the console in plain words (c10f395)
+- **console:** Show server errors in the console (5022381)
+
+### Fixed
+- **console:** Fix narrow layout and repeated Failed rows (f9ef90a)
+- **console:** Print each server error once (da7d14c)
+- **local:** Play the original audio instead of the dub (a94a89b)
 
 ---
 
