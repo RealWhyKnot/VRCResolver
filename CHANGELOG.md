@@ -11,6 +11,12 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
+_No notable changes since the last release._
+
+---
+
+## [v2026.11.10.1](https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.11.10.1) - 2026-11-10
+
 ### Added
 - Resolve YouTube on the PC when the server can't (10045cb)
 
@@ -21,11 +27,15 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **deps:** Update crates and ruff (e04cfe8)
 - **deps:** Update cc, flate2 and zip (620471e)
 - **deps:** Update winnow (64a657d)
+- **relay:** Split oversized modules (d11538f)
 
 ### Fixed
 - **uninstall:** Only delete files the app installed (f66a7fa)
 - Set the exec bit on the shell hooks (f49ac09)
 - Tighten client security and match the style guide (8cdbc29)
+- **relay:** Trim live playlists and stop retry storms (1d0c03d)
+- **patch:** Report startup recovery as a normal line (8ace1ba)
+- Keep the shell lint files on LF (f69923a)
 
 ---
 
