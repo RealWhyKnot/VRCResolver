@@ -1,6 +1,65 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn playback_transport_failures_print_once_until_recovery() {
+    struct Transport {
+        kind: &'static str,
+        healthy: std::sync::atomic::AtomicBool,
+    }
+    impl Upstream for Transport {
+        fn send(&self, _: UpstreamRequest) -> Sending<'_> {
+            Box::pin(async move {
+                if self.healthy.load(Ordering::SeqCst) {
+                    return Ok(UpstreamResponse {
+                        direct: true,
+                        status: StatusCode::OK,
+                        headers: HeaderMap::new(),
+                        body: Box::pin(futures_util::stream::empty()),
+                    });
+                }
+                if self.kind == "deadline" {
+                    return std::future::pending().await;
+                }
+                Err(UpstreamError::new(self.kind, "private transport details"))
+            })
+        }
+    }
+    for (kind, sentence, status) in [
+        ("connect_error", "Couldn't reach the server.", 502),
+        ("request_error", "A request to the server failed.", 502),
+        ("timeout", "The server took too long to answer.", 502),
+        ("deadline", "The server took too long to answer.", 504),
+    ] {
+        let upstream = Arc::new(Transport {
+            kind,
+            healthy: std::sync::atomic::AtomicBool::new(false),
+        });
+        let output = Capture::default();
+        let (dependencies, _, _) = deps(Arc::<Transport>::clone(&upstream), &output);
+        let mut config = RelayConfig::http(0);
+        config.timeout = Some(Duration::from_millis(30));
+        let server = RelayServer::start(config, dependencies)
+            .await
+            .expect("relay");
+        let mut client = Conn::open(server.port()).await;
+        let path = play("transport", "seg.ts", &upstream_url("transport", "seg.ts"));
+        for _ in 0..3 {
+            assert_eq!(client.get(&path).await.status, status);
+        }
+        assert_eq!(output.text().matches(sentence).count(), 1, "{kind}");
+        upstream.healthy.store(true, Ordering::SeqCst);
+        assert_eq!(client.get(&path).await.status, 200);
+        assert!(eventually(|| server.in_flight() == 0, WITHIN).await);
+        upstream.healthy.store(false, Ordering::SeqCst);
+        assert_eq!(client.get(&path).await.status, status);
+        assert_eq!(output.text().matches(sentence).count(), 2, "{kind}");
+        assert!(!output.text().contains("private transport details"));
+        assert!(!output.text().contains("[hitch]"));
+        server.stop().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retry_success_clears_a_failure_installed_by_an_overlapping_request() {
     struct Racing {
         hits: AtomicUsize,

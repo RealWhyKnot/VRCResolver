@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
 use url::Url;
-use vrcr_shared::console::{Component, Ux};
+use vrcr_shared::console::{Component, PlaybackError, Ux};
 use vrcr_shared::wire::{ResolveRequest, ResolveResponse};
 
 use crate::relay::hitch::{TimingSample, relay_kind};
@@ -48,6 +48,7 @@ struct Play {
     reasons: BTreeMap<String, u64>,
     statuses: BTreeMap<String, u64>,
     failures: BTreeMap<String, Repeat>,
+    console_errors: HashSet<(String, PlaybackError)>,
     playlists: HashSet<String>,
     context: FailureContext,
 }
@@ -234,6 +235,7 @@ impl Play {
             reasons: BTreeMap::new(),
             statuses: BTreeMap::new(),
             failures: BTreeMap::new(),
+            console_errors: HashSet::new(),
             playlists: HashSet::new(),
         }
     }

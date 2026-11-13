@@ -142,6 +142,7 @@ impl<M: Mesh> Ipc<M> {
         let key_player = req.player.map(Player::as_str);
         let mut outcome = "?".to_owned();
         let mut server_reason: Option<String> = None;
+        let mut public_message = None;
         let mut via_cache = false;
         let mut via_local = false;
         let mut failure: Option<Failure> = None;
@@ -203,6 +204,9 @@ impl<M: Mesh> Ipc<M> {
             {
                 Ok(result) => {
                     let local = if result.action == action::FALLBACK_NATIVE {
+                        public_message = serde_json::from_slice::<ResolveResponse>(&result.frame)
+                            .ok()
+                            .and_then(|response| response.public_message);
                         self.local_frame(&req, &id, deadline).await
                     } else {
                         None
@@ -288,6 +292,7 @@ impl<M: Mesh> Ipc<M> {
             via_lh_yt,
             elapsed,
             reason: reason_for_line.as_deref(),
+            public_message: public_message.as_deref(),
         });
 
         if let Some(gate) = self.health.as_deref()

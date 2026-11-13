@@ -1,6 +1,127 @@
 use super::*;
 
 #[test]
+fn unknown_playback_reason_is_a_bounded_ascii_token() {
+    assert_eq!(
+        console::PlaybackError::proxy("invalid_range!")
+            .message()
+            .as_deref(),
+        Some("playback error: invalid_range")
+    );
+    let hostile = format!("\x1b[31m{}\x1b[0m\r\n\u{2603}/?!", "a_0".repeat(100));
+    let error = console::PlaybackError::proxy(&hostile);
+    assert_eq!(
+        error.message().as_deref(),
+        Some(format!("playback error: {}", "a_0".repeat(32)).as_str())
+    );
+    assert_eq!(
+        console::PlaybackError::proxy("\x1b[31m\u{2603}")
+            .message()
+            .as_deref(),
+        Some("playback error: unknown")
+    );
+}
+
+#[test]
+fn resolve_public_messages_are_last_and_empty_messages_add_nothing() {
+    let mut sample = outcome(ResolveStatus::Fallback);
+    sample.reason = Some("all_configs_failed");
+    let (_, original) = console::resolve_outcome_line("*", &sample);
+    for message in [None, Some(""), Some(" \t\r\n")] {
+        sample.public_message = message;
+        assert_eq!(console::resolve_outcome_line("*", &sample).1, original);
+    }
+    sample.public_message = Some("The video is private.");
+    assert_eq!(
+        console::resolve_outcome_line("*", &sample).1,
+        format!("{original} -- The video is private.")
+    );
+}
+
+#[test]
+fn resolve_public_messages_strip_terminal_controls_and_private_urls() {
+    let message = "\x1b[31mThe\x1b[0m\t video\r\n is\x00 private. \u{2603}\x1b]0;title\x07\u{9b}31m\u{9d}title\u{9c}\x1b(B https://example.com/secret?token=secret";
+    let sample = Outcome {
+        public_message: Some(message),
+        ..outcome(ResolveStatus::Fallback)
+    };
+    let (_, line) = console::resolve_outcome_line("*", &sample);
+    assert!(line.ends_with(" -- The video is private. example.com"));
+    assert!(line.is_ascii());
+    assert!(!line.chars().any(char::is_control));
+    assert!(!line.contains("secret"));
+}
+
+#[test]
+fn resolve_public_messages_are_capped_at_two_hundred_characters() {
+    let message = "x".repeat(2000);
+    let sample = Outcome {
+        public_message: Some(&message),
+        ..outcome(ResolveStatus::Fallback)
+    };
+    let (_, line) = console::resolve_outcome_line("*", &sample);
+    let shown = line.split_once(" -- ").expect("message").1;
+    assert_eq!(shown.len(), 200);
+    assert!(shown.ends_with(".."));
+}
+
+#[test]
+fn resolve_public_messages_fit_console_width_without_moving_columns() {
+    let sample = Outcome {
+        reason: Some("all_configs_failed"),
+        public_message: Some("The video is blocked in the country the server connects from."),
+        ..outcome(ResolveStatus::Fallback)
+    };
+    let (wide, full) = ux(Style::plain());
+    wide.resolve_outcome(&sample);
+    for width in [20, 80, 120, 160] {
+        let (narrow, buffer) = ux(Style::plain());
+        let narrow = match width {
+            20 => narrow.with_width(|| Some(20)),
+            80 => narrow.with_width(|| Some(80)),
+            120 => narrow.with_width(|| Some(120)),
+            _ => narrow.with_width(|| Some(160)),
+        };
+        narrow.resolve_outcome(&sample);
+        let text = buffer.text();
+        assert_eq!(text.lines().count(), 1);
+        let line = text.trim_end();
+        assert!(line.len() < width);
+        assert_eq!(
+            line,
+            console::truncate_pad(
+                full.text().trim_end(),
+                full.text().trim_end().len().min(width - 1)
+            )
+        );
+    }
+}
+
+#[test]
+fn playback_notices_are_ascii_grey_and_restore_the_prompt() {
+    let (ux, buffer) = ux(Style {
+        color: true,
+        unicode: true,
+    });
+    let counts = Arc::new(Mutex::new(Counts::default()));
+    let _guard = ux.use_overlay(Box::new(Counting(Arc::clone(&counts))));
+    ux.playback_error(
+        "youtube.com",
+        &console::PlaybackError::proxy("access_denied"),
+    );
+    assert_eq!(
+        buffer.text(),
+        format!(
+            "> {}[12:34:56] * [relay][warn] youtube.com{} -- The video site refused the server's request.\x1b[0m\n> ",
+            Color::Gray.sgr(),
+            sp(17)
+        )
+    );
+    let counts = counts.lock().expect("counts");
+    assert_eq!((counts.clear, counts.render), (1, 2));
+}
+
+#[test]
 fn write_clears_and_restores_the_active_overlay() {
     let (ux, buf) = ux(Style::plain());
     let counts = Arc::new(Mutex::new(Counts::default()));

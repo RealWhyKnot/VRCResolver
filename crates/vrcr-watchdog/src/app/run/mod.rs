@@ -88,7 +88,8 @@ pub fn run(build: BuildInfo, args: &[String]) -> i32 {
             std::env::var("NO_COLOR").ok().as_deref(),
         ),
         vrcr_shared::console::local_clock,
-    );
+    )
+    .with_width(win::console_width);
     ux.tee_to(log.clone());
 
     let reporter = Arc::new(Reporter::from_env(&build.version, ux.clone()));

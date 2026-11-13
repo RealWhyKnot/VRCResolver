@@ -1,6 +1,30 @@
 use super::*;
 
 impl PlaybackLog {
+    pub fn playback_error(&self, path: &str, error: &PlaybackError, ux: &Ux) {
+        let Some(playback) = crate::relay::activity::play_id(path) else {
+            return;
+        };
+        let alias = format!("play-{}", token(playback));
+        let mut plays = self.lock();
+        let Some(play) = plays
+            .values_mut()
+            .filter(|play| play.aliases.contains(&alias))
+            .max_by_key(|play| play.started)
+        else {
+            return;
+        };
+        let host = (error.message().is_some()
+            && play
+                .console_errors
+                .insert((playback.to_owned(), error.clone())))
+        .then(|| play.host.clone());
+        drop(plays);
+        if let Some(host) = host {
+            ux.playback_error(&host, error);
+        }
+    }
+
     pub fn begin_request(
         &self,
         path: &str,
@@ -58,6 +82,10 @@ impl PlaybackLog {
         play.alias(alias);
         play.seen = now;
         play.active.remove(&sample.request_id);
+        if matches!(sample.status, 200 | 206) && sample.failure.is_none() && !sample.suppressed {
+            play.console_errors
+                .retain(|(stream, _)| *stream != playback);
+        }
         if sample.suppressed {
             play.context.suppressed_requests += 1;
         }

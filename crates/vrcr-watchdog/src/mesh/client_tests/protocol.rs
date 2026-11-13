@@ -1,5 +1,78 @@
 use super::*;
 
+struct ReceivedFallback(MeshResult);
+
+impl Mesh for ReceivedFallback {
+    fn current_node_host(&self) -> String {
+        "us1.vrcresolver.com".to_owned()
+    }
+    fn is_connected(&self) -> bool {
+        true
+    }
+    async fn resolve(&self, _: &ResolveRequest, _: Instant) -> Result<MeshResult, String> {
+        Ok(self.0.clone())
+    }
+    fn send_playback_feedback(&self, _: crate::ipc::Feedback) {}
+}
+
+#[tokio::test]
+async fn fallback_public_message_reaches_one_ipc_outcome_and_resolve_logs_stay_in_file() {
+    use tokio::io::AsyncWriteExt;
+    for binary in [false, true] {
+        let harness = Harness::new();
+        let mut pending = harness.pending("r1");
+        let message = "\x1b[31mThe\x1b[0m\t video\n is private.\u{2603}";
+        if binary {
+            harness
+                .binary(&mp_frame(vec![
+                    mp_str(action::FALLBACK_NATIVE),
+                    mp_str("r1"),
+                    mp_str(fallback::ALL_CONFIGS_FAILED),
+                    mp_str(message),
+                ]))
+                .await;
+        } else {
+            harness
+                .json(
+                    &serde_json::json!({
+                        "action": action::FALLBACK_NATIVE, "id": "r1",
+                        "reason": fallback::ALL_CONFIGS_FAILED, "public_message": message,
+                    })
+                    .to_string(),
+                )
+                .await;
+        }
+        harness
+            .json(r#"{"action":"resolve_log","id":"r1","message":"trying extractor_only"}"#)
+            .await;
+        let result = done(&mut pending).expect("fallback");
+        let ipc = crate::ipc::Ipc::builder(
+            Arc::new(ReceivedFallback(result)),
+            harness.client.inner.ux.clone(),
+            Log::to_file(&harness.log_path),
+        )
+        .build();
+        let (mut client, mut server) = tokio::io::duplex(65536);
+        client.write_all(b"{\"action\":\"resolve\",\"id\":\"r1\",\"url\":\"https://youtube.com/watch?v=secret\",\"player\":\"avpro\"}\n").await.expect("request");
+        ipc.handle(&mut server).await;
+        let text = harness.out.text();
+        assert_eq!(text.matches("[resolve]").count(), 1, "{text}");
+        assert!(
+            text.contains("all_configs_failed -- The video is private."),
+            "{text}"
+        );
+        assert!(text.is_ascii());
+        assert!(!text.contains("extractor_only"));
+        assert!(!text.contains("[resolve_log]"));
+        assert!(!text.contains("secret"));
+        assert!(
+            harness
+                .log()
+                .contains("[resolve_log] id=r1 level=info phase=trying config=extractor_only")
+        );
+    }
+}
+
 #[tokio::test]
 async fn rate_limited_non_resolve_action_sets_no_cooldown() {
     let h = Harness::new();

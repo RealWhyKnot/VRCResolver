@@ -1,5 +1,70 @@
 use url::Url;
 
+pub fn public_message(value: &str) -> String {
+    let mut plain = String::new();
+    let mut chars = value.chars().peekable();
+    while let Some(character) = chars.next() {
+        if matches!(character, '\u{1b}' | '\u{9b}' | '\u{9d}') {
+            let introducer = match character {
+                '\u{9b}' => Some('['),
+                '\u{9d}' => Some(']'),
+                _ => chars.next(),
+            };
+            match introducer {
+                Some('[') => {
+                    for part in chars.by_ref() {
+                        if ('@'..='~').contains(&part) {
+                            break;
+                        }
+                    }
+                }
+                Some(']' | 'P' | '^' | '_') => {
+                    while let Some(part) = chars.next() {
+                        if matches!(part, '\u{7}' | '\u{9c}') {
+                            break;
+                        }
+                        if part == '\u{1b}' && chars.peek() == Some(&'\\') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                Some(' '..='/') => {
+                    for part in chars.by_ref() {
+                        if ('0'..='~').contains(&part) {
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        } else if character.is_whitespace() {
+            plain.push(' ');
+        } else if character.is_ascii() && !character.is_control() {
+            plain.push(character);
+        }
+    }
+    let redacted = redact_message_urls(&plain);
+    let collapsed = redacted.split_whitespace().collect::<Vec<_>>().join(" ");
+    crate::console::truncate_pad(&collapsed, collapsed.len().min(200))
+}
+
+pub fn playback_reason(value: &str) -> String {
+    let clean = public_message(value);
+    let token: String = clean
+        .chars()
+        .filter(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || *character == '_'
+        })
+        .take(96)
+        .collect();
+    if token.is_empty() {
+        "unknown".to_owned()
+    } else {
+        token
+    }
+}
+
 pub fn sanitize_for_console(value: &str, max_len: usize) -> String {
     let redacted = redact_message_urls(value);
     let value = redacted.as_ref();

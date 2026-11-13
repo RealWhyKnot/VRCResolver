@@ -94,6 +94,7 @@ fn outcome(status: ResolveStatus) -> Outcome<'static> {
         via_lh_yt: false,
         elapsed: Duration::from_millis(1234),
         reason: None,
+        public_message: None,
     }
 }
 

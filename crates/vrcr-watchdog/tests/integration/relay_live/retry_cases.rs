@@ -2,6 +2,9 @@ use super::*;
 use std::sync::atomic::{AtomicU16, AtomicU64};
 use vrcr_watchdog::ipc::Feedback;
 
+#[path = "playback_cases.rs"]
+mod playback_cases;
+
 struct FailingOrigin {
     status: AtomicU16,
     hits: AtomicUsize,

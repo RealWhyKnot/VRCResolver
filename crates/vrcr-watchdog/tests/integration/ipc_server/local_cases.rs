@@ -73,10 +73,22 @@ fn with_step(mesh: &Arc<FakeMesh>, step: &Arc<FakeStep>) -> Arc<Ipc<FakeMesh>> {
 
 #[tokio::test(start_paused = true)]
 async fn a_server_fallback_is_answered_locally() {
-    let mesh = FakeMesh::connected(vec![fallback_step(fallback::ALL_CONFIGS_FAILED)]);
+    let mesh = FakeMesh::connected(vec![Step::Reply {
+        action: action::FALLBACK_NATIVE,
+        reason: Some(fallback::ALL_CONFIGS_FAILED),
+        url: None,
+        extra: Some(("public_message", "The video is private.")),
+        retry_after_ms: None,
+    }]);
     let step = FakeStep::new(Answer::Plays);
     let reported = Arc::new(Mutex::new(Vec::new()));
-    let ipc = Ipc::builder(Arc::clone(&mesh), Ux::sink(), Log::disabled())
+    let output = crate::common::mesh::Capture::default();
+    let ux = Ux::new(
+        Box::new(output.clone()),
+        vrcr_shared::console::Style::plain(),
+        String::new,
+    );
+    let ipc = Ipc::builder(Arc::clone(&mesh), ux, Log::disabled())
         .local(Some(Arc::<FakeStep>::clone(&step)))
         .report_fallback({
             let reported = Arc::clone(&reported);
@@ -98,6 +110,10 @@ async fn a_server_fallback_is_answered_locally() {
     assert_eq!(v["audio_codec"], "aac");
     assert_eq!(v["resolved_height"], 1080);
     assert_eq!(step.calls(), 1);
+    let text = output.text();
+    assert_eq!(text.matches("[resolve]").count(), 1);
+    assert!(text.contains("OK  local"));
+    assert!(text.contains("all_configs_failed -- The video is private."));
     assert_eq!(
         *reported.lock().unwrap_or_else(|e| e.into_inner()),
         Vec::<String>::new()

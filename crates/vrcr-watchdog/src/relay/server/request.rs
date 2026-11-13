@@ -211,18 +211,50 @@ pub(super) async fn handle(
             Err(_) => {
                 attempt.complete = true;
                 ex.player_status = 504;
+                if upstream_class {
+                    inner.deps.stats.playback.playback_error(
+                        &ex.path,
+                        &vrcr_shared::console::PlaybackError::Timeout,
+                        &inner.deps.ux,
+                    );
+                }
                 inner.record_hitch(&ex.sample(0, Some("upstream_timeout")));
                 return status_only(StatusCode::GATEWAY_TIMEOUT);
             }
             Ok(Err(e)) => {
                 attempt.complete = true;
                 ex.player_status = 502;
+                if upstream_class {
+                    let error = match e.kind {
+                        "timeout" => vrcr_shared::console::PlaybackError::Timeout,
+                        "connect_error" => vrcr_shared::console::PlaybackError::Unreachable,
+                        _ => vrcr_shared::console::PlaybackError::proxy("request_failed"),
+                    };
+                    inner
+                        .deps
+                        .stats
+                        .playback
+                        .playback_error(&ex.path, &error, &inner.deps.ux);
+                }
                 inner.record_hitch(&ex.sample(0, Some(e.kind)));
                 return status_only(StatusCode::BAD_GATEWAY);
             }
             Ok(Ok(r)) => r,
         }
     };
+    if !ex.suppressed
+        && upstream_class
+        && resp.direct
+        && (resp.status.is_client_error() || resp.status.is_server_error())
+        && let Some(reason) = resp.headers.get("x-vrcr-reason")
+    {
+        let reason = String::from_utf8_lossy(reason.as_bytes());
+        inner.deps.stats.playback.playback_error(
+            &ex.path,
+            &vrcr_shared::console::PlaybackError::proxy(&reason),
+            &inner.deps.ux,
+        );
+    }
     if eligible && !ex.suppressed {
         if resp.status.is_success() {
             inner.retries.clear(&key);

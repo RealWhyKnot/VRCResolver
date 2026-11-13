@@ -150,6 +150,7 @@ pub struct Ux {
     inner: Arc<Mutex<State>>,
     style: Style,
     clock: Clock,
+    width: fn() -> Option<usize>,
 }
 
 struct State {
@@ -185,6 +186,7 @@ impl Ux {
             })),
             style,
             clock,
+            width: || None,
         }
     }
 
@@ -198,10 +200,16 @@ impl Ux {
             Style::detect(redirected, no_color.as_deref(), ascii.as_deref()),
             local_clock,
         )
+        .with_width(crate::win::console_width)
     }
 
     pub fn sink() -> Ux {
         Ux::new(Box::new(io::sink()), Style::plain(), local_clock)
+    }
+
+    pub fn with_width(mut self, width: fn() -> Option<usize>) -> Self {
+        self.width = width;
+        self
     }
 
     pub fn style(&self) -> Style {
@@ -282,8 +290,31 @@ impl Ux {
     }
 
     pub fn resolve_outcome(&self, o: &Outcome<'_>) {
-        let (color, line) = resolve_outcome_line(self.style.bullet(), o);
-        self.stamped(color, &line);
+        let (color, line) = resolve_outcome_line("*", o);
+        self.stamped_fitted(color, &line);
+    }
+
+    pub fn playback_error(&self, host: &str, error: &PlaybackError) {
+        let Some(message) = error.message() else {
+            return;
+        };
+        let host = crate::logutil::public_message(host);
+        self.stamped_fitted(
+            Color::Gray,
+            &format!(
+                "* [relay][warn] {} -- {message}",
+                truncate_pad(&host, HOST_WIDTH)
+            ),
+        );
+    }
+
+    fn stamped_fitted(&self, color: Color, body: &str) {
+        let mut line = format!("[{}] {body}", (self.clock)());
+        if let Some(width) = (self.width)() {
+            line = truncate_pad(&line, line.chars().count().min(width.saturating_sub(1)));
+        }
+        let mut state = self.state();
+        raw(&mut state, self.style, color, &line);
     }
 
     pub fn wrapper_fallback(&self, host: &str, reason: &str, elapsed_ms: u64) {
@@ -358,6 +389,57 @@ pub struct Outcome<'a> {
     pub via_lh_yt: bool,
     pub elapsed: Duration,
     pub reason: Option<&'a str>,
+    pub public_message: Option<&'a str>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum PlaybackError {
+    Proxy(String),
+    Unknown(String),
+    Unreachable,
+    Timeout,
+}
+
+impl PlaybackError {
+    pub fn proxy(reason: &str) -> Self {
+        let clean = crate::logutil::playback_reason(reason);
+        if clean == reason {
+            Self::Proxy(clean)
+        } else {
+            Self::Unknown(clean)
+        }
+    }
+
+    pub fn message(&self) -> Option<String> {
+        let sentence = match self {
+            Self::Unknown(reason) => {
+                return Some(format!(
+                    "playback error: {}",
+                    crate::logutil::playback_reason(reason)
+                ));
+            }
+            Self::Unreachable => "Couldn't reach the server.",
+            Self::Timeout => "The server took too long to answer.",
+            Self::Proxy(reason) => match reason.as_str() {
+                "unknown_stream" => "The server no longer has this stream.",
+                "stream_recreate_required" => "The server asked to restart the stream.",
+                "rate_limited" => "The server is rate-limiting this stream.",
+                "upstream_failed" => "The video site returned an error to the server.",
+                "temporarily_unavailable" => "The server is busy or restarting.",
+                "upstream_timeout" => "The video site took too long to answer the server.",
+                "access_denied" => "The video site refused the server's request.",
+                "request_failed" => "A request to the server failed.",
+                "invalid_range" => return None,
+                _ => {
+                    return Some(format!(
+                        "playback error: {}",
+                        crate::logutil::playback_reason(reason)
+                    ));
+                }
+            },
+        };
+        Some(sentence.to_owned())
+    }
 }
 
 pub fn resolve_outcome_line(bullet: &str, o: &Outcome<'_>) -> (Color, String) {
@@ -378,12 +460,17 @@ pub fn resolve_outcome_line(bullet: &str, o: &Outcome<'_>) -> (Color, String) {
         .filter(|r| !r.is_empty())
         .map(|r| format!("   {r}"))
         .unwrap_or_default();
-    let line = format!(
+    let mut line = format!(
         "{bullet} [resolve] {token}  {word:<OUTCOME_WIDTH$} {}{yt}  {}  {:>6}{reason}",
         truncate_pad(o.host, HOST_WIDTH),
         truncate_pad(o.player, PLAYER_WIDTH),
         format_elapsed(o.elapsed)
     );
+    let message = crate::logutil::public_message(o.public_message.unwrap_or_default());
+    if !message.is_empty() {
+        line.push_str(" -- ");
+        line.push_str(&message);
+    }
     (color, line)
 }
 
