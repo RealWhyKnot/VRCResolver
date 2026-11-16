@@ -19,6 +19,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **console:** Fix narrow layout and repeated Failed rows (f9ef90a)
 - **console:** Print each server error once (da7d14c)
 - **local:** Play the original audio instead of the dub (a94a89b)
+- **patch:** Poll for re-apply in the running-target test (e6a2dbb)
 
 ---
 
