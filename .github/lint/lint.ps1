@@ -39,9 +39,13 @@ $existingRustFiles = @(
     }
 )
 Invoke-Gate -Name 'Rust style' -Command { awk -f .github/lint/rust-style.awk @existingRustFiles }
-if ($env:OS -eq 'Windows_NT' -and
-    (-not (Get-Command -Name shellcheck -ErrorAction SilentlyContinue) -or
-    -not (Get-Command -Name shfmt -ErrorAction SilentlyContinue))) {
+$hasShellcheck = [bool](Get-Command -Name shellcheck -ErrorAction SilentlyContinue)
+$hasShfmt = [bool](Get-Command -Name shfmt -ErrorAction SilentlyContinue)
+$shellToolsMissing = -not ($hasShellcheck -and $hasShfmt)
+if ($env:CI -and $shellToolsMissing) {
+    throw 'Shell checks need shellcheck and shfmt on PATH.'
+}
+if ($env:OS -eq 'Windows_NT' -and $shellToolsMissing) {
     Invoke-Gate -Name 'Shell checks' -Command {
         wsl -d agent --cd $repoRoot -- bash .github/lint/check-shell
     }
