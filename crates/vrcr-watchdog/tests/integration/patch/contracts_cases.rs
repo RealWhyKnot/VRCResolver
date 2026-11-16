@@ -75,11 +75,15 @@ fn tick_reapply_with_a_running_target_defers_quietly() {
     assert_eq!(target_now, ping);
     assert!(leftovers.is_empty(), "{leftovers:?}");
 
-    for _ in 0..2 {
-        if wrapper_identity::contains_marker(&r.target) {
-            break;
-        }
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !wrapper_identity::contains_marker(&r.target) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the wrapper was never re-applied after the child exited: {}",
+            r.out.logs()
+        );
         m.tick_once();
+        std::thread::sleep(Duration::from_millis(100));
     }
     assert_eq!(read(&r.target), wrapper_bytes());
     assert_eq!(read(&r.backup), ping);
