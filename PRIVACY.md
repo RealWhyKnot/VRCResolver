@@ -1,6 +1,6 @@
 # Privacy policy
 
-**Effective 10 November 2026.**
+**Effective 16 November 2026.**
 
 The live version is at [vrcresolver.com/privacy](https://vrcresolver.com/privacy). This copy is
 updated automatically when the live version changes.
@@ -136,6 +136,10 @@ When the proxy fetches a video, the site hosting it only sees our server's addre
 If our server can't resolve a YouTube link, the desktop client asks YouTube for it from your PC, and
 VRChat's own yt-dlp does the same if that fails too. In those cases YouTube sees your IP address, as
 it would without VRCResolver.
+
+If a Twitch live stream keeps loading slower than it plays through our server, the desktop client
+switches that stream to load straight from Twitch. Twitch then sees your IP address, as it would
+without VRCResolver.
 
 ## 8. Third parties your browser contacts directly
 
