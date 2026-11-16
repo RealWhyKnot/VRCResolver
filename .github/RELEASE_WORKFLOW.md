@@ -8,7 +8,8 @@ every beta's changes since then into the stable notes. Beta and dev tags use the
 tag. For anything the generator can't produce, use the [extras file](#extras-file).
 
 The workflow calls `build.ps1 -Package`. Local builds don't create a repo-root `release/` folder.
-The zip, build manifest and release integrity TSV go under `dist/` for the workflow to upload.
+The zip, build manifest and release integrity TSV go under `dist/`. The workflow uploads the zip
+and the TSV, plus a `.sha256` file it writes for the zip.
 
 ## Tag shapes
 

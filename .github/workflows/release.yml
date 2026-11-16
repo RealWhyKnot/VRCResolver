@@ -112,26 +112,44 @@ jobs:
         run: |
           $zip = Get-ChildItem dist/vrcresolver-*.zip | Select-Object -First 1
           if (-not $zip) { throw "No release zip found in dist/ -- build.ps1 -Package did not produce one." }
-          $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash
           $manifest = Get-ChildItem dist/vrcresolver-*.manifest.tsv | Select-Object -First 1
           if (-not $manifest) { throw "No manifest found in dist/ -- build.ps1 -Package did not produce one. Generate-ReleaseNotes.ps1 needs it for the File integrity section." }
+          "path=$($zip.FullName)"           >> $env:GITHUB_OUTPUT
+          "name=$($zip.Name)"               >> $env:GITHUB_OUTPUT
+          "size=$($zip.Length)"             >> $env:GITHUB_OUTPUT
+          "manifest=$($manifest.FullName)"  >> $env:GITHUB_OUTPUT
+          Write-Host "Release zip:      $($zip.Name)"
+          Write-Host "Release manifest: $($manifest.Name)"
+
+      - name: Checksums
+        id: checksums
+        uses: RealWhyKnot/workflows/checksums@v1
+        with:
+          archives: ${{ steps.zip.outputs.path }}
+          manifest: "false"
+          sidecar: "true"
+
+      - name: Write the integrity asset
+        id: integrity
+        shell: pwsh
+        env:
+          ZIP_PATH: ${{ steps.zip.outputs.path }}
+          ZIP_SHA256: ${{ steps.checksums.outputs.sha256 }}
+          MANIFEST_PATH: ${{ steps.zip.outputs.manifest }}
+        run: |
+          $zip = Get-Item -LiteralPath $env:ZIP_PATH
+          $hash = $env:ZIP_SHA256.ToUpperInvariant()
           $integrityName = $zip.Name -replace '\.zip$', '.integrity.tsv'
           $integrity = Join-Path $zip.DirectoryName $integrityName
           $zipLine = "$hash`t$($zip.Length)`t$($zip.Name)"
-          $manifestLines = Get-Content -LiteralPath $manifest.FullName -Encoding UTF8
+          $manifestLines = Get-Content -LiteralPath $env:MANIFEST_PATH -Encoding UTF8
           [System.IO.File]::WriteAllLines(
             $integrity,
             [string[]](@($zipLine) + $manifestLines),
             [System.Text.UTF8Encoding]::new($false))
-          "path=$($zip.FullName)"           >> $env:GITHUB_OUTPUT
-          "name=$($zip.Name)"               >> $env:GITHUB_OUTPUT
-          "size=$($zip.Length)"             >> $env:GITHUB_OUTPUT
           "sha256=$hash"                    >> $env:GITHUB_OUTPUT
-          "manifest=$($manifest.FullName)"  >> $env:GITHUB_OUTPUT
-          "integrity=$integrity"             >> $env:GITHUB_OUTPUT
-          "integrity_name=$integrityName"    >> $env:GITHUB_OUTPUT
-          Write-Host "Release zip:      $($zip.Name)"
-          Write-Host "Release manifest: $($manifest.Name)"
+          "integrity=$integrity"            >> $env:GITHUB_OUTPUT
+          "integrity_name=$integrityName"   >> $env:GITHUB_OUTPUT
           Write-Host "Integrity asset:  $integrityName"
           Write-Host "Zip digest:       $hash"
 
@@ -153,7 +171,7 @@ jobs:
             -ZipPath   '${{ steps.zip.outputs.path }}' `
             -ZipName   '${{ steps.zip.outputs.name }}' `
             -ZipSize   '${{ steps.zip.outputs.size }}' `
-            -ZipSha256 '${{ steps.zip.outputs.sha256 }}' `
+            -ZipSha256 '${{ steps.integrity.outputs.sha256 }}' `
             -Manifest  '${{ steps.zip.outputs.manifest }}'
           if (-not $body) {
             throw "Generate-ReleaseNotes.ps1 returned empty output. Inspect the workflow log for warnings."
@@ -186,7 +204,8 @@ jobs:
           draft-first: 'true'
           assets: |
             ${{ steps.zip.outputs.path }}
-            ${{ steps.zip.outputs.integrity }}
+            ${{ steps.integrity.outputs.integrity }}
+            ${{ steps.checksums.outputs.sidecars }}
 
       - name: Verify published release body matches input
         env:
