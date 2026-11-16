@@ -1,4 +1,7 @@
 use super::*;
+use crate::relay::upstream::UpstreamError;
+
+const DIRECT_HEADER_DEADLINE: Duration = Duration::from_secs(3);
 
 pub(super) async fn handle(
     inner: Arc<Inner>,
@@ -181,6 +184,14 @@ pub(super) async fn handle(
         .unwrap_or_default()
         .to_owned();
     let key = crate::relay::retry::key(&playback, &ex.target, &method, &outbound.headers);
+    let direct = eligible
+        .then(|| inner.slow.direct_origin(&playback, &ex.target))
+        .flatten()
+        .map(|url| UpstreamRequest {
+            method: method.clone(),
+            url,
+            headers: outbound.headers.clone(),
+        });
     outbound.headers.insert(
         "x-request-id",
         HeaderValue::from_str(&ex.req_id).expect("generated request id"),
@@ -205,7 +216,7 @@ pub(super) async fn handle(
     } else {
         let sent = tokio::select! {
             () = inner.shutdown.cancelled() => { attempt.sample.failure = Some("shutdown".to_owned()); attempt.sample.player_status = 503; return status_only(StatusCode::SERVICE_UNAVAILABLE) },
-            r = tokio::time::timeout(inner.header_deadline, inner.deps.upstream.send(outbound)) => r,
+            r = tokio::time::timeout(inner.header_deadline, send_preferring_direct(&inner, direct, outbound, &playback)) => r,
         };
         match sent {
             Err(_) => {
@@ -345,4 +356,20 @@ pub(super) async fn handle(
         return respond_manifest(&inner, ex, resp, policy, content_type, guard, abort);
     }
     respond_stream(&inner, ex, resp, content_type, is_head, guard, abort)
+}
+
+async fn send_preferring_direct(
+    inner: &Inner,
+    direct: Option<UpstreamRequest>,
+    proxied: UpstreamRequest,
+    playback: &str,
+) -> Result<UpstreamResponse, UpstreamError> {
+    if let Some(request) = direct {
+        match tokio::time::timeout(DIRECT_HEADER_DEADLINE, inner.deps.upstream.send(request)).await
+        {
+            Ok(Ok(response)) if response.status.is_success() => return Ok(response),
+            _ => inner.slow.give_up(playback, &inner.deps.ux),
+        }
+    }
+    inner.deps.upstream.send(proxied).await
 }

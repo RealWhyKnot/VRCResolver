@@ -33,6 +33,7 @@ use crate::common::mesh::Capture;
 
 const WITHIN: Duration = Duration::from_secs(5);
 const MANIFEST: &str = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nhttps://us1.vrcresolver.com/api/proxy/hls/seg_000001.ts?playback_id=t\n#EXTINF:2,\nhttps://us1.vrcresolver.com/api/proxy/hls/seg_000002.ts?playback_id=t\n#EXTINF:2,\nseg_000003.ts\n#EXT-X-ENDLIST\n";
+const LIVE_MANIFEST: &str = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:7\n#EXTINF:2,\nseg_000007.ts\n#EXTINF:2,\nseg_000008.ts\n#EXTINF:2,\nseg_000009.ts\n";
 static ZEROS: [u8; 65536] = [0; 65536];
 
 #[derive(Clone)]
@@ -258,6 +259,20 @@ impl Script {
                 200,
                 &[("content-length", "1000".to_owned()), ts()],
                 filled(1000, b'h'),
+                Tail::End,
+            ),
+            "live" if file.ends_with(".m3u8") => respond(
+                open,
+                200,
+                &[("content-type", "application/vnd.apple.mpegurl".to_owned())],
+                vec![Ok(Bytes::from_static(LIVE_MANIFEST.as_bytes()))],
+                Tail::End,
+            ),
+            "seg.ts" => respond(
+                open,
+                502,
+                &[("content-length", "4".to_owned())],
+                vec![Ok(Bytes::from_static(b"slow"))],
                 Tail::End,
             ),
             "manifest-stall" => respond(
@@ -518,59 +533,12 @@ fn tls() -> rustls::ClientConfig {
     (*platform_tls().unwrap_or_else(|e| panic!("{e}"))).clone()
 }
 
-struct Stub {
-    addr: SocketAddr,
-    heads: Arc<Mutex<Vec<String>>>,
-}
-
-async fn stub_origin() -> Stub {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-        .await
-        .unwrap_or_else(|e| panic!("{e}"));
-    let addr = listener.local_addr().unwrap_or_else(|e| panic!("{e}"));
-    let heads = Arc::new(Mutex::new(Vec::new()));
-    let log = std::sync::Arc::clone(&heads);
-    tokio::spawn(async move {
-        while let Ok((mut s, _)) = listener.accept().await {
-            let log = std::sync::Arc::clone(&log);
-            tokio::spawn(async move {
-                let mut buf = Vec::new();
-                let mut chunk = [0u8; 4096];
-                while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
-                    match s.read(&mut chunk).await {
-                        Ok(0) | Err(_) => return,
-                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
-                    }
-                }
-                let head = String::from_utf8_lossy(&buf).into_owned();
-                let path = head.split(' ').nth(1).unwrap_or_default().to_owned();
-                log.lock().unwrap_or_else(|e| e.into_inner()).push(head);
-                let port = addr.port();
-                let reply = match path.as_str() {
-                    "/api/proxy/full/video.mp4" => {
-                        let mut r = b"HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: 50000\r\nConnection: close\r\n\r\n".to_vec();
-                        r.extend(std::iter::repeat_n(b'o', 50000));
-                        r
-                    }
-                    "/api/proxy/redirect/x.ts" => format!(
-                        "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{port}/api/proxy/full/video.mp4\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                    )
-                    .into_bytes(),
-                    "/api/proxy/hop/x.ts" => format!(
-                        "HTTP/1.1 302 Found\r\nLocation: http://us1.vrcresolver.com:{port}/api/proxy/full/video.mp4\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                    )
-                    .into_bytes(),
-                    _ => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
-                };
-                let _ = s.write_all(&reply).await;
-                let _ = s.shutdown().await;
-            });
-        }
-    });
-    Stub { addr, heads }
-}
+mod origin_stub;
+use origin_stub::stub_origin;
 
 mod contracts_cases;
+
+mod direct_cases;
 
 mod lifecycle_cases;
 

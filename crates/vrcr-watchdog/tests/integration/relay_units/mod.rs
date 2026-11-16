@@ -188,6 +188,8 @@ mod activity_cases;
 
 mod contracts_cases;
 
+mod direct_cases;
+
 mod headers_cases;
 
 mod hitches_cases;

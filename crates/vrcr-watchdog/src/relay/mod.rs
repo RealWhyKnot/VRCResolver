@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod bypass;
+pub mod direct;
 pub mod headers;
 pub mod hitch;
 pub mod live;

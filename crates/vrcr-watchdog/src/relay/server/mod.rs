@@ -96,6 +96,7 @@ struct Inner {
     targets: TargetResolver,
     live_playlists: super::live::history::History,
     retries: super::retry::RetryMemory,
+    slow: super::direct::SlowStreams,
     in_flight: AtomicUsize,
     req_counter: AtomicU64,
     request_prefix: String,
@@ -146,6 +147,7 @@ impl RelayServer {
             targets: TargetResolver::new(),
             live_playlists: super::live::history::History::default(),
             retries: super::retry::RetryMemory::default(),
+            slow: super::direct::SlowStreams::default(),
             in_flight: AtomicUsize::new(0),
             req_counter: AtomicU64::new(0),
             request_prefix: uuid::Uuid::new_v4().simple().to_string(),
@@ -500,6 +502,7 @@ impl Inner {
             &self.deps.ux,
         );
         self.report_retries(false);
+        self.slow.observe(sample, &self.deps.ux);
         if sample.status < 300 && sample.failure.is_none() {
             self.deps.hitch.record_diagnostic(
                 sample,
