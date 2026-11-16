@@ -14,6 +14,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 ### Added
 - **console:** Rewrite the console in plain words (c10f395)
 - **console:** Show server errors in the console (5022381)
+- **relay:** Play a slow live stream straight from the CDN (b7aba7f)
 
 ### Fixed
 - **console:** Fix narrow layout and repeated Failed rows (f9ef90a)
