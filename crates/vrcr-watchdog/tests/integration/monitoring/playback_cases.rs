@@ -388,3 +388,40 @@ fn session_line_sums_the_whole_run() {
         "[session] up=0m resolves=0 cached=0 local_video=0 relay_req=0 relay_mib=0.0 upstream_mib=0.0 reconnects=0"
     );
 }
+
+fn open_and_fail(r: &Rig, m: &mut VrcLogMonitor, url: &str) {
+    r.feed(m, &format!("[AVProVideo] Opening {url}\n"));
+    r.feed(m, "[AVProVideo] Error: Loading failed\n");
+}
+
+#[test]
+fn a_world_reopening_a_dead_link_reports_it_once_per_ten_seconds() {
+    let r = Rig::new();
+    let mut m = r.monitor();
+    for _ in 0..25 {
+        open_and_fail(&r, &mut m, PLAYBACK);
+    }
+    assert_eq!(r.sink.kinds(), [feedback::LOAD_FAILURE]);
+    assert_eq!(r.out.logs().matches("load_failure ms=").count(), 25);
+
+    r.clock.advance(secs(9));
+    open_and_fail(&r, &mut m, PLAYBACK);
+    assert_eq!(r.sink.kinds(), [feedback::LOAD_FAILURE]);
+
+    r.clock.advance(secs(1));
+    open_and_fail(&r, &mut m, PLAYBACK);
+    assert_eq!(r.sink.kinds(), [feedback::LOAD_FAILURE; 2]);
+}
+
+#[test]
+fn a_failure_on_another_link_is_still_reported() {
+    let r = Rig::new();
+    let mut m = r.monitor();
+    open_and_fail(&r, &mut m, PLAYBACK);
+    open_and_fail(
+        &r,
+        &mut m,
+        "https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=other",
+    );
+    assert_eq!(r.sink.kinds(), [feedback::LOAD_FAILURE; 2]);
+}

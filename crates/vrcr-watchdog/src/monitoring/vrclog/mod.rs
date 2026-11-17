@@ -32,6 +32,8 @@ pub const DELIVERED_HEIGHT_TTL: Duration = Duration::from_secs(10 * 60);
 pub const PLAYING_FEEDBACK_INTERVAL: Duration = Duration::from_secs(15);
 pub const DEFAULT_SILENT_STALL_WINDOW: Duration = Duration::from_secs(12);
 pub const MAX_DELIVERED_HEIGHT_ENTRIES: usize = 64;
+pub const REPEAT_FAILURE_QUIET: Duration = Duration::from_secs(10);
+pub const MAX_REPORTED_FAILURES: usize = 64;
 pub const MIN_DELIVERED_HEIGHT: i32 = 16;
 pub const MAX_DELIVERED_HEIGHT: i32 = 4320;
 pub const DIRECTORY_RESCAN_INTERVAL_MS: i64 = 5000;
@@ -219,6 +221,7 @@ pub struct VrcLogMonitor {
     stall: Option<Stall>,
     playing: Option<Playing>,
     delivered: HashMap<String, (i32, SystemTime)>,
+    reported_failures: HashMap<String, SystemTime>,
     audio_missing: bool,
     player_error: Option<String>,
     active_playback_id: Option<String>,
@@ -238,6 +241,7 @@ impl VrcLogMonitor {
             stall: None,
             playing: None,
             delivered: HashMap::new(),
+            reported_failures: HashMap::new(),
             audio_missing: false,
             player_error: None,
             active_playback_id: None,

@@ -157,7 +157,9 @@ impl VrcLogMonitor {
             }
         }
         let height = self.delivered_height(&failed, now);
-        self.send(&failed, feedback::LOAD_FAILURE, ms, height);
+        if self.first_failure_report(&failed, now) {
+            self.send(&failed, feedback::LOAD_FAILURE, ms, height);
+        }
         let recovery = self.mark_playback_failure(&failed);
         self.deps.ux.log_write(
             Component::VrcLog,
@@ -168,6 +170,20 @@ impl VrcLogMonitor {
                 self.player_error.as_deref().unwrap_or("loading_failed"),
             ),
         );
+    }
+
+    fn first_failure_report(&mut self, url: &str, now: SystemTime) -> bool {
+        self.reported_failures.retain(|_, at| {
+            now.duration_since(*at)
+                .is_ok_and(|age| age < REPEAT_FAILURE_QUIET)
+        });
+        if self.reported_failures.contains_key(url) {
+            return false;
+        }
+        if self.reported_failures.len() < MAX_REPORTED_FAILURES {
+            self.reported_failures.insert(url.to_owned(), now);
+        }
+        true
     }
 
     pub(super) fn clear_playback(&mut self) {
