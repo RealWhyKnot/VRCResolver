@@ -425,3 +425,20 @@ fn a_failure_on_another_link_is_still_reported() {
     );
     assert_eq!(r.sink.kinds(), [feedback::LOAD_FAILURE; 2]);
 }
+
+#[test]
+fn a_world_cycling_through_many_dead_links_reports_each_once() {
+    let r = Rig::new();
+    let mut m = r.monitor();
+    let links: Vec<String> = (0..100)
+        .map(|n| format!("https://us1.vrcresolver.com/api/proxy/manifest.m3u8?q=dead{n}"))
+        .collect();
+    for link in &links {
+        open_and_fail(&r, &mut m, link);
+    }
+    assert_eq!(r.sink.kinds().len(), 100);
+
+    open_and_fail(&r, &mut m, &links[99]);
+    open_and_fail(&r, &mut m, &links[99]);
+    assert_eq!(r.sink.kinds().len(), 100);
+}

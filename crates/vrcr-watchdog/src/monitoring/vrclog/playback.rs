@@ -180,9 +180,16 @@ impl VrcLogMonitor {
         if self.reported_failures.contains_key(url) {
             return false;
         }
-        if self.reported_failures.len() < MAX_REPORTED_FAILURES {
-            self.reported_failures.insert(url.to_owned(), now);
+        if self.reported_failures.len() >= MAX_REPORTED_FAILURES
+            && let Some(oldest) = self
+                .reported_failures
+                .iter()
+                .min_by_key(|(_, at)| **at)
+                .map(|(known, _)| known.clone())
+        {
+            self.reported_failures.remove(&oldest);
         }
+        self.reported_failures.insert(url.to_owned(), now);
         true
     }
 
