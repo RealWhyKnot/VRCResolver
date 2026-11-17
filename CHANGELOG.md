@@ -24,6 +24,8 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **console:** Print each server error once (da7d14c)
 - **local:** Play the original audio instead of the dub (a94a89b)
 - **patch:** Poll for re-apply in the running-target test (e6a2dbb)
+- **vrclog:** Keep quieting repeats after 64 failed links (116ee5f)
+- **vrclog:** Report a failing link once every 10 s (52352c1)
 
 ---
 
