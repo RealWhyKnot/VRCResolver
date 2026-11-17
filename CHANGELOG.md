@@ -16,6 +16,9 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **console:** Show server errors in the console (5022381)
 - **relay:** Play a slow live stream straight from the CDN (b7aba7f)
 
+### Changed
+- **deps:** Bump the minor-and-patch group with 3 updates (#85) (92437fc)
+
 ### Fixed
 - **console:** Fix narrow layout and repeated Failed rows (f9ef90a)
 - **console:** Print each server error once (da7d14c)
