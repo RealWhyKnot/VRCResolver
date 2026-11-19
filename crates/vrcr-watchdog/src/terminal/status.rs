@@ -23,7 +23,6 @@ pub struct LineInput<'a> {
     pub spinner: usize,
     pub width: usize,
     pub input: &'a str,
-    pub status_line: bool,
     pub animations: bool,
     pub unicode: bool,
     pub ghost: &'a str,
@@ -64,9 +63,6 @@ pub fn format(
     line: &LineInput<'_>,
 ) -> Frame {
     let width = normalize_width(line.width);
-    if !line.status_line {
-        return prompt_only(line.input, line.ghost, line.cursor, width);
-    }
     let g = glyphs(line.unicode);
     let flags = Flags::of(activity, now);
     let status = status_runs(
@@ -217,19 +213,6 @@ fn status_runs(
     runs
 }
 
-fn prompt_only(input: &str, ghost: &str, cursor: Option<usize>, width: usize) -> Frame {
-    let line = fit("", input, width);
-    let caret = caret_column(PROMPT.len(), input, cursor);
-    if !ghost.is_empty() && clen(&line) + clen(ghost) <= width {
-        return Frame::from_runs(vec![
-            Run::new(line, Color::Gray),
-            Run::new(ghost, Color::DarkGray),
-        ])
-        .with_cursor(caret);
-    }
-    Frame::plain(line, Color::Gray).with_cursor(caret)
-}
-
 fn join(status: &str, input: &str) -> String {
     if status.is_empty() {
         format!("{PROMPT}{input}")
@@ -276,7 +259,6 @@ struct GateKey {
     input: String,
     ghost: String,
     cursor: Option<usize>,
-    status_line: bool,
     animations: bool,
     unicode: bool,
 }
@@ -310,7 +292,6 @@ impl FrameGate {
             input: line.input.to_owned(),
             ghost: line.ghost.to_owned(),
             cursor: line.cursor,
-            status_line: line.status_line,
             animations: line.animations,
             unicode: line.unicode,
         };

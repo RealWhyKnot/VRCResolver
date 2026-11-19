@@ -2,21 +2,18 @@ use super::*;
 
 #[test]
 fn fast_refresh_needs_motion_and_recent_traffic() {
-    let mut s = AppSettings::default();
     let active = Activity {
         last_relay: Some(t0() - Duration::from_secs(1)),
         ..Activity::default()
     };
-    assert!(text::fast_refresh(&active, t0(), &s, true));
-    assert!(!text::fast_refresh(&active, t0(), &s, false));
-    assert!(!text::fast_refresh(&idle(), t0(), &s, true));
+    assert!(text::fast_refresh(&active, t0(), true));
+    assert!(!text::fast_refresh(&active, t0(), false));
+    assert!(!text::fast_refresh(&idle(), t0(), true));
     let stale = Activity {
         last_relay: Some(t0() - Duration::from_secs(3)),
         ..Activity::default()
     };
-    assert!(!text::fast_refresh(&stale, t0(), &s, true));
-    s.terminal.animations = false;
-    assert!(!text::fast_refresh(&active, t0(), &s, true));
+    assert!(!text::fast_refresh(&stale, t0(), true));
 }
 
 #[test]

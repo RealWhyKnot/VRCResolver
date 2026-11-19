@@ -94,10 +94,6 @@ fn first_run_elevates_once_then_reuses_the_trusted_cert() {
     assert!(elevations[0].starts_with(&format!("{BOOTSTRAP_ARG} 51234 ")));
     let text = out.logs();
     assert!(
-        text.contains("configuring HTTPS for localhost.youtube.com -- UAC prompt incoming."),
-        "{text}"
-    );
-    assert!(
         text.contains("HTTPS ready for localhost.youtube.com:51234"),
         "{text}"
     );
@@ -142,7 +138,7 @@ fn declined_uac_keeps_the_cert_for_the_next_attempt() {
     assert!(m.ensure_ready(51234).is_none());
     assert!(
         out.logs()
-            .contains("UAC declined -- HTTPS relay not configured.")
+            .contains("Permission declined. Secure video was left off.")
     );
     assert!(!out.logs().contains("falling back"));
     let first =

@@ -9,12 +9,12 @@ use std::time::{Duration, SystemTime};
 use regex_lite::Regex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use vrcr_shared::console::{Component, Ux};
+use vrcr_shared::console::{Component, Notice, Ux};
 use vrcr_shared::first_party::FirstPartyPolicy;
 use vrcr_shared::log::Log;
 use vrcr_shared::logutil::redact_url;
 use vrcr_shared::paths::AppPaths;
-use vrcr_shared::trust_gateway::extract_target;
+use vrcr_shared::trust_gateway::{GATEWAY_HOST, extract_target};
 use vrcr_shared::wire::feedback;
 
 use crate::clock::Now;
@@ -70,6 +70,28 @@ pub struct RelayWedge {
     pub on_wedged: Box<dyn Fn(u16) -> bool + Send + Sync>,
 }
 
+const SETUP_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SetupPass {
+    pub generation: u64,
+    pub running: bool,
+    pub reported: bool,
+}
+
+pub struct SetupProbe {
+    pub pass: Box<dyn Fn() -> SetupPass + Send + Sync>,
+    pub incomplete: Box<dyn Fn() -> Option<bool> + Send + Sync>,
+}
+
+#[derive(Default)]
+struct SetupHint {
+    generation: Option<u64>,
+    checked: Option<SystemTime>,
+    incomplete: bool,
+    shown: bool,
+}
+
 pub struct MonitorDeps {
     pub mesh: Arc<dyn PlaybackSink>,
     pub policy: Arc<RwLock<FirstPartyPolicy>>,
@@ -79,6 +101,8 @@ pub struct MonitorDeps {
     pub health: Option<Arc<HealthGate>>,
     pub local: Option<Arc<Manifests>>,
     pub relay_wedge: Option<RelayWedge>,
+    pub setup: Option<SetupProbe>,
+    pub wrapper_missing: Option<Box<dyn Fn() -> bool + Send + Sync>>,
     pub on_new_session: Option<Box<dyn Fn() + Send + Sync>>,
     pub audio: Box<dyn Fn() -> AudioCheck + Send + Sync>,
     pub silent_stall_window: Duration,
@@ -102,6 +126,8 @@ impl MonitorDeps {
             health: None,
             local: None,
             relay_wedge: None,
+            setup: None,
+            wrapper_missing: None,
             on_new_session: None,
             audio: Box::new(audio::check_default),
             silent_stall_window: DEFAULT_SILENT_STALL_WINDOW,
@@ -225,6 +251,8 @@ pub struct VrcLogMonitor {
     audio_missing: bool,
     player_error: Option<String>,
     active_playback_id: Option<String>,
+    setup_hint: SetupHint,
+    wrapper_hint_shown: bool,
 }
 
 impl VrcLogMonitor {
@@ -245,6 +273,8 @@ impl VrcLogMonitor {
             audio_missing: false,
             player_error: None,
             active_playback_id: None,
+            setup_hint: SetupHint::default(),
+            wrapper_hint_shown: false,
         }
     }
 
@@ -322,6 +352,10 @@ impl VrcLogMonitor {
     }
 
     pub fn poll_once(&mut self, now: SystemTime) {
+        if self.setup_hint.checked.is_some() {
+            let _ = self.setup_hint_due(now);
+        }
+        self.refresh_wrapper_hint();
         let since = self.last_scan.map_or(i64::MAX, |t| {
             now.duration_since(t)
                 .map_or(-1, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
@@ -410,6 +444,52 @@ impl VrcLogMonitor {
             if !line.is_empty() {
                 self.process_line(line, now);
             }
+        }
+    }
+
+    fn setup_hint_due(&mut self, now: SystemTime) -> bool {
+        let Some(probe) = &self.deps.setup else {
+            return false;
+        };
+        let pass = (probe.pass)();
+        if pass.running {
+            return false;
+        }
+        let hint = &mut self.setup_hint;
+        if hint.generation != Some(pass.generation) {
+            *hint = SetupHint {
+                generation: Some(pass.generation),
+                shown: pass.reported,
+                ..SetupHint::default()
+            };
+        }
+        if hint.checked.is_none_or(|checked| {
+            now.duration_since(checked).unwrap_or_default() >= SETUP_CHECK_INTERVAL
+        }) {
+            let incomplete = (probe.incomplete)();
+            if (probe.pass)() != pass {
+                return false;
+            }
+            hint.checked = Some(now);
+            if let Some(incomplete) = incomplete {
+                hint.incomplete = incomplete;
+                if !incomplete {
+                    hint.shown = false;
+                }
+            }
+        }
+        hint.incomplete && !hint.shown
+    }
+
+    fn refresh_wrapper_hint(&mut self) {
+        if self.wrapper_hint_shown
+            && self
+                .deps
+                .wrapper_missing
+                .as_ref()
+                .is_some_and(|check| !check())
+        {
+            self.wrapper_hint_shown = false;
         }
     }
 

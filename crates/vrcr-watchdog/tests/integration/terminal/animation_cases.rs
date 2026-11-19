@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn activity_glyph_and_pulse_follow_motion_settings() {
+fn activity_glyph_and_pulse_follow_animation_availability() {
     assert_eq!(
         activity_glyph(
             &ASCII,

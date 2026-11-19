@@ -42,6 +42,10 @@ impl<M: Mesh> Ipc<M> {
             return;
         }
 
+        self.stats
+            .playback
+            .record_resolve_request(&req.url, SystemTime::now());
+
         let mut budget_ms = i32::try_from(PER_REQUEST_TIMEOUT.as_millis())
             .expect("request timeout fits milliseconds");
         let mut deadline = started + PER_REQUEST_TIMEOUT;
@@ -65,11 +69,7 @@ impl<M: Mesh> Ipc<M> {
                     .collect(),
             );
         }
-        if profile::apply_high_quality(&mut req, (self.high_quality)()) {
-            self.log.line(&format!(
-                "[ipc] high quality on; requesting up to {HIGH_QUALITY_MAX_HEIGHT}p id={id}"
-            ));
-        } else if profile::apply_default_quality_cap(&mut req) {
+        if profile::apply_default_quality_cap(&mut req) {
             self.log.line(&format!(
                 "[ipc] capped VRChat's height request to {DEFAULT_MAX_HEIGHT}p id={id}"
             ));

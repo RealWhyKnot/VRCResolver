@@ -1,6 +1,55 @@
 use super::*;
 
 #[test]
+fn native_resolution_points_to_repair_only_when_the_wrapper_was_missing() {
+    let rig = Rig::new();
+    let missing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let state = Arc::clone(&missing);
+    let stats = Arc::new(Stats::new(rig.now()));
+    let mut deps = rig.deps(AudioCheck::new(AudioState::Ok, Some("Speakers")));
+    deps.stats = Some(Arc::clone(&stats));
+    deps.wrapper_missing = Some(Box::new(move || state.load(Ordering::Relaxed)));
+    let mut monitor = rig.monitor_with(deps);
+    let source = "https://source.example.test/watch?id=7";
+    let result = "https://media.example.test/video.mp4";
+    let hint = "Type repair to reconnect VRCResolver to VRChat's video player.";
+    let feed = |monitor: &mut VrcLogMonitor, source, result| {
+        rig.feed(
+            monitor,
+            &format!("[Video Playback] URL '{source}' resolved to '{result}'\n"),
+        );
+    };
+    feed(&mut monitor, source, result);
+    assert!(!rig.out.text().contains(hint));
+
+    missing.store(true, Ordering::Relaxed);
+    feed(
+        &mut monitor,
+        source,
+        "http://localhost.youtube.com:31415/play/2",
+    );
+    stats.playback.record_resolve_request(source, rig.now());
+    feed(&mut monitor, source, result);
+    assert!(!rig.out.text().contains(hint));
+
+    rig.clock.advance(Duration::from_secs(61));
+    feed(&mut monitor, source, result);
+    feed(
+        &mut monitor,
+        "https://source.example.test/watch?id=9",
+        result,
+    );
+    assert_eq!(rig.out.text().matches(hint).count(), 1);
+
+    missing.store(false, Ordering::Relaxed);
+    monitor.poll_once(rig.now());
+    missing.store(true, Ordering::Relaxed);
+    rig.clock.advance(secs(61));
+    feed(&mut monitor, source, result);
+    assert_eq!(rig.out.text().matches(hint).count(), 2);
+}
+
+#[test]
 fn alternating_logs_do_not_replay_old_lines() {
     let r = Rig::new();
     let mut logs = LogDir::new(r.dir.path());

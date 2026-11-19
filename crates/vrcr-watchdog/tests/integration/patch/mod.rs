@@ -1,4 +1,6 @@
-use std::fs::{self, File, OpenOptions};
+#[cfg(windows)]
+use std::fs::File;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

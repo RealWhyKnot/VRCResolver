@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::wire::{DEFAULT_MAX_HEIGHT, HIGH_QUALITY_MAX_HEIGHT, Player, ResolveRequest};
+use crate::wire::{DEFAULT_MAX_HEIGHT, Player, ResolveRequest};
 
 const HEIGHT_CAP_NEEDLE: &[u8] = b"height<=";
 
@@ -81,16 +81,6 @@ pub fn wrapper_request(
 
 pub fn new_request_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
-}
-
-pub fn apply_high_quality(request: &mut ResolveRequest, enabled: bool) -> bool {
-    if !enabled || request.player != Some(Player::AvPro) {
-        return false;
-    }
-    request.max_height = Some(HIGH_QUALITY_MAX_HEIGHT);
-    request.vrchat_format_arg = None;
-    request.prefer_highest = Some(true);
-    true
 }
 
 pub fn apply_default_quality_cap(request: &mut ResolveRequest) -> bool {

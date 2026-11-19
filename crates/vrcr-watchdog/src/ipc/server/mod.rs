@@ -10,8 +10,8 @@ use vrcr_shared::log::Log;
 use vrcr_shared::logutil::{bare_host, sanitize_for_console};
 use vrcr_shared::profile;
 use vrcr_shared::wire::{
-    self, DEFAULT_MAX_HEIGHT, HIGH_QUALITY_MAX_HEIGHT, Player, ResolveRequest, ResolveResponse,
-    WrapperEventNotify, action, fallback, feedback, og_reason,
+    self, DEFAULT_MAX_HEIGHT, Player, ResolveRequest, ResolveResponse, WrapperEventNotify, action,
+    fallback, feedback, og_reason,
 };
 
 use super::framing::{self, cid_suffix};
@@ -76,7 +76,6 @@ pub fn og_failed_detail_for(reason: Option<&str>) -> &'static str {
         .unwrap_or(OG_FAILED_DETAIL_UNKNOWN)
 }
 
-type Flag = Arc<dyn Fn() -> bool + Send + Sync>;
 type Codecs = Arc<dyn Fn() -> Option<Vec<String>> + Send + Sync>;
 type FallbackSink = Arc<dyn Fn(&ResolveRequest, &str) + Send + Sync>;
 
@@ -102,11 +101,6 @@ impl<M: Mesh> IpcBuilder<M> {
 
     pub fn stats(mut self, stats: Arc<Stats>) -> Self {
         self.ipc.stats = stats;
-        self
-    }
-
-    pub fn high_quality(mut self, f: impl Fn() -> bool + Send + Sync + 'static) -> Self {
-        self.ipc.high_quality = Arc::new(f);
         self
     }
 
@@ -144,7 +138,6 @@ pub struct Ipc<M: Mesh> {
     hint: Option<Arc<OgFallbackHint>>,
     health: Option<Arc<HealthGate>>,
     stats: Arc<Stats>,
-    high_quality: Flag,
     verified_codecs: Codecs,
     report_fallback: FallbackSink,
     local: Option<Arc<dyn Step>>,
@@ -175,7 +168,6 @@ impl<M: Mesh> Ipc<M> {
                 hint: None,
                 health: None,
                 stats: Arc::new(Stats::default()),
-                high_quality: Arc::new(|| false),
                 verified_codecs: Arc::new(|| None),
                 report_fallback: Arc::new(|_, _| {}),
                 local: None,

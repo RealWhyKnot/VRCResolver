@@ -13,7 +13,7 @@ use vrcr_watchdog::hosts::{
 
 use crate::common::mesh::Capture;
 
-const GIVE_UP: &str = "won't ask again";
+const GIVE_UP: &str = "Run repair to try again.";
 
 fn capture_ux() -> (Ux, Capture) {
     let out = Capture::default();
@@ -174,8 +174,8 @@ fn declined_elevation_is_recorded_for_the_session() {
     assert!(m.declined_this_session());
     assert!(!m.prompt_in_flight());
     let text = out.logs();
-    assert!(text.contains("adding entry for public-instance support -- UAC prompt incoming."));
-    assert!(text.contains("UAC declined -- entry not modified."));
+    assert!(text.contains("Permission declined. The hosts entry was left unchanged."));
+    assert!(out.text().contains("Type repair to be asked again."));
     assert!(!text.contains("entry not present after elevation"));
 }
 

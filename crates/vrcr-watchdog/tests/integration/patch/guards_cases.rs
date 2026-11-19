@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn repair_reapplies_the_wrapper_without_waiting_for_the_ticker() {
+    let rig = Rig::new();
+    rig.write_wrapper();
+    let original = vrc_bundled();
+    write(&rig.target, &original);
+    let manager = rig.manager();
+    assert!(manager.wrapper_missing());
+    assert_eq!(manager.repair_wrapper(), Some(true));
+    assert_eq!(read(&rig.target), wrapper_bytes());
+    assert_eq!(read(&rig.backup), original);
+    assert!(!manager.wrapper_missing());
+    assert_eq!(manager.repair_wrapper(), Some(false));
+    assert!(manager.restore_now("console-close"));
+    assert_eq!(manager.repair_wrapper(), None);
+    assert_eq!(read(&rig.target), original);
+}
+
+#[test]
 fn wrapper_returning_after_missing_episode_resumes_backup_and_install() {
     let r = Rig::new();
     let vrc = vrc_bundled();

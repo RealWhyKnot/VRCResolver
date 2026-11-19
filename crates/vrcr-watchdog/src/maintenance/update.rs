@@ -11,12 +11,6 @@ use vrcr_shared::console::{Component, Ux};
 use vrcr_shared::log::Log;
 use vrcr_shared::release::pick_highest_entry;
 
-#[derive(Clone, Copy)]
-pub struct CheckPolicy {
-    pub enabled: bool,
-    pub include_prereleases: bool,
-}
-
 pub use vrcr_shared::release::{ANY_RELEASES_URL, REPO, STABLE_LATEST_URL, Version};
 
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
@@ -98,7 +92,7 @@ impl Release {
             format!(" ({})", best.html_url)
         };
         format!(
-            "version {}{channel} is available; type /update to install{link}",
+            "version {}{channel} is available; type update to install{link}",
             best.tag
         )
     }
@@ -140,21 +134,12 @@ async fn github_get(url: &'static str, local: String) -> Option<String> {
 }
 
 pub fn start_background_check(
-    policy: CheckPolicy,
+    include_prereleases: bool,
     local: &str,
     ux: Ux,
-    log: &Log,
-) -> Option<tokio::task::JoinHandle<()>> {
-    let CheckPolicy {
-        enabled,
-        include_prereleases,
-    } = policy;
-    if !enabled {
-        log.line("[update] startup update check disabled by settings");
-        return None;
-    }
+) -> tokio::task::JoinHandle<()> {
     let local = local.to_owned();
-    Some(tokio::spawn(async move {
+    tokio::spawn(async move {
         let fetch_version = local.clone();
         if let Some(release) = check(include_prereleases, &local, |url| {
             github_get(url, fetch_version)
@@ -163,7 +148,7 @@ pub fn start_background_check(
         {
             release.announce(&ux);
         }
-    }))
+    })
 }
 
 pub fn updater_command(install_dir: &Path) -> Command {
@@ -174,23 +159,9 @@ pub fn updater_command(install_dir: &Path) -> Command {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum UpdateStart {
-    UpdaterMissing(PathBuf),
+    UpdaterMissing,
     Failed,
     Started,
-}
-
-impl UpdateStart {
-    pub fn message(&self) -> String {
-        match self {
-            UpdateStart::UpdaterMissing(p) => {
-                format!("updater not found in install folder: {}", p.display())
-            }
-            UpdateStart::Failed => "update could not start.".to_owned(),
-            UpdateStart::Started => {
-                "update started; this window may close while files are replaced.".to_owned()
-            }
-        }
-    }
 }
 
 pub fn start_update(
@@ -199,7 +170,7 @@ pub fn start_update(
 ) -> UpdateStart {
     let updater = install_dir.join(UPDATER_EXE);
     if !updater.is_file() {
-        return UpdateStart::UpdaterMissing(updater);
+        return UpdateStart::UpdaterMissing;
     }
     match spawn(updater_command(install_dir)) {
         Ok(()) => UpdateStart::Started,

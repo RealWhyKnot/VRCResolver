@@ -172,11 +172,10 @@ fn default_quality_cap_never_raises_and_fills_the_default() {
 }
 
 #[test]
-fn default_quality_cap_and_high_quality_leave_unity_alone() {
+fn default_quality_cap_leaves_unity_alone() {
     let mut req = avpro(Some(720), Some("(mp4/best)[height<=?720]"));
     req.player = Some(Player::Unity);
     assert!(!profile::apply_default_quality_cap(&mut req));
-    assert!(!profile::apply_high_quality(&mut req, true));
     assert_eq!(req.max_height, Some(720));
     assert_eq!(
         req.vrchat_format_arg.as_deref(),
@@ -186,31 +185,15 @@ fn default_quality_cap_and_high_quality_leave_unity_alone() {
 }
 
 #[test]
-fn high_quality_raises_the_cap_and_drops_the_vrchat_selector() {
-    let fmt = "bv*[height<=1080]+ba/best[height<=1080]";
-    let mut off = avpro(Some(1080), Some(fmt));
-    assert!(!profile::apply_high_quality(&mut off, false));
-    assert_eq!(off.max_height, Some(1080));
-    assert_eq!(off.vrchat_format_arg.as_deref(), Some(fmt));
-    assert_eq!(off.prefer_highest, None);
-
-    let mut on = avpro(Some(2160), Some(VRCHAT_ARG));
-    assert!(profile::apply_high_quality(&mut on, true));
-    assert_eq!(on.max_height, Some(wire::HIGH_QUALITY_MAX_HEIGHT));
-    assert_eq!(on.vrchat_format_arg, None);
-    assert_eq!(on.prefer_highest, Some(true));
-}
-
-#[test]
 fn prefer_highest_serializes_only_when_set() {
     let req = avpro(Some(1080), None);
     let json = serde_json::to_string(&req).unwrap();
     assert!(!json.contains("prefer_highest"));
     let mut hq = avpro(Some(1080), Some("x"));
-    profile::apply_high_quality(&mut hq, true);
+    hq.prefer_highest = Some(true);
     let json = serde_json::to_string(&hq).unwrap();
     assert!(json.contains("\"prefer_highest\":true"));
-    assert!(json.contains("\"maxHeight\":2160"));
+    assert!(json.contains("\"maxHeight\":1080"));
 }
 
 #[test]

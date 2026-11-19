@@ -1,15 +1,12 @@
 use super::blocks::Item;
 use super::renderer::Renderer;
-use super::session::SessionStore;
 use super::text::normalize_verb;
 use crate::maintenance::update;
-use crate::settings;
 
 pub const MAX_SUGGESTION_SCORE: usize = 3;
 
 pub struct Context<'a> {
     pub renderer: &'a Renderer,
-    pub session: &'a SessionStore,
     pub commands: &'a Registry,
 }
 
@@ -26,16 +23,11 @@ pub type Completer = fn(&Registry, CompletionInput<'_>) -> Completion;
 pub struct Command {
     pub name: String,
     pub description: String,
-    pub aliases: Vec<String>,
     handler: Handler,
     completer: Option<Completer>,
 }
 
 impl Command {
-    pub fn has_completer(&self) -> bool {
-        self.completer.is_some()
-    }
-
     pub fn run(&self, ctx: &Context<'_>, args: &str) {
         (self.handler)(ctx, args);
     }
@@ -75,88 +67,30 @@ fn starts_with_ci(value: &str, prefix: &str) -> bool {
 impl Registry {
     pub fn with_defaults() -> Registry {
         let mut r = Registry::default();
+        r.add("help", "Show commands or get help with one.", help);
+        r.add("status", "Show current video activity.", |ctx, _| {
+            ctx.renderer.render_status()
+        });
         r.add(
-            "help",
-            "Show available terminal commands, or details for one of them.",
-            help,
-            &["?"],
+            "repair",
+            "Ask Windows again for permission to play videos in public worlds.",
+            |ctx, _| ctx.renderer.repair(),
         );
-        r.add(
-            "settings",
-            "List or change persisted watchdog settings.",
-            settings_command,
-            &["config"],
-        );
-        r.add(
-            "status",
-            "Show what the proxy is doing right now.",
-            |ctx, _| ctx.renderer.render_status(),
-            &["stats", "activity", "dashboard"],
-        );
-        r.add(
-            "history",
-            "Show recent terminal commands.",
-            |ctx, _| ctx.renderer.render_history(&ctx.session.recent_commands()),
-            &[],
-        );
-        r.add(
-            "permissions",
-            "Show what this terminal is allowed to do.",
-            |ctx, _| {
-                ctx.renderer.log_permissions();
-            },
-            &[],
-        );
-        r.add(
-            "tools",
-            "Show managed watchdog subsystems.",
-            |ctx, _| ctx.renderer.render_tools(),
-            &[],
-        );
-        r.add(
-            "diagnostics",
-            "Show useful support paths and session files.",
-            |ctx, _| ctx.renderer.render_diagnostics(ctx.session),
-            &["diag", "paths"],
-        );
-        r.add(
-            "update",
-            "Check for and install the latest VRCResolver release.",
-            update_command,
-            &["upgrade"],
-        );
-        r.add(
-            "clear",
-            "Clear the terminal view.",
-            |ctx, _| ctx.renderer.clear_screen(),
-            &["cls"],
-        );
-        r.add(
-            "quit",
-            "Shut down VRCResolver cleanly.",
-            |ctx, _| {
-                ctx.renderer.info("quit requested; shutting down.");
-                ctx.renderer.request_shutdown();
-            },
-            &["exit"],
-        );
-        r.set_completer("settings", complete_settings);
+        r.add("update", "Check for and install updates.", update_command);
+        r.add("clear", "Clear the console.", |ctx, _| {
+            ctx.renderer.clear_screen()
+        });
         r.set_completer("help", complete_help);
+        r.set_completer("update", complete_update);
         r
     }
 
-    pub fn add(&mut self, name: &str, description: &str, handler: Handler, aliases: &[&str]) {
+    pub fn add(&mut self, name: &str, description: &str, handler: Handler) {
         let name = normalize_verb(name);
         assert!(!name.is_empty(), "command name is required");
-        let aliases = aliases
-            .iter()
-            .map(|a| normalize_verb(a))
-            .filter(|a| !a.is_empty())
-            .collect();
         self.commands.push(Command {
             name,
             description: description.to_owned(),
-            aliases,
             handler,
             completer: None,
         });
@@ -168,7 +102,7 @@ impl Registry {
             .commands
             .iter_mut()
             .rev()
-            .find(|c| c.name == verb || c.aliases.contains(&verb))
+            .find(|c| c.name == verb)
             .unwrap_or_else(|| panic!("unknown command: {name}"));
         command.completer = Some(completer);
     }
@@ -179,10 +113,7 @@ impl Registry {
 
     pub fn get(&self, verb: &str) -> Option<&Command> {
         let verb = normalize_verb(verb);
-        self.commands
-            .iter()
-            .rev()
-            .find(|c| c.name == verb || c.aliases.contains(&verb))
+        self.commands.iter().rev().find(|c| c.name == verb)
     }
 
     pub fn complete(&self, input: &str) -> Completion {
@@ -237,11 +168,7 @@ impl Registry {
             .commands
             .iter()
             .filter_map(|c| {
-                let best = c
-                    .aliases
-                    .iter()
-                    .map(|a| match_score(&verb, a))
-                    .fold(match_score(&verb, &c.name), usize::min);
+                let best = match_score(&verb, &c.name);
                 (best <= MAX_SUGGESTION_SCORE).then_some((c, best))
             })
             .collect();
@@ -261,10 +188,7 @@ impl Registry {
         let mut matches: Vec<&Command> = self
             .commands
             .iter()
-            .filter(|c| {
-                starts_with_ci(&c.name, &prefix)
-                    || c.aliases.iter().any(|a| starts_with_ci(a, &prefix))
-            })
+            .filter(|c| starts_with_ci(&c.name, &prefix))
             .collect();
         matches.sort_by_key(|c| c.name.to_lowercase());
         let lead = if slash { "/" } else { "" };
@@ -327,6 +251,9 @@ fn help(ctx: &Context<'_>, args: &str) {
             .info("To uninstall, run vrcresolver.Uninstaller.exe from this folder.");
     } else if let Some(target) = ctx.commands.get(&wanted) {
         ctx.renderer.render_command_help(target);
+        if target.name == "update" {
+            ctx.renderer.render_update_help(&UPDATE_OPTIONS);
+        }
     } else {
         ctx.renderer
             .render_unknown_command(&wanted, &ctx.commands.nearest(&wanted, 3));
@@ -362,175 +289,61 @@ fn complete_help(registry: &Registry, input: CompletionInput<'_>) -> Completion 
     )
 }
 
-fn update_command(ctx: &Context<'_>, _args: &str) {
-    let started = ctx.renderer.start_update();
-    let message = started.message();
-    match started {
-        update::UpdateStart::UpdaterMissing(_) => ctx.renderer.error(&message),
-        update::UpdateStart::Failed => ctx.renderer.warn(&message),
-        update::UpdateStart::Started => ctx.renderer.info(&message),
-    }
-}
+const UPDATE_OPTIONS: [(&str, &str); 2] = [
+    ("beta", "Check for updates and include beta releases."),
+    ("stable", "Check for stable updates only."),
+];
 
-fn settings_command(ctx: &Context<'_>, args: &str) {
-    let parts: Vec<&str> = args
-        .split(' ')
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .collect();
-    let Some(first) = parts.first() else {
-        ctx.renderer.render_settings();
-        return;
-    };
-    match first.to_lowercase().as_str() {
-        "help" => ctx.renderer.render_settings_help(),
-        "get" if parts.len() == 2 => render_one(ctx, parts[1]),
-        "get" => ctx.renderer.warn("usage: settings get <name>"),
-        "set" if parts.len() >= 3 => set_one(ctx, parts[1], &parts[2..].join(" ")),
-        "set" => ctx.renderer.warn("usage: settings set <name> <value>"),
-        "reset" if parts.len() == 2 => reset(ctx, parts[1]),
-        "reset" => ctx.renderer.warn("usage: settings reset <name|all>"),
-        _ if parts.len() >= 2 => set_one(ctx, parts[0], &parts[1..].join(" ")),
-        _ => render_one(ctx, parts[0]),
-    }
-}
-
-fn unknown_setting(ctx: &Context<'_>, key: &str) {
-    ctx.renderer.warn(&format!(
-        "unknown setting: {key} (use settings to list names)"
-    ));
-}
-
-fn render_one(ctx: &Context<'_>, key: &str) {
-    match settings::find(key) {
-        Some(setting) => ctx.renderer.render_setting(setting),
-        None => unknown_setting(ctx, key),
-    }
-}
-
-fn set_one(ctx: &Context<'_>, key: &str, value: &str) {
-    let Some(setting) = settings::find(key) else {
-        unknown_setting(ctx, key);
-        return;
+fn update_command(ctx: &Context<'_>, args: &str) {
+    let requested = match args.trim().to_ascii_lowercase().as_str() {
+        "" => None,
+        "beta" => Some(true),
+        "stable" => Some(false),
+        _ => {
+            ctx.renderer
+                .warn("Type update, update beta or update stable.");
+            return;
+        }
     };
     let store = ctx.renderer.settings();
-    let mut probe = store.snapshot();
-    if let Err(e) = setting.try_set(&mut probe, value) {
-        ctx.renderer.warn(&format!("invalid value for {key}: {e}"));
+    if let Some(include) = requested
+        && store.set_include_prereleases(include).is_err()
+    {
+        ctx.renderer.error("Couldn't save your update choice.");
         return;
     }
-    let next = store.update(|s| {
-        let _ = setting.try_set(s, value);
-    });
-    let suffix = if setting.restart_required {
-        " (takes effect next launch)"
+    let channel = if store.include_prereleases() {
+        "beta"
     } else {
-        ""
+        "stable"
     };
-    ctx.renderer
-        .success(&format!("settings: {key} = {}{suffix}", setting.get(&next)));
+    match ctx.renderer.start_update() {
+        update::UpdateStart::UpdaterMissing => ctx.renderer.error(&format!(
+            "Couldn't check for {channel} updates because the updater is missing."
+        )),
+        update::UpdateStart::Failed => ctx
+            .renderer
+            .warn(&format!("Couldn't start the check for {channel} updates.")),
+        update::UpdateStart::Started => ctx
+            .renderer
+            .info(&format!("Checking for {channel} updates.")),
+    }
 }
 
-fn reset(ctx: &Context<'_>, key: &str) {
-    let store = ctx.renderer.settings();
-    if key.eq_ignore_ascii_case("all") {
-        store.update(|s| {
-            for setting in &settings::ALL {
-                setting.reset(s);
-            }
-        });
-        ctx.renderer
-            .success("settings: all values reset to defaults.");
-        return;
-    }
-    let Some(setting) = settings::find(key) else {
-        unknown_setting(ctx, key);
-        return;
+fn complete_update(_registry: &Registry, input: CompletionInput<'_>) -> Completion {
+    let prefix = match (input.tokens, input.ends_with_space) {
+        ([_], true) => "",
+        ([_, prefix], false) => prefix,
+        _ => return Completion::default(),
     };
-    let next = store.update(|s| setting.reset(s));
-    ctx.renderer
-        .success(&format!("settings: {key} reset to {}", setting.get(&next)));
-}
-
-fn complete_settings(_registry: &Registry, input: CompletionInput<'_>) -> Completion {
-    let CompletionInput {
-        slash,
-        tokens,
-        ends_with_space,
-    } = input;
-    let mut args: Vec<&str> = tokens.iter().skip(1).copied().collect();
-    if ends_with_space || args.is_empty() {
-        args.push("");
-    }
-    let lead = if slash { "/settings" } else { "settings" };
-    let current = args[args.len() - 1];
-    if args.len() == 1 {
-        let mut items = action_items(current);
-        items.extend(setting_items(current, false));
-        if items.len() == 1 {
-            return Completion::replace(format!("{lead} {} ", items[0].text));
-        }
-        return Completion::list(items);
-    }
-    let action = args[0].to_lowercase();
-    if action == "get" || action == "reset" {
-        let items = setting_items(current, action == "reset");
-        if items.len() == 1 {
-            return Completion::replace(format!("{lead} {action} {} ", items[0].text));
-        }
-        return Completion::list(items);
-    }
-    if action == "set" {
-        if args.len() == 2 {
-            let items = setting_items(current, false);
-            if items.len() == 1 {
-                return Completion::replace(format!("{lead} set {} ", items[0].text));
-            }
-            return Completion::list(items);
-        }
-        return complete_value(&format!("{lead} set "), args[1], current);
-    }
-    complete_value(&format!("{lead} "), args[0], current)
-}
-
-fn complete_value(prefix: &str, name: &str, current: &str) -> Completion {
-    let Some(setting) = settings::find(name) else {
-        return Completion::default();
-    };
-    let items: Vec<Item> = setting
-        .choices()
+    let items: Vec<_> = UPDATE_OPTIONS
         .iter()
-        .filter(|v| starts_with_ci(v, current))
-        .map(|v| Item::new(*v, setting.description))
+        .filter(|(name, _)| starts_with_ci(name, prefix))
+        .map(|(name, description)| Item::new(*name, *description))
         .collect();
-    if items.len() == 1 {
-        return Completion::replace(format!("{prefix}{} {}", setting.key, items[0].text));
+    if let [item] = items.as_slice() {
+        let slash = if input.slash { "/" } else { "" };
+        return Completion::replace(format!("{slash}update {}", item.text));
     }
     Completion::list(items)
-}
-
-fn action_items(prefix: &str) -> Vec<Item> {
-    [
-        ("get", "Show one setting."),
-        ("set", "Change a setting."),
-        ("reset", "Reset a setting."),
-        ("help", "Show settings help."),
-    ]
-    .into_iter()
-    .filter(|(t, _)| starts_with_ci(t, prefix))
-    .map(|(t, d)| Item::new(t, d))
-    .collect()
-}
-
-fn setting_items(prefix: &str, include_all: bool) -> Vec<Item> {
-    let mut items = Vec::new();
-    if include_all && starts_with_ci("all", prefix) {
-        items.push(Item::new("all", "Reset every setting."));
-    }
-    for s in &settings::ALL {
-        if starts_with_ci(s.key, prefix) || s.aliases.iter().any(|a| starts_with_ci(a, prefix)) {
-            items.push(Item::new(s.key, s.description));
-        }
-    }
-    items
 }

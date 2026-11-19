@@ -544,22 +544,17 @@ pub async fn run_check<E: CodecEnv>(
 }
 
 pub fn start_background_check(
-    enabled: bool,
     state_dir: &Path,
     capabilities: Arc<CodecCapabilities>,
     ux: Ux,
     log: Log,
-) -> Option<tokio::task::JoinHandle<()>> {
-    if !enabled {
-        log.line("[codec] auto-install disabled by settings");
-        return None;
-    }
+) -> tokio::task::JoinHandle<()> {
     let _ = fs::create_dir_all(state_dir);
     let path = state_dir.join(STATE_FILE);
-    Some(tokio::spawn(async move {
+    tokio::spawn(async move {
         let installer = Installer::new(SystemEnv { log });
         run_check(&installer, &path, &capabilities, &ux).await;
-    }))
+    })
 }
 
 #[cfg(test)]

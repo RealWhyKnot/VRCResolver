@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -7,24 +6,21 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::common::mesh::Capture;
 use tempfile::TempDir;
 use vrcr_shared::console::Color;
-use vrcr_shared::paths::AppPaths;
 use vrcr_shared::win::KeyEvent;
-use vrcr_watchdog::settings::{AppSettings, Store};
+use vrcr_watchdog::settings::Store;
 use vrcr_watchdog::stats::{Activity, Bandwidth, Stats};
 use vrcr_watchdog::terminal::blocks::{self, Item};
 use vrcr_watchdog::terminal::commands::{Registry, edit_distance};
 use vrcr_watchdog::terminal::input::{InputBuffer, MAX_INPUT_CHARS};
 use vrcr_watchdog::terminal::overlay::{OverlayLine, park_caret, write_runs};
-use vrcr_watchdog::terminal::renderer::{
-    console_width, describe_age, describe_terminal, status_rows, usable_width,
-};
+use vrcr_watchdog::terminal::renderer::{console_width, describe_age, status_rows, usable_width};
 use vrcr_watchdog::terminal::status::{self, FrameGate, LineInput, PROMPT};
 use vrcr_watchdog::terminal::text::{
     self, ASCII, CommandLine, Frame, Run, UNICODE, activity_glyph, pulse_color, sparkline,
     trim_left, trim_right,
 };
 use vrcr_watchdog::terminal::{
-    Core, Key, KeyDecoder, Services, SessionStore, animations_allowed, interactive_allowed,
+    Core, HistoryStore, Key, KeyDecoder, Services, animations_allowed, interactive_allowed,
 };
 
 fn t0() -> SystemTime {
@@ -37,10 +33,6 @@ fn fixed_now() -> SystemTime {
 
 fn tmp() -> TempDir {
     TempDir::new().unwrap_or_else(|e| panic!("{e}"))
-}
-
-fn read(path: &Path) -> String {
-    fs::read_to_string(path).unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn idle() -> Activity {
@@ -61,7 +53,6 @@ fn line<'a>(input: &'a str, width: usize) -> LineInput<'a> {
         spinner: 0,
         width,
         input,
-        status_line: true,
         animations: true,
         unicode: false,
         ghost: "",
@@ -75,8 +66,7 @@ struct Harness {
     core: Core,
     settings: Arc<Store>,
     stats: Arc<Stats>,
-    shutdowns: Arc<AtomicUsize>,
-    session: Arc<SessionStore>,
+    repairs: Arc<AtomicUsize>,
 }
 
 fn harness_with(width: Option<usize>) -> Harness {
@@ -92,13 +82,9 @@ fn harness_styled(width: Option<usize>, style: vrcr_shared::console::Style) -> H
         Box::new(|_| {}),
     ));
     let stats = Arc::new(Stats::new(t0()));
-    let shutdowns = Arc::new(AtomicUsize::new(0));
-    let counter = std::sync::Arc::clone(&shutdowns);
-    let session = Arc::new(SessionStore::new(
-        &dir.path().join("terminal"),
-        t0(),
-        fixed_now,
-    ));
+    let repairs = Arc::new(AtomicUsize::new(0));
+    let repair_counter = Arc::clone(&repairs);
+    let history = HistoryStore::new(&dir.path().join("terminal"));
     let width_fn: fn() -> Option<usize> = if width.is_some() {
         || Some(100)
     } else {
@@ -109,25 +95,23 @@ fn harness_styled(width: Option<usize>, style: vrcr_shared::console::Style) -> H
         stats: std::sync::Arc::clone(&stats),
         settings: std::sync::Arc::clone(&settings),
         mesh_connected: Arc::new(|| true),
-        request_shutdown: Arc::new(move || {
-            counter.fetch_add(1, Ordering::SeqCst);
+        repair: Arc::new(move || {
+            repair_counter.fetch_add(1, Ordering::SeqCst);
         }),
         install_dir: dir.path().join("install"),
-        paths: AppPaths::new(dir.path().join("local"), dir.path().join("data")),
         spawn_updater: |_| Ok(()),
         width: width_fn,
         animations_available: false,
         now: fixed_now,
     };
-    let core = Core::new(services, std::sync::Arc::clone(&session));
+    let core = Core::new(services, history);
     Harness {
         _dir: dir,
         out,
         core,
         settings,
         stats,
-        shutdowns,
-        session,
+        repairs,
     }
 }
 
@@ -156,6 +140,6 @@ mod input_cases;
 
 mod rendering_cases;
 
-mod settings_cases;
+mod animation_cases;
 
 mod text_cases;

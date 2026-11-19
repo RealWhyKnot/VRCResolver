@@ -19,6 +19,7 @@ use vrcr_shared::win::{Elevated, MachineStore};
 use x509_parser::extensions::GeneralName;
 
 use crate::clock::Now;
+use crate::maintenance::SetupError;
 
 pub use vrcr_shared::relay_tls::{
     BOOTSTRAP_ARG, CHECK_ARG, CHECK_CLEAN, CHECK_NEEDS_REMOVAL, REMOVE_ARG,
@@ -83,6 +84,7 @@ pub struct RelayTls<'a> {
     ux: Ux,
     now: Now,
     disabled: bool,
+    approve: &'a dyn Fn() -> bool,
 }
 
 impl<'a> RelayTls<'a> {
@@ -93,6 +95,7 @@ impl<'a> RelayTls<'a> {
             ux,
             now,
             disabled: disabled_by_env(),
+            approve: &|| true,
         }
     }
 
@@ -101,53 +104,116 @@ impl<'a> RelayTls<'a> {
         self
     }
 
+    #[cfg(any(test, windows))]
+    pub(crate) fn with_permission(mut self, approve: &'a dyn Fn() -> bool) -> Self {
+        self.approve = approve;
+        self
+    }
+
     pub fn ensure_ready(&self, port: u16) -> Option<Arc<rustls::ServerConfig>> {
+        self.setup_ready(port).ok().flatten()
+    }
+
+    pub(crate) fn setup_ready(
+        &self,
+        port: u16,
+    ) -> Result<Option<Arc<rustls::ServerConfig>>, SetupError> {
         if self.disabled || !valid_port(port) {
-            return None;
+            return Ok(None);
         }
-        let material = self.load_or_create()?;
+        let (material, _) = self.ensure_trust(port, false)?;
+        self.config(&material).map(Some).ok_or(SetupError::Failed)
+    }
+
+    #[cfg(any(test, windows))]
+    pub(crate) fn repair_trust(&self, port: u16) -> Result<bool, SetupError> {
+        if self.disabled {
+            return Ok(false);
+        }
+        if !valid_port(port) {
+            return match self.trust_missing() {
+                Ok(false) => Ok(false),
+                _ => Err(SetupError::Failed),
+            };
+        }
+        self.ensure_trust(port, true).map(|(_, changed)| changed)
+    }
+
+    #[cfg(any(test, windows))]
+    pub(crate) fn trust_missing(&self) -> io::Result<bool> {
+        if self.disabled {
+            return Ok(false);
+        }
+        match fs::read(self.state_dir.join(CERT_FILE)) {
+            Ok(cert) => self.trusted(&thumbprint(&cert)).map(|trusted| !trusted),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn ensure_trust(&self, port: u16, repair: bool) -> Result<(CertMaterial, bool), SetupError> {
+        let material = self.load_or_create(repair).ok_or(SetupError::Failed)?;
         let thumb = thumbprint(&material.cert_der);
         match self.trusted(&thumb) {
-            Ok(true) => return self.config(&material),
+            Ok(true) => return Ok((material, false)),
             Ok(false) => {}
-            Err(e) => self.ux.log_warn(
-                Component::Relay,
-                &format!("HTTPS readiness check failed: {e}"),
-            ),
+            Err(e) => {
+                self.ux.log_warn(
+                    Component::Relay,
+                    &format!("HTTPS readiness check failed: {e}"),
+                );
+                if repair {
+                    return Err(SetupError::Failed);
+                }
+            }
         }
-        self.ux
-            .event(vrcr_shared::console::Notice::SecurePermissionNeeded);
-        self.ux.log_write(
-            Component::Relay,
-            "configuring HTTPS for localhost.youtube.com -- UAC prompt incoming.",
-        );
+        if !valid_port(port) {
+            return Err(SetupError::Failed);
+        }
         let args = format!("{BOOTSTRAP_ARG} {port} {}", hex::encode(&material.cert_der));
-        match self.host.elevate(&args) {
+        let outcome = if (self.approve)() {
+            self.host.elevate(&args)
+        } else {
+            Elevated::Declined
+        };
+        match outcome {
             Elevated::Exited(0) => {}
-            Elevated::Exited(_) => return None,
+            Elevated::Exited(_) => {
+                if !repair {
+                    self.ux
+                        .event(vrcr_shared::console::Notice::SecureSetupIncomplete);
+                }
+                return Err(SetupError::Failed);
+            }
             Elevated::Declined => {
-                self.ux
-                    .event(vrcr_shared::console::Notice::SecurePermissionDeclined);
+                if !repair {
+                    self.ux
+                        .event(vrcr_shared::console::Notice::SecurePermissionDeclined);
+                }
                 self.ux.log_write(
                     Component::Relay,
-                    "UAC declined -- HTTPS relay not configured.",
+                    "Permission declined. Secure video was left off.",
                 );
-                return None;
+                return Err(SetupError::Declined);
             }
             Elevated::TimedOut => {
-                self.ux.event(vrcr_shared::console::Notice::SecureSetupSlow);
+                if !repair {
+                    self.ux.event(vrcr_shared::console::Notice::SecureSetupSlow);
+                }
                 self.ux.log_warn(
                     Component::Relay,
                     "HTTPS elevation child still running after 60s -- falling back to HTTP.",
                 );
-                return None;
+                return Err(SetupError::Failed);
             }
             Elevated::Failed(e) => {
-                self.ux
-                    .event(vrcr_shared::console::Notice::SecureSetupLaunchFailed);
+                if !repair {
+                    self.ux
+                        .event(vrcr_shared::console::Notice::SecureSetupLaunchFailed);
+                }
                 self.ux
                     .log_warn(Component::Relay, &format!("HTTPS elevation error: {e}"));
-                return None;
+                return Err(SetupError::Failed);
             }
         }
         match self.trusted(&thumb) {
@@ -156,7 +222,7 @@ impl<'a> RelayTls<'a> {
                     Component::Relay,
                     &format!("HTTPS ready for localhost.youtube.com:{port}"),
                 );
-                return self.config(&material);
+                return Ok((material, true));
             }
             Ok(false) => {}
             Err(e) => self.ux.log_warn(
@@ -164,13 +230,15 @@ impl<'a> RelayTls<'a> {
                 &format!("HTTPS verification failed after elevation: {e}"),
             ),
         }
-        self.ux
-            .event(vrcr_shared::console::Notice::SecureSetupIncomplete);
+        if !repair {
+            self.ux
+                .event(vrcr_shared::console::Notice::SecureSetupIncomplete);
+        }
         self.ux.log_warn(
             Component::Relay,
             "HTTPS setup did not complete; falling back to HTTP relay.",
         );
-        None
+        Err(SetupError::Failed)
     }
 
     fn config(&self, material: &CertMaterial) -> Option<Arc<rustls::ServerConfig>> {
@@ -209,15 +277,17 @@ impl<'a> RelayTls<'a> {
         Some(material)
     }
 
-    fn load_or_create(&self) -> Option<CertMaterial> {
+    fn load_or_create(&self, require_saved: bool) -> Option<CertMaterial> {
         if let Some(m) = self.load() {
             return Some(m);
         }
         let material = match generate((self.now)()) {
             Ok(m) => m,
             Err(e) => {
-                self.ux
-                    .event(vrcr_shared::console::Notice::CertificateCreateFailed);
+                if !require_saved {
+                    self.ux
+                        .event(vrcr_shared::console::Notice::CertificateCreateFailed);
+                }
                 self.ux.log_warn(
                     Component::Relay,
                     &format!("HTTPS certificate could not be created: {e}"),
@@ -226,12 +296,17 @@ impl<'a> RelayTls<'a> {
             }
         };
         if let Err(e) = self.save(&material) {
-            self.ux
-                .event(vrcr_shared::console::Notice::CertificateSaveFailed);
+            if !require_saved {
+                self.ux
+                    .event(vrcr_shared::console::Notice::CertificateSaveFailed);
+            }
             self.ux.log_warn(
                 Component::Relay,
                 &format!("HTTPS certificate could not be saved: {e}"),
             );
+            if require_saved {
+                return None;
+            }
         }
         Some(material)
     }

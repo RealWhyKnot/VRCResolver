@@ -11,6 +11,8 @@ use vrcr_shared::console::{Component, Ux};
 pub use vrcr_shared::hosts::{
     ADD_ARG, MARKER_IP, REMOVE_ARG, contains_bypass_entry, hosts_path, line_is_bypass_entry,
 };
+
+use crate::maintenance::SetupError;
 use vrcr_shared::log::Log;
 use vrcr_shared::trust_gateway::GATEWAY_HOST;
 use vrcr_shared::win::Elevated;
@@ -94,12 +96,14 @@ pub fn run_remove(path: &Path, ux: &Ux) -> i32 {
 
 pub type ReadState = Box<dyn Fn() -> Result<bool, String> + Send + Sync>;
 pub type Elevate = Box<dyn Fn(&str) -> Elevated + Send + Sync>;
+type Approve = Box<dyn Fn() -> bool + Send + Sync>;
 
 pub struct HostsManager {
     read: ReadState,
     elevate: Elevate,
+    approve: Approve,
     ux: Ux,
-    in_flight: AtomicBool,
+    prompt: Mutex<()>,
     declined: AtomicBool,
 }
 
@@ -108,21 +112,26 @@ impl HostsManager {
         HostsManager {
             read,
             elevate,
+            approve: Box::new(|| true),
             ux,
-            in_flight: AtomicBool::new(false),
+            prompt: Mutex::new(()),
             declined: AtomicBool::new(false),
         }
     }
 
     #[cfg(windows)]
-    pub fn system(ux: Ux) -> io::Result<HostsManager> {
-        let exe = std::env::current_exe()?;
+    pub(crate) fn system(ux: Ux, approve: Approve) -> HostsManager {
         let path = hosts_path();
-        Ok(HostsManager::new(
+        let mut manager = HostsManager::new(
             Box::new(move || read_bypass_state(&path)),
-            Box::new(move |arg| vrcr_shared::win::run_elevated(&exe, arg, ELEVATION_TIMEOUT)),
+            Box::new(|arg| match std::env::current_exe() {
+                Ok(exe) => vrcr_shared::win::run_elevated(&exe, arg, ELEVATION_TIMEOUT),
+                Err(error) => Elevated::Failed(format!("find watchdog executable: {error}")),
+            }),
             ux,
-        ))
+        );
+        manager.approve = approve;
+        manager
     }
 
     pub fn read_state(&self) -> Result<bool, String> {
@@ -134,67 +143,96 @@ impl HostsManager {
     }
 
     pub fn prompt_in_flight(&self) -> bool {
-        self.in_flight.load(Ordering::Acquire)
+        matches!(
+            self.prompt.try_lock(),
+            Err(std::sync::TryLockError::WouldBlock)
+        )
     }
 
     pub fn declined_this_session(&self) -> bool {
         self.declined.load(Ordering::Acquire)
     }
 
-    fn reexec(&self, arg: &str) -> bool {
-        match (self.elevate)(arg) {
-            Elevated::Exited(_) => true,
+    fn report_elevation(&self, outcome: Elevated, repair: bool) -> Elevated {
+        match &outcome {
+            Elevated::Exited(_) => {}
             Elevated::TimedOut => {
-                self.ux.event(vrcr_shared::console::Notice::HostsSetupSlow);
+                if !repair {
+                    self.ux.event(vrcr_shared::console::Notice::HostsSetupSlow);
+                }
                 self.ux.log_warn(
                     Component::Hosts,
                     "elevation child still running after 60s -- continuing without hosts entry.",
                 );
-                true
             }
             Elevated::Declined => {
-                self.ux
-                    .event(vrcr_shared::console::Notice::HostsPermissionDeclined);
-                self.ux
-                    .log_write(Component::Hosts, "UAC declined -- entry not modified.");
-                false
+                if !repair {
+                    self.ux
+                        .event(vrcr_shared::console::Notice::HostsPermissionDeclined);
+                }
+                self.ux.log_write(
+                    Component::Hosts,
+                    "Permission declined. The hosts entry was left unchanged.",
+                );
             }
             Elevated::Failed(e) => {
-                self.ux
-                    .event(vrcr_shared::console::Notice::HostsSetupLaunchFailed);
+                if !repair {
+                    self.ux
+                        .event(vrcr_shared::console::Notice::HostsSetupLaunchFailed);
+                }
                 self.ux
                     .log_warn(Component::Hosts, &format!("elevation error: {e}"));
-                false
             }
         }
+        outcome
     }
 
     pub fn ensure_entry(&self) {
-        if self.is_active() {
-            return;
+        let _guard = match self.prompt.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return,
+        };
+        if !self.declined_this_session() {
+            let _ = self.ensure_locked(false, self.approve.as_ref());
         }
-        if self
-            .in_flight
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return;
-        }
-        self.ensure_locked();
-        self.in_flight.store(false, Ordering::Release);
     }
 
-    fn ensure_locked(&self) {
-        if self.is_active() {
-            return;
+    #[cfg(any(test, windows))]
+    pub(crate) fn setup_pass<T>(
+        &self,
+        repair: bool,
+        before_hosts: impl FnOnce() -> T,
+        approve: &dyn Fn() -> bool,
+    ) -> (T, Result<bool, SetupError>) {
+        let _guard = self.prompt.lock().unwrap_or_else(|e| e.into_inner());
+        if repair {
+            self.declined.store(false, Ordering::Release);
         }
-        self.ux
-            .event(vrcr_shared::console::Notice::HostsPermissionNeeded);
-        self.ux.log_write(
-            Component::Hosts,
-            "adding entry for public-instance support -- UAC prompt incoming.",
-        );
-        let launched = self.reexec(ADD_ARG);
+        (before_hosts(), self.ensure_locked(repair, approve))
+    }
+
+    fn ensure_locked(&self, repair: bool, approve: &dyn Fn() -> bool) -> Result<bool, SetupError> {
+        match self.read_state() {
+            Ok(true) => return Ok(false),
+            Ok(false) => {}
+            Err(e) => {
+                if !repair {
+                    self.ux
+                        .event(vrcr_shared::console::Notice::HostsSetupIncomplete);
+                }
+                self.ux
+                    .log_warn(Component::Hosts, &format!("could not read hosts file: {e}"));
+                return Err(SetupError::Failed);
+            }
+        }
+        let outcome = if approve() {
+            (self.elevate)(ADD_ARG)
+        } else {
+            Elevated::Declined
+        };
+        let outcome = self.report_elevation(outcome, repair);
+        let launched = matches!(outcome, Elevated::Exited(_) | Elevated::TimedOut);
         if self.is_active() {
             if launched {
                 self.ux.log_write(
@@ -202,22 +240,28 @@ impl HostsManager {
                     &format!("added {MARKER_IP} {GATEWAY_HOST}"),
                 );
             }
-            return;
+            return Ok(launched);
         }
         self.declined.store(true, Ordering::Release);
         if launched {
-            self.ux
-                .event(vrcr_shared::console::Notice::HostsSetupIncomplete);
+            if !repair {
+                self.ux
+                    .event(vrcr_shared::console::Notice::HostsSetupIncomplete);
+            }
             self.ux.log_warn(
                 Component::Hosts,
                 "entry not present after elevation -- public-instance support may not work.",
             );
         }
+        match outcome {
+            Elevated::Declined => Err(SetupError::Declined),
+            _ => Err(SetupError::Failed),
+        }
     }
 
     pub fn remove_entry_if_present(&self) {
         if self.is_active() {
-            self.reexec(REMOVE_ARG);
+            self.report_elevation((self.elevate)(REMOVE_ARG), false);
         }
     }
 }
@@ -294,6 +338,7 @@ impl HostsTicker {
             }
         };
         if present {
+            st.gave_up = false;
             if st.last_present != Some(true) {
                 self.ux.log_write(
                     Component::Hosts,
@@ -351,7 +396,7 @@ impl HostsTicker {
         st.gave_up = true;
         self.ux.log_warn(
             Component::Hosts,
-            &format!("tick: re-add failed ({reason}) -- won't ask again until the next start"),
+            &format!("tick: re-add failed ({reason}). Run repair to try again."),
         );
     }
 

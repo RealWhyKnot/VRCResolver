@@ -210,11 +210,8 @@ async fn requests_are_shaped_before_they_reach_the_mesh() {
     )
     .await;
     ask(&ipc, &req("avpro", ",\"maxHeight\":2160")).await;
-    let hq = Ipc::builder(std::sync::Arc::clone(&mesh), Ux::sink(), Log::disabled())
-        .high_quality(|| true)
-        .build();
-    ask(&hq, &req("avpro", ",\"maxHeight\":720")).await;
-    ask(&hq, &req("unity", ",\"maxHeight\":720")).await;
+    ask(&ipc, &req("avpro", ",\"maxHeight\":720")).await;
+    ask(&ipc, &req("unity", ",\"maxHeight\":720")).await;
 
     let sent = mesh.resolves();
     let codecs = sent[0].accept_codecs.clone().unwrap_or_default();
@@ -225,7 +222,7 @@ async fn requests_are_shaped_before_they_reach_the_mesh() {
     assert_eq!(sent[0].correlation_id.as_deref(), Some("x1"));
     assert_eq!(sent[0].max_height, Some(1080));
     assert_eq!(sent[1].correlation_id, None);
-    assert_eq!(sent[2].max_height, Some(2160));
-    assert_eq!(sent[2].prefer_highest, Some(true));
+    assert_eq!(sent[2].max_height, Some(720));
+    assert_eq!(sent[2].prefer_highest, None);
     assert_eq!(sent[3].max_height, Some(720));
 }

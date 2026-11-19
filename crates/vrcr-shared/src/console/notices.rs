@@ -7,12 +7,12 @@ pub enum Notice {
     HostsSetupSlow,
     HostsPermissionDeclined,
     HostsSetupLaunchFailed,
-    HostsPermissionNeeded,
     HostsSetupIncomplete,
+    PublicVideoSetupMissing,
+    VideoWrapperMissing,
     SecurePlaybackRetry,
     ReportRejected,
     ReportSendFailed,
-    SecurePermissionNeeded,
     SecurePermissionDeclined,
     SecureSetupSlow,
     SecureSetupLaunchFailed,
@@ -58,7 +58,7 @@ impl Ux {
 
             Notice::HostsAddFailed => (
                 Color::Red,
-                "VRCResolver couldn't enable video playback in public worlds.",
+                "VRCResolver couldn't set up videos for public worlds. Type repair to be asked again.",
             ),
             Notice::HostsRemoveFailed => (
                 Color::Red,
@@ -66,70 +66,70 @@ impl Ux {
             ),
             Notice::HostsSetupSlow => (
                 Color::Yellow,
-                "Windows is still setting up public-world playback. VRCResolver will carry on without it.",
+                "Windows took too long to set up videos for public worlds. Type repair to be asked again.",
             ),
             Notice::HostsPermissionDeclined => (
                 Color::Yellow,
-                "Permission was declined. Videos from this PC may not play in public worlds.",
+                "Permission for videos in public worlds was declined. Type repair to be asked again.",
             ),
             Notice::HostsSetupLaunchFailed => (
                 Color::Yellow,
-                "Windows couldn't open public-world playback setup.",
-            ),
-            Notice::HostsPermissionNeeded => (
-                Color::Yellow,
-                "Windows will ask for permission to let videos from this PC play in public worlds.",
+                "Windows couldn't open video setup for public worlds. Type repair to be asked again.",
             ),
             Notice::HostsSetupIncomplete => (
                 Color::Yellow,
-                "Public-world playback setup didn't finish. Videos from this PC may not play in public worlds.",
+                "Video setup for public worlds didn't finish. Type repair to be asked again.",
+            ),
+            Notice::PublicVideoSetupMissing => (
+                Color::Yellow,
+                "Type repair to finish setting up videos for public worlds.",
+            ),
+            Notice::VideoWrapperMissing => (
+                Color::Yellow,
+                "Type repair to reconnect VRCResolver to VRChat's video player.",
             ),
             Notice::SecurePlaybackRetry => (
                 Color::Yellow,
-                "Secure video playback couldn't start. Trying an unsecured local connection.",
+                "Secure video couldn't start. Trying video without a secure connection.",
             ),
             Notice::ReportRejected => (Color::Yellow, "The server didn't accept the error report."),
             Notice::ReportSendFailed => {
                 (Color::Yellow, "VRCResolver couldn't send the error report.")
             }
-            Notice::SecurePermissionNeeded => (
-                Color::Yellow,
-                "Windows will ask for permission to set up secure video playback on this PC.",
-            ),
             Notice::SecurePermissionDeclined => (
                 Color::Yellow,
-                "Permission was declined. Videos from this PC will use an unsecured local connection.",
+                "Permission for secure video was declined. Type repair to be asked again.",
             ),
             Notice::SecureSetupSlow => (
                 Color::Yellow,
-                "Secure video setup is taking too long. Videos from this PC will use an unsecured local connection.",
+                "Windows took too long to set up secure video. Type repair to be asked again.",
             ),
             Notice::SecureSetupLaunchFailed => (
                 Color::Yellow,
-                "Windows couldn't open secure video setup. Videos from this PC will use an unsecured local connection.",
+                "Windows couldn't open secure video setup. Type repair to be asked again.",
             ),
             Notice::SecureSetupIncomplete => (
                 Color::Yellow,
-                "Secure video setup didn't finish. Videos from this PC will use an unsecured local connection.",
+                "Secure video setup didn't finish. Type repair to be asked again.",
             ),
             Notice::CertificateReadFailed => (
                 Color::Yellow,
-                "VRCResolver couldn't read its security certificate. Videos from this PC will use an unsecured local connection.",
+                "VRCResolver couldn't read its secure video setup. Type repair to be asked again.",
             ),
             Notice::CertificateCreateFailed => (
                 Color::Yellow,
-                "VRCResolver couldn't create a security certificate. Videos from this PC will use an unsecured local connection.",
+                "VRCResolver couldn't prepare secure video playback. Type repair to be asked again.",
             ),
             Notice::CertificateSaveFailed => (
                 Color::Yellow,
-                "VRCResolver couldn't save its security certificate. Secure video setup may be needed again next time.",
+                "VRCResolver couldn't save its secure video setup. Type repair to be asked again.",
             ),
             Notice::SecurePortInvalid | Notice::CertificateInvalid | Notice::SecureSetupFailed => {
                 (Color::Red, "Secure video setup failed.")
             }
             Notice::OldCertificateRemoveFailed => (
                 Color::Yellow,
-                "Secure video setup couldn't remove an old security certificate.",
+                "VRCResolver couldn't remove an old security certificate.",
             ),
             Notice::OldConnectionRemoveFailed => (
                 Color::Yellow,
@@ -162,7 +162,7 @@ impl Ux {
             ),
             Notice::CloseHandlerFailed => (
                 Color::Yellow,
-                "VRCResolver couldn't watch for this window closing. Close it with the quit command to restore VRChat's video player.",
+                "VRChat's video player may need to be restored after you close this window. Open VRCResolver again if videos stop working.",
             ),
             Notice::Closing => (
                 Color::Gray,

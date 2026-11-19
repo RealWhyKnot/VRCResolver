@@ -20,7 +20,6 @@ impl Item {
 pub struct PaletteCommand<'a> {
     pub name: &'a str,
     pub description: &'a str,
-    pub aliases: &'a [String],
 }
 
 fn title_frame(title: &str) -> Frame {
@@ -64,78 +63,6 @@ pub fn key_value(
                 ),
                 Run::new("  ", Color::DarkGray),
                 Run::new(right_text, Color::Gray),
-            ]));
-        }
-    }
-    frames
-}
-
-pub fn table(
-    title: &str,
-    rows: &[(String, String, String)],
-    width: usize,
-    glyphs: &Glyphs,
-) -> Vec<Frame> {
-    if rows.is_empty() {
-        return key_value(title, &[], width, glyphs);
-    }
-    let width = width.max(24);
-    let longest = |f: fn(&(String, String, String)) -> &str| {
-        rows.iter().map(|r| clen(f(r))).max().unwrap_or(0)
-    };
-    let name_width = longest(|r| &r.0).min(22).min((width / 4).max(8));
-    let value_width = longest(|r| &r.1).min(18).min((width / 5).max(8));
-    let description_width = width.saturating_sub(name_width + value_width + 10);
-    if description_width < 16 {
-        let flat: Vec<(String, String)> = rows
-            .iter()
-            .map(|(n, v, d)| (n.clone(), format!("{v} - {d}")))
-            .collect();
-        return key_value(title, &flat, width, glyphs);
-    }
-
-    let mut frames = vec![
-        title_frame(title),
-        Frame::from_runs(vec![
-            Run::new(
-                format!("  {}", pad_right("setting", name_width)),
-                Color::DarkGray,
-            ),
-            Run::new(
-                format!("  {}", pad_right("current", value_width)),
-                Color::DarkGray,
-            ),
-            Run::new("  about", Color::DarkGray),
-        ]),
-    ];
-    for (name, value, description) in rows {
-        let descriptions = wrap(description, description_width);
-        let count = descriptions.len().max(1);
-        for i in 0..count {
-            let (n, v) = if i == 0 {
-                (
-                    pad_right(&trim_right(name, name_width), name_width),
-                    pad_right(&trim_right(value, value_width), value_width),
-                )
-            } else {
-                (" ".repeat(name_width), " ".repeat(value_width))
-            };
-            frames.push(Frame::from_runs(vec![
-                Run::new(
-                    format!("  {n}"),
-                    if i == 0 {
-                        Color::White
-                    } else {
-                        Color::DarkGray
-                    },
-                ),
-                Run::new("  ", Color::DarkGray),
-                Run::new(v, value_color(value)),
-                Run::new("  ", Color::DarkGray),
-                Run::new(
-                    descriptions.get(i).cloned().unwrap_or_default(),
-                    Color::Gray,
-                ),
             ]));
         }
     }
@@ -213,41 +140,45 @@ pub fn panel(
 }
 
 pub fn command_palette(
+    title: &str,
     commands: &[PaletteCommand<'_>],
     width: usize,
     glyphs: &Glyphs,
 ) -> Vec<Frame> {
-    let width = width.max(24);
-    let mut frames = vec![Frame::from_runs(vec![
-        Run::new("commands", Color::White),
-        Run::new("  tab completes a unique match", Color::DarkGray),
-    ])];
+    let width = width.max(20);
+    let mut frames = vec![title_frame(title)];
     let command_width = commands
         .iter()
-        .map(|c| clen(c.name) + 1)
+        .map(|c| clen(c.name))
         .max()
         .unwrap_or(8)
         .clamp(8, 18);
-    let description_width = width.saturating_sub(command_width + 8).max(8);
+    let column = command_width + 6;
     for c in commands {
-        let alias = if c.aliases.is_empty() {
-            String::new()
-        } else {
-            let list: Vec<String> = c.aliases.iter().map(|a| format!("/{a}")).collect();
-            format!("  {}", list.join(", "))
-        };
-        frames.push(Frame::from_runs(vec![
+        let mut label = vec![
             Run::new(format!("  {} ", glyphs.detail), Color::DarkGray),
-            Run::new(
-                pad_right(&format!("/{}", c.name), command_width),
-                Color::White,
-            ),
-            Run::new("  ", Color::DarkGray),
-            Run::new(
-                trim_right(&format!("{}{alias}", c.description), description_width),
+            Run::new(c.name, Color::White),
+        ];
+        let margin = if width.saturating_sub(column) < 16 {
+            4
+        } else {
+            column
+        };
+        let description = wrap(c.description, width - margin);
+        let mut lines = description.into_iter();
+        if margin == column
+            && let Some(first) = lines.next()
+        {
+            label.push(Run::new(
+                " ".repeat((column - 4).saturating_sub(clen(c.name))),
                 Color::Gray,
-            ),
-        ]));
+            ));
+            label.push(Run::new(first, Color::Gray));
+        }
+        frames.push(Frame::from_runs(label));
+        frames.extend(
+            lines.map(|line| Frame::plain(format!("{}{line}", " ".repeat(margin)), Color::Gray)),
+        );
     }
     frames
 }
@@ -302,19 +233,6 @@ pub fn wrap(value: &str, width: usize) -> Vec<String> {
         }
     }
     lines
-}
-
-fn value_color(value: &str) -> Color {
-    let v = value.trim().to_lowercase();
-    if v.starts_with("on") {
-        Color::Green
-    } else if v.starts_with("off") {
-        Color::DarkGray
-    } else if v.starts_with("automatic") {
-        Color::Gray
-    } else {
-        Color::White
-    }
 }
 
 pub fn state_color(value: &str) -> Color {

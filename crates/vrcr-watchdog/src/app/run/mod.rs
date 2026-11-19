@@ -16,6 +16,7 @@ use vrcr_shared::paths::AppPaths;
 use vrcr_shared::win::{self, CtrlEvent, HkcuKey, MutexError, NamedMutex, RegDword};
 use vrcr_shared::{legacy, tools, wininet, wire};
 
+use super::setup;
 use super::{
     BuildInfo, CLOSE_WAIT, COMPONENT, ChildMode, CreateError, Instance, InstanceMutex,
     MeshSnapshot, ServerTls, Snapshot, TOOLS_NOT_FOUND, acquire_instance, child_mode,
@@ -35,7 +36,7 @@ use crate::mesh::reporting::Reporter;
 use crate::mesh::{Config, MeshClient, connect};
 use crate::monitoring::heartbeat::{self, Heartbeat};
 use crate::monitoring::perf::{self, PerfReporter, Phases, SystemInfo};
-use crate::monitoring::vrclog::{MonitorDeps, RelayWedge, VrcLogMonitor};
+use crate::monitoring::vrclog::{MonitorDeps, RelayWedge, SetupPass, SetupProbe, VrcLogMonitor};
 use crate::og_hint::{self, OgFallbackHint};
 use crate::relay::server::RelayDeps;
 use crate::relay::tls::{self, ChildPaths, RelayTls, WindowsTlsHost};
@@ -46,7 +47,8 @@ use crate::relay::{
 use crate::resolve_cache::ResolveCache;
 use crate::settings::Store;
 use crate::stats::Stats;
-use crate::terminal::{Services, SessionStore, Terminal, animations_allowed, interactive_allowed};
+use crate::terminal::renderer::Action;
+use crate::terminal::{HistoryStore, Services, Terminal, animations_allowed, interactive_allowed};
 
 impl InstanceMutex for NamedMutex {
     fn try_acquire(&mut self) -> bool {
@@ -193,8 +195,9 @@ struct Lifecycle {
     coordinator: OnceLock<ShutdownCoordinator>,
     started: AtomicBool,
     fast: AtomicBool,
-    quit: Mutex<bool>,
+    closed: Mutex<bool>,
     wake: Condvar,
+    closing: CancellationToken,
 }
 
 impl Lifecycle {
@@ -204,8 +207,9 @@ impl Lifecycle {
             coordinator: OnceLock::new(),
             started: AtomicBool::new(false),
             fast: AtomicBool::new(false),
-            quit: Mutex::new(false),
+            closed: Mutex::new(false),
             wake: Condvar::new(),
+            closing: CancellationToken::new(),
         }
     }
 
@@ -217,6 +221,7 @@ impl Lifecycle {
         let coordinator = self.coordinator.get()?;
         if !self.started.swap(true, Ordering::SeqCst) {
             self.fast.store(fast, Ordering::SeqCst);
+            self.closing.cancel();
         }
         let _entered = self.handle.enter();
         Some(coordinator.run(trigger, fast))
@@ -228,22 +233,24 @@ impl Lifecycle {
         };
         match limit {
             Some(limit) => {
-                let _ = self.handle.block_on(tokio::time::timeout(limit, done));
+                let _ = self
+                    .handle
+                    .block_on(async { tokio::time::timeout(limit, done).await });
             }
             None => self.handle.block_on(done),
         }
     }
 
-    fn request_quit(&self) {
-        *self.quit.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    fn signal_closed(&self) {
+        *self.closed.lock().unwrap_or_else(|e| e.into_inner()) = true;
         self.wake.notify_all();
     }
 
-    fn wait_quit(&self) {
-        let guard = self.quit.lock().unwrap_or_else(|e| e.into_inner());
+    fn wait_for_close(&self) {
+        let guard = self.closed.lock().unwrap_or_else(|e| e.into_inner());
         let _guard = self
             .wake
-            .wait_while(guard, |q| !*q)
+            .wait_while(guard, |closed| !*closed)
             .unwrap_or_else(|e| e.into_inner());
     }
 
@@ -251,7 +258,7 @@ impl Lifecycle {
         let trigger = match event {
             CtrlEvent::CtrlC => {
                 drop(self.begin("ctrl-c", false));
-                self.request_quit();
+                self.signal_closed();
                 return;
             }
             CtrlEvent::Close => "console-close",
@@ -259,7 +266,7 @@ impl Lifecycle {
             CtrlEvent::Shutdown => "system-shutdown",
         };
         self.shutdown(trigger, true, Some(CLOSE_WAIT));
-        self.request_quit();
+        self.signal_closed();
     }
 }
 
@@ -498,25 +505,7 @@ impl App {
         }
     }
 
-    fn start_hosts(&self) {
-        let manager = match HostsManager::system(self.ux.clone()) {
-            Ok(manager) => Arc::new(manager),
-            Err(e) => {
-                self.ux
-                    .log_warn(Component::Hosts, &format!("background check failed: {e}"));
-                return;
-            }
-        };
-        let ensure = std::sync::Arc::clone(&manager);
-        let ux = self.ux.clone();
-        tokio::spawn(async move {
-            if let Err(e) = tokio::task::spawn_blocking(move || ensure.ensure_entry()).await {
-                ux.log_warn(
-                    Component::Hosts,
-                    &format!("background check failed: {}", panic_text(&e)),
-                );
-            }
-        });
+    fn start_hosts_ticker(&self, manager: Arc<HostsManager>) {
         let ticker = Arc::new(HostsTicker::new(
             manager,
             clock::system(),
@@ -532,19 +521,17 @@ impl App {
         stats: Arc<Stats>,
         mesh: MeshClient,
         state_root: &Path,
-        started: SystemTime,
+        repair: Action,
     ) {
         let stdin_tty = io::stdin().is_terminal();
         let stdout_tty = io::stdout().is_terminal();
-        let life = std::sync::Arc::clone(&self.life);
         let services = Services {
             ux: self.ux.clone(),
             stats,
             settings,
             mesh_connected: Arc::new(move || mesh.is_connected()),
-            request_shutdown: Arc::new(move || life.request_quit()),
+            repair,
             install_dir: self.install_dir.clone(),
-            paths: self.paths.clone(),
             spawn_updater: update::spawn_detached,
             width: win::console_width,
             animations_available: animations_allowed(
@@ -556,12 +543,8 @@ impl App {
             ),
             now: SystemTime::now,
         };
-        let session = Arc::new(SessionStore::new(
-            &state_root.join("terminal"),
-            started,
-            SystemTime::now,
-        ));
-        let terminal = Arc::new(Terminal::new(services, session));
+        let history = HistoryStore::new(&state_root.join("terminal"));
+        let terminal = Arc::new(Terminal::new(services, history));
         put(&self.parts.terminal, std::sync::Arc::clone(&terminal));
         let allowed = interactive_allowed(
             crate::terminal::interactive::OutputSupport {
@@ -576,4 +559,10 @@ impl App {
     }
 }
 
+mod permission;
+mod repair;
+mod session_end;
 mod startup;
+
+#[cfg(test)]
+mod tests;

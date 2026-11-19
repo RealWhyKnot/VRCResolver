@@ -14,6 +14,13 @@ impl VrcLogMonitor {
             self.on_opening(c[1].to_owned(), now);
             return;
         }
+        if let Some((_, resolved)) = line.split_once("[Video Playback] URL '")
+            && let Some((source, result)) = resolved.split_once("' resolved to '")
+            && let Some((result, _)) = result.split_once('\'')
+        {
+            self.on_native_resolution(source, result, now);
+            return;
+        }
         if let Some((_, height)) = parse_observed_resolution(line)
             && let Some((url, at)) = self.active.clone()
         {
@@ -36,6 +43,26 @@ impl VrcLogMonitor {
                 self.confirm_playback(&url);
             }
             self.stall = None;
+        }
+    }
+
+    fn on_native_resolution(&mut self, source: &str, result: &str, now: SystemTime) {
+        if self.wrapper_hint_shown || !external_video_url(result) {
+            return;
+        }
+        if self
+            .deps
+            .stats
+            .as_ref()
+            .is_some_and(|stats| !stats.playback.recently_requested(source, now))
+            && self
+                .deps
+                .wrapper_missing
+                .as_ref()
+                .is_some_and(|check| check())
+        {
+            self.deps.ux.event(Notice::VideoWrapperMissing);
+            self.wrapper_hint_shown = true;
         }
     }
 
@@ -126,12 +153,15 @@ impl VrcLogMonitor {
 
     pub(super) fn report_load_failure(&mut self, observed: &str, ms: i32, now: SystemTime) {
         let failed = self.canonical(observed);
-        if self
+        let first_failure = self
             .deps
             .stats
             .as_ref()
-            .is_none_or(|stats| stats.playback.first_video_failure(&failed, now))
-        {
+            .is_none_or(|stats| stats.playback.first_video_failure(&failed, now));
+        if external_video_url(observed) && self.setup_hint_due(now) {
+            self.deps.ux.event(Notice::PublicVideoSetupMissing);
+            self.setup_hint.shown = true;
+        } else if first_failure {
             self.deps.ux.video(
                 vrcr_shared::console::VideoStatus::Failed,
                 &failed,
@@ -429,4 +459,14 @@ impl VrcLogMonitor {
             ));
         }
     }
+}
+
+fn external_video_url(url: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|url| {
+        url.host_str().is_some_and(|host| {
+            !host
+                .trim_end_matches('.')
+                .eq_ignore_ascii_case(GATEWAY_HOST)
+        })
+    })
 }

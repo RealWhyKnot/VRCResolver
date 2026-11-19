@@ -1,7 +1,7 @@
 use std::fs;
 use std::time::{Duration, SystemTime};
 
-use crate::common::ManualClock;
+use crate::common::{ManualClock, T_2026_09_29};
 use tempfile::TempDir;
 use vrcr_shared::log::Log;
 use vrcr_shared::logutil::{self, iso8601_utc, parse_iso8601_utc};
@@ -21,7 +21,7 @@ impl Fixture {
     fn new() -> Fixture {
         Fixture {
             dir: TempDir::new().unwrap_or_else(|e| panic!("{e}")),
-            clock: ManualClock::at(SystemTime::now()),
+            clock: ManualClock::utc(T_2026_09_29),
         }
     }
 

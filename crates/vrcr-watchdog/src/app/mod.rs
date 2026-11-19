@@ -17,6 +17,8 @@ use crate::relay::tls;
 mod run;
 #[cfg(windows)]
 pub use run::run;
+#[cfg(any(test, windows))]
+mod setup;
 
 pub const COMPONENT: &str = "watchdog";
 pub const TOOLS_NOT_FOUND: &str = "<not found \u{2014} launch VRChat once>";

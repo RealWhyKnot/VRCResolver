@@ -206,19 +206,3 @@ fn capabilities_refresh_logs_and_stores_the_probe() {
         assert!(log.contains(want), "{want}: {log}");
     }
 }
-
-#[test]
-fn disabled_codec_check_logs_and_spawns_nothing() {
-    let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
-    let log_path = dir.path().join("w.log");
-    let caps = Arc::new(CodecCapabilities::new(Arc::new(|| None), Log::disabled()));
-    let (ux, _) = capture_ux();
-    let handle =
-        codec::start_background_check(false, dir.path(), caps, ux, Log::to_file(&log_path));
-    assert!(handle.is_none());
-    assert!(
-        fs::read_to_string(&log_path)
-            .unwrap_or_default()
-            .contains("[codec] auto-install disabled by settings")
-    );
-}

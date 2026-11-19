@@ -2,25 +2,14 @@ use super::*;
 
 impl Renderer {
     pub fn log_ready(&self) {
-        let message = "interactive terminal ready; type /help for commands.";
-        self.inner.session.record_output("success", message);
+        let message = "Type help for commands.";
         self.inner
             .services
             .ux
             .log_success(Component::Terminal, message);
     }
 
-    pub fn log_permissions(&self) {
-        let message = "permissions: local watchdog commands only; shell execution isn't exposed.";
-        self.inner.session.record_output("info", message);
-        self.inner
-            .services
-            .ux
-            .log_write(Component::Terminal, message);
-    }
-
     pub fn info(&self, message: &str) {
-        self.inner.session.record_output("info", message);
         self.inner
             .services
             .ux
@@ -29,7 +18,6 @@ impl Renderer {
     }
 
     pub fn success(&self, message: &str) {
-        self.inner.session.record_output("success", message);
         self.inner
             .services
             .ux
@@ -38,7 +26,6 @@ impl Renderer {
     }
 
     pub fn warn(&self, message: &str) {
-        self.inner.session.record_output("warn", message);
         self.inner
             .services
             .ux
@@ -47,7 +34,6 @@ impl Renderer {
     }
 
     pub fn error(&self, message: &str) {
-        self.inner.session.record_output("error", message);
         self.inner
             .services
             .ux

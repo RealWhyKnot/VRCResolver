@@ -27,7 +27,9 @@ use vrcr_watchdog::mesh::frames::{
     BinaryFrame, decode_binary, describe_connect_failure, fallback_native_line,
     playback_feedback_payload, playback_quality_line, resolve_log_line, wire_deadline_for,
 };
-use vrcr_watchdog::mesh::identity::{self, load_or_create, load_or_create_with, parse_simple_guid};
+#[cfg(windows)]
+use vrcr_watchdog::mesh::identity::load_or_create_with;
+use vrcr_watchdog::mesh::identity::{self, load_or_create, parse_simple_guid};
 use vrcr_watchdog::mesh::reporting::{
     MAX_PER_SESSION, MAX_SUMMARY_CHARS, MIN_INTERVAL, Machine, Post, ReportPayload, Reporter,
     extract_domain, failure_kind, hash_short, path_and_query, replace_ignore_ascii_case,

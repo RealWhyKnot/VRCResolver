@@ -50,13 +50,48 @@ fn status_line_degrades_to_a_fitted_plain_line() {
         &idle(),
         &no_bandwidth(),
         t0(),
-        &line("settings set high-quality", 40),
+        &line("update stable with extra arguments", 40),
     );
     assert!(frame.width() <= 40);
     assert!(frame.plain.contains(PROMPT));
-    assert!(frame.plain.ends_with("high-quality"));
+    assert!(frame.plain.ends_with("arguments"), "{}", frame.plain);
     assert_eq!(frame.runs.len(), 1);
     assert_eq!(frame.cursor, Some(frame.width()));
+}
+
+#[test]
+fn command_help_keeps_names_and_descriptions_visible_at_all_widths() {
+    let commands = [
+        blocks::PaletteCommand {
+            name: "repair",
+            description: "Ask Windows again for permission to play videos in public worlds.",
+        },
+        blocks::PaletteCommand {
+            name: "update beta",
+            description: "Check for updates and include beta releases.",
+        },
+        blocks::PaletteCommand {
+            name: "update stable",
+            description: "Check for stable updates only.",
+        },
+    ];
+    for width in 20..=180 {
+        for glyphs in [&ASCII, &UNICODE] {
+            let frames = blocks::command_palette("commands", &commands, width, glyphs);
+            assert!(frames.iter().all(|frame| frame.width() <= width), "{width}");
+            let output = frames
+                .iter()
+                .flat_map(|frame| frame.plain.split_whitespace())
+                .collect::<Vec<_>>()
+                .join(" ");
+            for command in &commands {
+                assert!(
+                    output.contains(&format!("{} {}", command.name, command.description)),
+                    "{width}: {output}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -102,7 +137,7 @@ fn overlay_line_only_writes_changes_and_clears_its_width() {
 }
 
 #[test]
-fn status_tools_diagnostics_and_update_render() {
+fn status_and_update_render() {
     let h = harness_with(Some(100));
     h.stats.record_relay_bytes(false, 4096, t0());
     h.run("status");
@@ -110,33 +145,11 @@ fn status_tools_diagnostics_and_update_render() {
     assert!(out.contains("+ status "));
     assert!(out.contains("serving VRChat"));
     assert!(out.contains("4.0 KB served"));
-    h.run("tools");
-    assert!(h.out.text().contains("resolver mesh"));
-    h.run("diag");
-    let out = h.out.text();
-    assert!(out.lines().any(|line| line == "diagnostics"));
-    assert!(out.contains("this session"));
-    for label in ["version", "sha", "build time", "os", "rustc", "vrc tools"] {
-        assert!(out.contains(label), "{out}");
-    }
-    h.run("help");
-    assert!(
-        h.out
-            .text()
-            .contains("To uninstall, run vrcresolver.Uninstaller.exe from this folder.")
-    );
-    h.run("permissions");
-    assert!(!h.out.text().contains("shell execution isn't exposed."));
-    assert!(
-        h.out
-            .logs()
-            .contains("permissions: local watchdog commands only; shell execution isn't exposed.")
-    );
     h.run("update");
     assert!(
         h.out
             .text()
-            .contains("  updater not found in install folder")
+            .contains("  Couldn't check for stable updates because the updater is missing.")
     );
 }
 
@@ -155,14 +168,7 @@ fn render_writes_the_status_line_through_the_overlay() {
 
 #[test]
 fn status_rows_describe_idle_and_disconnected_states() {
-    let rows = status_rows(
-        &idle(),
-        &no_bandwidth(),
-        false,
-        &AppSettings::default(),
-        t0(),
-        &ASCII,
-    );
+    let rows = status_rows(&idle(), &no_bandwidth(), false, t0(), &ASCII);
     let find = |n: &str| rows.iter().find(|r| r.0 == n).cloned().unwrap_or_default();
     assert_eq!(find("local video").1, "waiting");
     assert_eq!(find("local video").2, "0 B served total");
@@ -170,7 +176,7 @@ fn status_rows_describe_idle_and_disconnected_states() {
     assert_eq!(find("resolver").2, "no media pulled yet");
     assert_eq!(find("peak speed").1, "none yet");
     assert_eq!(find("resolves").2, "0 local video, 0 cache hits");
-    assert_eq!(rows.len(), 8);
+    assert_eq!(rows.len(), 6);
 }
 
 #[test]
@@ -178,11 +184,7 @@ fn terminal_ready_is_logged_without_an_extra_console_tip() {
     let h = harness();
     h.core.renderer().log_ready();
     assert_eq!(h.out.text(), "");
-    assert!(
-        h.out
-            .logs()
-            .contains("[terminal] interactive terminal ready; type /help for commands.")
-    );
+    assert!(h.out.logs().contains("[terminal] Type help for commands."));
 }
 
 #[test]
@@ -206,7 +208,7 @@ fn replies_are_plain_and_keep_all_log_levels() {
     ] {
         assert!(log.contains(line), "{log}");
     }
-    for command in ["help", "status", "update", "diagnostics", "unknown-command"] {
+    for command in ["help", "status", "update", "unknown-command"] {
         h.run(command);
     }
     let text = h.out.text();

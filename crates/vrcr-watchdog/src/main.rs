@@ -12,7 +12,9 @@ fn main() {
     #[cfg(not(windows))]
     {
         let _ = (build, args);
-        eprintln!("vrcresolver runs on Windows only.");
+        use std::io::Write as _;
+
+        let _ = writeln!(std::io::stderr(), "vrcresolver runs on Windows only.");
         std::process::exit(1);
     }
 }

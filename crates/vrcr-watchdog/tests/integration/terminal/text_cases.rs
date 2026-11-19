@@ -64,10 +64,4 @@ fn widths_and_ages_match_the_original_formatting() {
         describe_age(Some(t0() - Duration::from_secs(500 * 3600)), t0()),
         "99h ago"
     );
-    let mut s = AppSettings::default();
-    assert_eq!(describe_terminal(&s), "status line on, motion on");
-    s.terminal.animations = false;
-    assert_eq!(describe_terminal(&s), "status line on, motion off");
-    s.terminal.status_line = false;
-    assert_eq!(describe_terminal(&s), "status line off");
 }

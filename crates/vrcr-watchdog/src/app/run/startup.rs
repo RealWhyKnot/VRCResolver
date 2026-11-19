@@ -18,10 +18,10 @@ impl App {
             let ux = self.ux.clone();
             Box::new(move |msg: &str| ux.log_warn(Component::Terminal, msg))
         }));
-        let prefs = settings.snapshot();
+        let include_prereleases = settings.include_prereleases();
         self.banner(&state_root);
         if self.build.dev {
-            let json = serde_json::to_string(&prefs).unwrap_or_default();
+            let json = serde_json::json!({ "maintenance": { "include_prereleases": include_prereleases } }).to_string();
             self.log
                 .line(&perf::system_line(&SystemInfo::probe(&state_root, json)));
         }
@@ -40,6 +40,7 @@ impl App {
         ));
         put(&self.parts.patch, std::sync::Arc::clone(&patcher));
         self.install_shutdown(std::sync::Arc::clone(&patcher));
+        session_end::listen(&self.life, &self.ux);
         patcher.recover_from_unclean_shutdown();
         phases.mark("recover");
 
@@ -82,10 +83,6 @@ impl App {
             .og_hint(std::sync::Arc::clone(&og_hint))
             .health(std::sync::Arc::clone(&health))
             .stats(std::sync::Arc::clone(&stats))
-            .high_quality({
-                let settings = std::sync::Arc::clone(&settings);
-                move || settings.snapshot().playback.high_quality
-            })
             .verified_codecs({
                 let codecs = std::sync::Arc::clone(&codecs);
                 move || codecs.verified()
@@ -109,89 +106,17 @@ impl App {
         let ports = Arc::new(RelayPortManager::new(&state_root, self.ux.clone()));
         put(&self.parts.ports, std::sync::Arc::clone(&ports));
         let activity = Arc::new(RelayActivity::new());
-        let relay = if ports.initialize() {
-            let https_allowed = prefs.https_enabled();
-            if !https_allowed {
-                self.ux.log_write(
-                    Component::Relay,
-                    "secure local video disabled in settings; using local HTTP fallback.",
-                );
-            }
-            let relay_started = runtime.block_on(self.start_relay(
-                &ports,
-                https_allowed,
-                &state_root,
-                mesh.first_party(),
-                RelayShared {
-                    recovery: crate::relay::retry::Hooks {
-                        invalidate: Some({
-                            let cache = Arc::clone(&cache);
-                            Arc::new(move |url| {
-                                cache.evict_by_url(url);
-                            })
-                        }),
-                        report: Some({
-                            let mesh = mesh.clone();
-                            Arc::new(move |feedback| mesh.send_playback_feedback(feedback))
-                        }),
-                    },
-                    activity: std::sync::Arc::clone(&activity),
-                    stats: std::sync::Arc::clone(&stats),
-                    manifests: std::sync::Arc::clone(&manifests),
-                },
-            ));
-            if relay_started.is_none() {
-                self.ux
-                    .event(vrcr_shared::console::Notice::RelayStartFailed);
-                self.ux.log_warn(
-                    Component::Relay,
-                    "local video relay could not start -- public-instance local video disabled.",
-                );
-            }
-            relay_started
-        } else {
-            self.ux
-                .event(vrcr_shared::console::Notice::LocalPortUnavailable);
-            self.ux.log_warn(
-                Component::Relay,
-                "could not reserve a local video port -- public-instance local video disabled.",
-            );
-            None
-        };
-
-        let node = mesh.current_node_host();
-        let node = if node.is_empty() {
-            crate::mesh::PROXY_HOST
-        } else {
-            &node
-        };
-        let host_state = match hosts::read_bypass_state(&hosts::hosts_path()) {
-            Ok(true) => "present",
-            Ok(false) => "missing",
-            Err(_) => "unknown",
-        };
-        self.ux.log_write(
-            Component::Relay,
-            &crate::diagnostics::startup::line(&crate::diagnostics::startup::Environment {
-                version: &self.build.version,
-                os: &win::os_description(),
-                server: node,
-                port: relay.as_ref().map_or(0, |(server, _)| server.port()),
-                tls: relay.as_ref().map_or("unavailable", |(_, scheme)| {
-                    if *scheme == "https" {
-                        "ready"
-                    } else {
-                        "not_in_use"
-                    }
-                }),
-                hosts: host_state,
-                vrchat: win::list_processes()
-                    .iter()
-                    .any(|process| win::process_stem(&process.exe).eq_ignore_ascii_case("VRChat")),
-                previous: &previous,
+        let port_ready = ports.initialize();
+        let hosts = Arc::new(HostsManager::system(
+            self.ux.clone(),
+            Box::new({
+                let ux = self.ux.clone();
+                let closing = self.life.closing.clone();
+                move || setup::approve(permission::ask(setup::Changes::Hosts, &closing, &ux), &ux)
             }),
-        );
-        phases.mark("relay");
+        ));
+        let setup_state = Arc::new(repair::SetupState::starting(self.life.closing.clone()));
+        let bypass = Arc::new(OnceLock::<RelayBypass>::new());
 
         let mut deps = MonitorDeps::new(
             Arc::new(mesh.clone()),
@@ -199,32 +124,26 @@ impl App {
             self.ux.clone(),
             self.log.clone(),
         );
-        deps.cache = Some(std::sync::Arc::clone(&cache));
-        deps.stats = Some(std::sync::Arc::clone(&stats));
+        deps.cache = Some(Arc::clone(&cache));
+        deps.stats = Some(Arc::clone(&stats));
         deps.og_hint = Some(og_hint);
         deps.health = Some(health);
-        deps.local = Some(std::sync::Arc::clone(&manifests));
-        if let Some((server, scheme)) = relay {
-            let bypass = Arc::new(RelayBypass::new(
-                std::sync::Arc::clone(&ports),
-                scheme,
-                self.ux.clone(),
-            ));
-            let engage = std::sync::Arc::clone(&bypass);
-            deps.relay_wedge = Some(RelayWedge {
-                activity,
-                on_wedged: Box::new(move |port| engage.engage(port)),
-            });
-            deps.on_new_session = Some(Box::new(move || bypass.release()));
-            is_relay_up.store(true, Ordering::SeqCst);
-            put(&self.parts.relay, Arc::new(server));
-        }
-        let vrc_dir = self.paths.local_low().join("VRChat").join("VRChat");
-        let cancel = CancellationToken::new();
-        let handle = VrcLogMonitor::new(deps, vrc_dir).spawn(clock::system(), cancel.clone());
-        put(&self.parts.logmon, (cancel, handle));
-        phases.mark("logmon");
-
+        deps.local = Some(Arc::clone(&manifests));
+        deps.relay_wedge = Some(RelayWedge {
+            activity: Arc::clone(&activity),
+            on_wedged: Box::new({
+                let bypass = Arc::clone(&bypass);
+                move |port| bypass.get().is_some_and(|bypass| bypass.engage(port))
+            }),
+        });
+        deps.on_new_session = Some(Box::new({
+            let bypass = Arc::clone(&bypass);
+            move || {
+                if let Some(bypass) = bypass.get() {
+                    bypass.release();
+                }
+            }
+        }));
         if !patcher.start() {
             self.life.shutdown("patch-refused", false, None);
             return 2;
@@ -236,17 +155,47 @@ impl App {
             Component::Patch,
             "VRChat video hook ready; watching for game updates.",
         );
-        self.ux.log_write(
-            Component::Terminal,
-            "type /help for commands, /status for activity, /settings for options.",
-        );
+        self.ux
+            .log_write(Component::Terminal, "Type help for commands.");
         self.ux.log_write(
             Component::Terminal,
             "to uninstall, run vrcresolver.Uninstaller.exe from this folder.",
         );
 
-        self.start_hosts();
-        phases.mark("hosts");
+        deps.setup = Some(SetupProbe {
+            pass: Box::new({
+                let setup_state = Arc::clone(&setup_state);
+                move || setup_state.pass()
+            }),
+            incomplete: Box::new({
+                let hosts = Arc::clone(&hosts);
+                let ux = self.ux.clone();
+                let state_root = state_root.clone();
+                move || {
+                    let hosts_missing = hosts.read_state().ok().map(|present| !present);
+                    if hosts_missing == Some(true) || !port_ready {
+                        return hosts_missing;
+                    }
+                    let host = WindowsTlsHost::current().ok()?;
+                    match RelayTls::new(&host, &state_root, ux.clone(), clock::system())
+                        .trust_missing()
+                        .ok()?
+                    {
+                        true => Some(true),
+                        false => hosts_missing,
+                    }
+                }
+            }),
+        });
+        deps.wrapper_missing = Some(Box::new({
+            let patcher = Arc::clone(&patcher);
+            move || patcher.wrapper_missing()
+        }));
+        let vrc_dir = self.paths.local_low().join("VRChat").join("VRChat");
+        let cancel = CancellationToken::new();
+        let handle = VrcLogMonitor::new(deps, vrc_dir).spawn(clock::system(), cancel.clone());
+        put(&self.parts.logmon, (cancel, handle));
+        phases.mark("logmon");
 
         let cancel = CancellationToken::new();
         let beat = Arc::new(Heartbeat {
@@ -256,7 +205,7 @@ impl App {
                 move || mesh.is_connected()
             }),
             cache_size: Box::new({
-                let cache = cache;
+                let cache = Arc::clone(&cache);
                 move || cache.count()
             }),
             now: clock::system(),
@@ -281,23 +230,18 @@ impl App {
             );
         }
 
-        let _ = update::start_background_check(
-            crate::maintenance::update::CheckPolicy {
-                enabled: prefs.maintenance.update_check,
-                include_prereleases: prefs.maintenance.include_prereleases,
-            },
+        drop(update::start_background_check(
+            include_prereleases,
             &self.build.version,
             self.ux.clone(),
-            &self.log,
-        );
+        ));
         codecs.refresh();
-        let _ = codec::start_background_check(
-            prefs.maintenance.codec_auto_install,
+        drop(codec::start_background_check(
             &state_root,
             codecs,
             self.ux.clone(),
             self.log.clone(),
-        );
+        ));
         tools::sweep_legacy_install_tools(&self.install_dir);
         if let Err(e) = stage_wrapper_hashes(&self.install_dir, &state_root) {
             self.log.line(&format!(
@@ -307,19 +251,178 @@ impl App {
 
         phases.mark("background");
 
-        self.start_terminal(settings, stats, mesh, &state_root, started);
+        let repair = repair::command(
+            self.ux.clone(),
+            Arc::clone(&hosts),
+            Arc::clone(&ports),
+            &state_root,
+            Arc::clone(&setup_state),
+            patcher,
+        );
+        self.start_terminal(
+            settings,
+            Arc::clone(&stats),
+            mesh.clone(),
+            &state_root,
+            repair,
+        );
         phases.mark("terminal");
+
+        let permission_worker = runtime.spawn_blocking({
+            let hosts = Arc::clone(&hosts);
+            let ux = self.ux.clone();
+            let state_root = state_root.clone();
+            let closing = self.life.closing.clone();
+            let port = ports.current_port();
+            move || {
+                let (tls, hosts) = setup::run(
+                    &hosts,
+                    false,
+                    &closing,
+                    &|changes| permission::ask(changes, &closing, &ux),
+                    &ux,
+                    |approve| {
+                        let host = WindowsTlsHost::current().map_err(|error| {
+                            ux.event(vrcr_shared::console::Notice::SecureSetupIncomplete);
+                            ux.log_warn(Component::Relay, &error.to_string());
+                            crate::maintenance::SetupError::Failed
+                        })?;
+                        RelayTls::new(&host, &state_root, ux.clone(), clock::system())
+                            .with_permission(approve)
+                            .setup_ready(port)
+                    },
+                );
+                let reported = tls.is_err() || hosts.is_err();
+                (tls.ok().flatten(), reported)
+            }
+        });
+        let (relay, reported) = runtime.block_on(async {
+            let (tls, reported) = tokio::select! {
+                biased;
+                () = self.life.closing.cancelled() => return (None, false),
+                result = permission_worker => match result {
+                    Ok(result) => result,
+                    Err(error) => {
+                        self.ux.event(vrcr_shared::console::Notice::SecureSetupIncomplete);
+                        self.ux.log_warn(
+                            Component::Terminal,
+                            &format!("Video setup stopped: {}", panic_text(&error)),
+                        );
+                        (None, true)
+                    }
+                }
+            };
+            if !port_ready {
+                self.ux
+                    .event(vrcr_shared::console::Notice::LocalPortUnavailable);
+                self.ux.log_warn(
+                    Component::Relay,
+                    "could not reserve a local video port -- public-instance local video disabled.",
+                );
+                return (None, reported);
+            }
+            let relay = self
+                .start_relay(
+                    &ports,
+                    tls,
+                    mesh.first_party(),
+                    RelayShared {
+                        recovery: crate::relay::retry::Hooks {
+                            invalidate: Some(Arc::new(move |url| {
+                                cache.evict_by_url(url);
+                            })),
+                            report: Some({
+                                let mesh = mesh.clone();
+                                Arc::new(move |feedback| mesh.send_playback_feedback(feedback))
+                            }),
+                        },
+                        activity,
+                        stats,
+                        manifests,
+                    },
+                )
+                .await;
+            (relay, reported)
+        });
+        if self.life.closing.is_cancelled() {
+            ports.delete_port_file();
+        } else {
+            self.log_relay_start(&mesh, relay.as_ref(), &hosts, &previous);
+            if let Some((server, scheme)) = relay {
+                let _ = bypass.set(RelayBypass::new(
+                    Arc::clone(&ports),
+                    scheme,
+                    self.ux.clone(),
+                ));
+                setup_state
+                    .relay_https
+                    .store(scheme == "https", Ordering::Release);
+                put(&self.parts.relay, Arc::new(server));
+                is_relay_up.store(true, Ordering::SeqCst);
+            } else if port_ready {
+                self.ux
+                    .event(vrcr_shared::console::Notice::RelayStartFailed);
+                self.ux.log_warn(
+                    Component::Relay,
+                    "local video relay could not start -- public-instance local video disabled.",
+                );
+            }
+            self.start_hosts_ticker(hosts);
+            setup_state.finish(reported);
+        }
+        phases.mark("relay");
         if self.build.dev {
             self.log.line(&phases.line());
         }
 
-        self.life.wait_quit();
+        self.life.wait_for_close();
         self.ux.log_write(
             Component::Shutdown,
             "shutting down; restoring VRChat tools and closing local services.",
         );
-        self.life.shutdown("quit", false, None);
+        self.life.shutdown("console-exit", false, None);
         0
+    }
+
+    fn log_relay_start(
+        &self,
+        mesh: &MeshClient,
+        relay: Option<&(RelayServer, &str)>,
+        hosts: &HostsManager,
+        previous: &str,
+    ) {
+        let node = mesh.current_node_host();
+        let node = if node.is_empty() {
+            crate::mesh::PROXY_HOST
+        } else {
+            &node
+        };
+        let hosts = match hosts.read_state() {
+            Ok(true) => "present",
+            Ok(false) => "missing",
+            Err(_) => "unknown",
+        };
+        self.ux.log_write(
+            Component::Relay,
+            &crate::diagnostics::startup::line(&crate::diagnostics::startup::Environment {
+                version: &self.build.version,
+                os: &win::os_description(),
+                server: node,
+                port: relay.map_or(0, |(server, _)| server.port()),
+                tls: relay.map_or("unavailable", |(_, scheme)| {
+                    if *scheme == "https" {
+                        "ready"
+                    } else {
+                        "not_in_use"
+                    }
+                }),
+                hosts,
+                vrchat: win::list_processes()
+                    .iter()
+                    .any(|process| win::process_stem(&process.exe).eq_ignore_ascii_case("VRChat")),
+                previous,
+            }),
+        );
     }
 
     fn local_step(
@@ -356,8 +459,7 @@ impl App {
     pub(super) async fn start_relay(
         &self,
         ports: &RelayPortManager,
-        https_allowed: bool,
-        state_root: &Path,
+        tls: ServerTls,
         policy: Arc<std::sync::RwLock<vrcr_shared::first_party::FirstPartyPolicy>>,
         shared: RelayShared,
     ) -> Option<(RelayServer, &'static str)> {
@@ -370,11 +472,6 @@ impl App {
         let upstream: Result<Arc<dyn Upstream>, String> = connect::platform_tls()
             .and_then(|tls| ReqwestUpstream::new((*tls).clone()))
             .map(upstream::shared);
-        let tls_host = WindowsTlsHost::current().ok();
-        let tls_for = |port: u16| -> ServerTls {
-            let host = tls_host.as_ref()?;
-            RelayTls::new(host, state_root, self.ux.clone(), clock::system()).ensure_ready(port)
-        };
         let hitch = Arc::new(HitchDetector::new());
         let start = |port: u16, tls: ServerTls| {
             let recovery = recovery.clone();
@@ -411,6 +508,6 @@ impl App {
                 RelayServer::start(cfg, deps).await
             }
         };
-        start_relay(ports, https_allowed, tls_for, start, &self.ux).await
+        start_relay(ports, tls.is_some(), |_| tls.clone(), start, &self.ux).await
     }
 }

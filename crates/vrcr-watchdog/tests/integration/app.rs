@@ -97,10 +97,11 @@ fn elevated_child_flags_dispatch_before_anything_else() {
 
 #[test]
 fn legacy_program_data_sits_beside_the_current_root() {
-    let root = Path::new(r"C:\ProgramData\vrcresolver");
+    let parent = Path::new("C:/ProgramData");
+    let root = parent.join("vrcresolver");
     assert_eq!(
-        app::legacy_program_data_root(root),
-        Path::new(r"C:\ProgramData").join(legacy::STATE_DIR_NAME)
+        app::legacy_program_data_root(&root),
+        parent.join(legacy::STATE_DIR_NAME)
     );
 }
 

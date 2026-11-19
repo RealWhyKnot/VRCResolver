@@ -377,8 +377,41 @@ impl PatchManager {
         if st.restored {
             return;
         }
-        self.tick_core(&mut st);
+        self.tick_core(&mut st, false);
         drop(st);
+    }
+
+    pub fn wrapper_missing(&self) -> bool {
+        let Some(dir) = self.tools_dir.as_deref() else {
+            return false;
+        };
+        let target = dir.join(TARGET_NAME);
+        let mut st = self.lock();
+        let missing = !st.restored
+            && match fs::metadata(&target) {
+                Ok(meta) => {
+                    meta.is_file()
+                        && self.classify(&mut st, &target) == WrapperKind::VrcBundledYtDlp
+                }
+                Err(e) => e.kind() == io::ErrorKind::NotFound,
+            };
+        drop(st);
+        missing
+    }
+
+    pub fn repair_wrapper(&self) -> Option<bool> {
+        let target = self.tools_dir.as_ref()?.join(TARGET_NAME);
+        let mut st = self.lock();
+        let fixed = if st.restored {
+            None
+        } else if self.classify(&mut st, &target) == WrapperKind::Ours {
+            Some(false)
+        } else {
+            self.tick_core(&mut st, true);
+            (self.classify(&mut st, &target) == WrapperKind::Ours).then_some(true)
+        };
+        drop(st);
+        fixed
     }
 }
 

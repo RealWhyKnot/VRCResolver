@@ -19,10 +19,12 @@ use crate::stats::RelayKind;
 const CAPACITY: usize = 256;
 const IDLE: Duration = Duration::from_secs(300);
 const REPEAT: Duration = Duration::from_secs(60);
+const RESOLVE_REQUEST_WINDOW: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
 pub struct PlaybackLog {
     plays: Mutex<HashMap<String, Play>>,
+    resolve_requests: Mutex<HashMap<String, SystemTime>>,
     video_failures: Mutex<video_failures::VideoFailures>,
 }
 
@@ -271,6 +273,32 @@ impl Play {
 }
 
 impl PlaybackLog {
+    pub fn record_resolve_request(&self, url: &str, now: SystemTime) {
+        let mut requests = self
+            .resolve_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        requests
+            .retain(|_, at| now.duration_since(*at).unwrap_or_default() <= RESOLVE_REQUEST_WINDOW);
+        if requests.len() >= CAPACITY
+            && let Some(oldest) = requests
+                .iter()
+                .min_by_key(|(_, at)| *at)
+                .map(|(key, _)| key.clone())
+        {
+            requests.remove(&oldest);
+        }
+        requests.insert(url_key(url), now);
+    }
+
+    pub(crate) fn recently_requested(&self, url: &str, now: SystemTime) -> bool {
+        self.resolve_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&url_key(url))
+            .is_some_and(|at| now.duration_since(*at).unwrap_or_default() <= RESOLVE_REQUEST_WINDOW)
+    }
+
     fn lock(&self) -> MutexGuard<'_, HashMap<String, Play>> {
         self.plays.lock().unwrap_or_else(|error| error.into_inner())
     }

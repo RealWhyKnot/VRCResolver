@@ -2,7 +2,6 @@ use std::time::{Duration, SystemTime};
 
 use vrcr_shared::console::Color;
 
-use crate::settings::AppSettings;
 use crate::stats::Activity;
 
 #[derive(Clone, Copy)]
@@ -16,13 +15,8 @@ pub const IDLE_REFRESH: Duration = Duration::from_secs(1);
 pub const ANIMATION_WINDOW: Duration = Duration::from_secs(2);
 pub const RECENT_WINDOW: Duration = Duration::from_secs(5);
 
-pub fn fast_refresh(
-    activity: &Activity,
-    now: SystemTime,
-    settings: &AppSettings,
-    animations_available: bool,
-) -> bool {
-    if !settings.terminal.status_line || !settings.terminal.animations || !animations_available {
+pub fn fast_refresh(activity: &Activity, now: SystemTime, animations_available: bool) -> bool {
+    if !animations_available {
         return false;
     }
     activity.relay_active(now, ANIMATION_WINDOW) || activity.upstream_active(now, ANIMATION_WINDOW)
@@ -104,16 +98,6 @@ pub fn pad_right(s: &str, width: usize) -> String {
     let mut out = String::with_capacity(s.len() + width - len);
     out.push_str(s);
     out.extend(std::iter::repeat_n(' ', width - len));
-    out
-}
-
-pub fn pad_left(s: &str, width: usize) -> String {
-    let len = clen(s);
-    if len >= width {
-        return s.to_owned();
-    }
-    let mut out: String = std::iter::repeat_n(' ', width - len).collect();
-    out.push_str(s);
     out
 }
 

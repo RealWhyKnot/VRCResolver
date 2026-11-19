@@ -79,7 +79,7 @@ impl PatchManager {
         }
     }
 
-    pub(super) fn tick_core(&self, st: &mut TickState) {
+    pub(super) fn tick_core(&self, st: &mut TickState, repair_now: bool) {
         let Some(dir) = self.tools_dir.as_deref() else {
             return;
         };
@@ -88,6 +88,8 @@ impl PatchManager {
         let mut target_exists = target.is_file();
         let backup_exists = backup.is_file();
         let (settled, stamp) = self.observe(st, &target, target_exists);
+        let settled =
+            settled || (repair_now && stamp.is_some_and(|stamp| stamp_of(&target) == Some(stamp)));
 
         if !backup_exists {
             if !target_exists {
@@ -209,7 +211,7 @@ impl PatchManager {
             return;
         }
 
-        if st.last_patch.is_some_and(|t| t.elapsed() < MIN_REAPPLY_GAP) {
+        if !repair_now && st.last_patch.is_some_and(|t| t.elapsed() < MIN_REAPPLY_GAP) {
             return;
         }
 

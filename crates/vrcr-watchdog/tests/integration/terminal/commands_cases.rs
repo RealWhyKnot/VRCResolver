@@ -2,52 +2,34 @@ use super::*;
 
 #[test]
 fn command_line_splits_verb_and_arguments() {
-    let c = CommandLine::parse("  /Settings  set hq on ");
-    assert_eq!(c.verb, "settings");
-    assert_eq!(c.args, "set hq on");
+    let c = CommandLine::parse("  /Update  beta ");
+    assert_eq!(c.verb, "update");
+    assert_eq!(c.args, "beta");
     let c = CommandLine::parse("help");
     assert_eq!(c.verb, "help");
     assert_eq!(c.args, "");
 }
 
 #[test]
-fn table_falls_back_to_key_value_when_narrow() {
-    let rows = vec![(
-        "status-line".to_owned(),
-        "on".to_owned(),
-        "Show the live status line.".to_owned(),
-    )];
-    let wide = blocks::table("settings", &rows, 100, &ASCII);
-    assert!(wide[1].plain.contains("setting") && wide[1].plain.contains("about"));
-    assert_eq!(wide[2].runs[2].color, Color::Green);
-    let narrow = blocks::table("settings", &rows, 30, &ASCII);
-    assert!(narrow.iter().any(|f| f.plain.contains("on - Show")));
-}
-
-#[test]
-fn prompt_only_mode_shows_ghost_text_and_cursor() {
-    let mut l = line("he", 80);
-    l.status_line = false;
-    l.ghost = "lp ";
-    l.cursor = Some(1);
-    let frame = status::format(&idle(), &no_bandwidth(), t0(), &l);
-    assert_eq!(frame.plain, format!("{PROMPT}help "));
-    assert_eq!(frame.runs[1].color, Color::DarkGray);
-    assert_eq!(frame.cursor, Some(PROMPT.len() + 1));
-    assert_eq!(status::normalize_width(0), 119);
-    assert_eq!(status::normalize_width(500), 180);
-}
-
-#[test]
 fn registry_completes_commands_with_and_without_a_slash() {
     let r = Registry::with_defaults();
-    assert_eq!(r.complete("/he").replacement, "/help ");
-    assert_eq!(r.complete("cl").replacement, "clear ");
-    assert_eq!(r.complete("exi").replacement, "quit ");
-    let s = r.complete("s");
-    assert_eq!(s.replacement, "");
-    let names: Vec<&str> = s.suggestions.iter().map(|i| i.text.as_str()).collect();
-    assert_eq!(names, vec!["settings", "status"]);
+    for (prefix, command) in [
+        ("he", "help"),
+        ("st", "status"),
+        ("re", "repair"),
+        ("up", "update"),
+        ("cl", "clear"),
+    ] {
+        assert_eq!(r.complete(prefix).replacement, format!("{command} "));
+        assert_eq!(
+            r.complete(&format!("/{prefix}")).replacement,
+            format!("/{command} ")
+        );
+        assert_eq!(
+            r.complete(&format!("help {prefix}")).replacement,
+            format!("help {command}")
+        );
+    }
     assert_eq!(r.complete("").suggestions.len(), r.all().len());
     assert_eq!(
         r.complete("nope ").suggestions,
@@ -58,20 +40,17 @@ fn registry_completes_commands_with_and_without_a_slash() {
 #[test]
 fn registry_suggests_ghost_suffixes() {
     let r = Registry::with_defaults();
-    assert_eq!(r.suggest("/hi"), "story ");
+    assert_eq!(r.suggest("/re"), "pair ");
     assert_eq!(r.suggest("HE"), "lp ");
     assert_eq!(r.suggest("he"), "lp ");
     assert_eq!(r.suggest("help "), "");
-    assert_eq!(r.suggest("settings set high-q"), "uality ");
+    assert_eq!(r.suggest("update be"), "ta");
     assert_eq!(r.suggest(""), "");
 }
 
 #[test]
-fn registry_resolves_aliases_and_nearest_matches() {
+fn registry_suggests_nearest_commands() {
     let r = Registry::with_defaults();
-    assert_eq!(r.get("/STATS").map(|c| c.name.as_str()), Some("status"));
-    assert_eq!(r.get("?").map(|c| c.name.as_str()), Some("help"));
-    assert!(r.get("").is_none());
     let near: Vec<String> = r.nearest("stauts", 3).into_iter().map(|i| i.text).collect();
     assert_eq!(near[0], "status");
     assert_eq!(
@@ -87,61 +66,42 @@ fn registry_resolves_aliases_and_nearest_matches() {
 }
 
 #[test]
-fn settings_completion_walks_actions_names_and_values() {
-    let r = Registry::with_defaults();
-    let first = r.complete("settings ");
-    let texts: Vec<&str> = first.suggestions.iter().map(|i| i.text.as_str()).collect();
-    assert_eq!(&texts[..4], &["get", "set", "reset", "help"]);
-    assert_eq!(texts.len(), 4 + 7);
-    assert_eq!(r.complete("settings ge").replacement, "settings get ");
-    assert_eq!(
-        r.complete("/settings set hi").replacement,
-        "/settings set high-quality "
-    );
-    assert_eq!(
-        r.complete("settings reset al").replacement,
-        "settings reset all "
-    );
-    assert_eq!(
-        r.complete("settings set high-quality of").replacement,
-        "settings set high-quality off"
-    );
-    assert_eq!(
-        r.complete("settings set high-quality ").suggestions.len(),
-        2
-    );
-    assert_eq!(r.complete("settings animations o").suggestions.len(), 2);
-    assert_eq!(
-        r.complete("settings set bogus o").suggestions,
-        <[vrcr_watchdog::terminal::blocks::Item; 0]>::default()
-    );
-    assert_eq!(r.complete("help st").replacement, "help status");
-}
-
-#[test]
 fn typing_help_echoes_and_lists_every_command() {
     let h = harness();
-    h.run("/help");
+    h.run("help");
     let out = h.out.text();
-    assert!(out.contains("vrcr> /help\n"));
-    assert!(
-        out.lines()
-            .any(|line| line == "commands  tab completes a unique match")
-    );
-    assert!(out.contains("/settings"));
-    assert!(out.contains("/stats, /activity, /dashboard"));
-    assert!(out.contains("  tab completes as you type; help <command> explains one."));
-    assert_eq!(h.session.recent_commands(), vec!["/help"]);
+    assert!(out.contains("vrcr> help\n"));
+    assert!(out.lines().any(|line| line == "commands"));
+    let names: Vec<_> = out
+        .lines()
+        .filter_map(|line| {
+            line.trim_start()
+                .strip_prefix("- ")?
+                .split_whitespace()
+                .next()
+        })
+        .collect();
+    assert_eq!(names, ["help", "status", "repair", "update", "clear"]);
+    assert!(out.contains("Ask Windows again for permission to play videos in public worlds."));
+    assert!(out.contains("Press Tab to complete a command or type help <command> for details."));
+    assert!(out.contains("To uninstall, run vrcresolver.Uninstaller.exe from this folder."));
 }
 
 #[test]
 fn help_for_one_command_and_unknown_commands() {
     let h = harness();
-    h.run("help settings");
+    h.run("help update");
     let out = h.out.text();
-    assert!(out.lines().any(|line| line == "help"));
-    assert!(out.contains("config"));
-    assert!(out.contains("tab completes them"));
+    assert!(out.contains("update beta"));
+    assert!(out.contains("Check for updates and include beta releases."));
+    assert!(out.contains("update stable"));
+    assert!(out.contains("Check for stable updates only."));
+    h.run("help repair");
+    assert!(
+        h.out
+            .text()
+            .contains("Ask Windows again for permission to play videos in public worlds.")
+    );
     h.run("stauts");
     let out = h.out.text();
     assert!(out.contains("  unknown command: stauts"));
@@ -151,87 +111,40 @@ fn help_for_one_command_and_unknown_commands() {
 }
 
 #[test]
-fn settings_commands_change_and_reset_the_store() {
+fn repair_starts_without_arguments() {
     let h = harness();
-    h.run("settings set high-quality on");
-    assert!(h.settings.snapshot().playback.high_quality);
-    assert!(h.out.text().contains("settings: high-quality = on"));
-    h.run("settings update-check off");
-    assert!(
-        h.out
-            .text()
-            .contains("settings: update-check = off (takes effect next launch)")
-    );
-    h.run("settings set hq maybe");
-    assert!(h.out.text().contains("invalid value for hq:"));
-    h.run("settings reset all");
-    assert!(!h.settings.snapshot().playback.high_quality);
-    assert!(h.settings.snapshot().maintenance.update_check);
-    h.run("settings get bogus");
-    assert!(
-        h.out
-            .text()
-            .contains("unknown setting: bogus (use settings to list names)")
-    );
-    h.run("settings get");
-    assert!(h.out.text().contains("usage: settings get <name>"));
-    h.run("settings set x");
-    assert!(h.out.text().contains("usage: settings set <name> <value>"));
-    h.run("settings reset");
-    assert!(h.out.text().contains("usage: settings reset <name|all>"));
-    h.run("settings animations");
-    assert!(h.out.text().lines().any(|line| line == "setting"));
-    h.run("settings");
-    assert!(h.out.text().contains("secure-local-video"));
-    h.run("settings help");
-    assert!(h.out.text().contains("settings status-line off"));
-}
-
-#[test]
-fn quit_and_ctrl_d_request_shutdown() {
-    let h = harness();
-    h.typed("x");
-    h.core.handle_key(Key::CtrlD);
-    assert_eq!(h.shutdowns.load(Ordering::SeqCst), 0);
-    h.core.handle_key(Key::CtrlU);
-    h.core.handle_key(Key::CtrlD);
-    assert_eq!(h.shutdowns.load(Ordering::SeqCst), 1);
-    h.run("exit");
-    assert_eq!(h.shutdowns.load(Ordering::SeqCst), 2);
-    assert!(h.out.text().contains("quit requested; shutting down."));
+    h.run("repair");
+    assert_eq!(h.repairs.load(Ordering::SeqCst), 1);
 }
 
 #[test]
 fn tab_completes_and_right_accepts_the_ghost() {
     let h = harness();
-    h.typed("se");
-    assert_eq!(h.core.ghost(), "ttings ");
+    h.typed("up");
+    assert_eq!(h.core.ghost(), "date ");
     h.core.handle_key(Key::Right);
-    assert_eq!(h.core.input_text(), "settings ");
-    h.core.handle_key(Key::Escape);
-    h.typed("s");
+    assert_eq!(h.core.input_text(), "update ");
     h.core.handle_key(Key::Tab);
-    assert_eq!(h.core.input_text(), "s");
-    assert!(h.out.text().contains("vrcr> s\nmatches"));
-    h.core.handle_key(Key::Left);
-    assert_eq!(h.core.ghost(), "");
-    h.core.handle_key(Key::End);
-    h.typed("t");
+    assert_eq!(h.core.input_text(), "update ");
+    assert!(h.out.text().contains("vrcr> update \nmatches"));
+    h.typed("b");
     h.core.handle_key(Key::Tab);
-    assert_eq!(h.core.input_text(), "status ");
+    assert_eq!(h.core.input_text(), "update beta");
 }
 
 #[test]
 fn up_arrow_recalls_submitted_commands() {
     let h = harness();
-    h.run("history");
-    assert!(h.out.text().contains(" 1  history"));
+    h.run("status");
     h.core.handle_key(Key::Up);
-    assert_eq!(h.core.input_text(), "history");
+    assert_eq!(h.core.input_text(), "status");
     h.core.handle_key(Key::Down);
     assert_eq!(h.core.input_text(), "");
     h.core.handle_key(Key::Enter);
-    assert_eq!(h.session.recent_commands(), vec!["history"]);
+    assert_eq!(
+        HistoryStore::new(&h._dir.path().join("terminal")).load_history(),
+        ["status"]
+    );
 }
 
 #[test]
@@ -264,4 +177,67 @@ fn completion_palette_and_items_render() {
     let frames = blocks::completion_palette(&[Item::new("status", "Show status.")], 60, &ASCII);
     assert_eq!(frames[0].plain, "matches");
     assert!(frames[1].plain.starts_with("  - status"));
+}
+
+#[test]
+fn removed_commands_have_no_completions() {
+    let registry = Registry::with_defaults();
+    for removed in [
+        "settings",
+        "logs",
+        "quit",
+        "exit",
+        "history",
+        "permissions",
+        "tools",
+        "diagnostics",
+    ] {
+        assert!(registry.get(removed).is_none(), "{removed}");
+        assert_eq!(registry.complete(removed), Default::default(), "{removed}");
+    }
+}
+
+#[test]
+fn update_completes_beta_and_stable() {
+    let registry = Registry::with_defaults();
+    assert_eq!(registry.complete("update b").replacement, "update beta");
+    assert_eq!(registry.complete("update ST").replacement, "update stable");
+    let choices = registry.complete("update ").suggestions;
+    assert_eq!(
+        choices
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>(),
+        ["beta", "stable"]
+    );
+    assert_eq!(registry.complete("update stable extra"), Default::default());
+}
+
+#[test]
+fn update_switches_channel_and_checks_the_saved_choice() {
+    let h = harness();
+    let install = h._dir.path().join("install");
+    fs::create_dir_all(&install).unwrap_or_else(|e| panic!("{e}"));
+    fs::write(install.join("vrcresolver.Updater.exe"), []).unwrap_or_else(|e| panic!("{e}"));
+    let load =
+        || Store::new(h._dir.path().join("settings.json"), Box::new(|_| {})).include_prereleases();
+    h.run("update beta");
+    assert!(h.settings.include_prereleases());
+    assert!(load());
+    assert!(h.out.text().ends_with("  Checking for beta updates.\n"));
+    h.run("update");
+    assert!(h.out.text().ends_with("  Checking for beta updates.\n"));
+    h.run("update stable");
+    assert!(!h.settings.include_prereleases());
+    assert!(!load());
+    assert!(h.out.text().ends_with("  Checking for stable updates.\n"));
+    h.run("update");
+    assert!(h.out.text().ends_with("  Checking for stable updates.\n"));
+    h.run("update nightly");
+    assert!(
+        h.out
+            .text()
+            .ends_with("  Type update, update beta or update stable.\n")
+    );
+    assert!(!load());
 }

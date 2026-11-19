@@ -44,6 +44,8 @@ Needs 64-bit Windows 10 or 11.
 
 ## Troubleshooting
 
+If you missed or declined a Windows permission prompt, type `repair` in the VRCResolver console.
+
 The console prints one line per video. `Playing` (green) means it worked. `Skipped` (yellow) means VRChat's own yt-dlp got the video instead, and the line says why. `Failed` (red) means that didn't work either. Full logs are in `%LOCALAPPDATA%Low\vrcresolver\logs\`. When you file a bug, include the log lines for the failed video.
 
 ## How it works

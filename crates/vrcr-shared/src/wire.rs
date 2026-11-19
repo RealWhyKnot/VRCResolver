@@ -125,7 +125,6 @@ pub const AVPRO_ACCEPT_CODECS: [&str; 9] = [
 pub const UNITY_ACCEPT_CODECS: [&str; 2] = ["h264", "aac"];
 pub const AVPRO_MAX_AUDIO_CHANNELS: i32 = 8;
 pub const UNITY_MAX_AUDIO_CHANNELS: i32 = 2;
-pub const HIGH_QUALITY_MAX_HEIGHT: i32 = 2160;
 pub const DEFAULT_MAX_HEIGHT: i32 = 1080;
 pub const EXTENSION_BACKED_VIDEO_CODECS: [&str; 3] = ["h265", "vp9", "av1"];
 

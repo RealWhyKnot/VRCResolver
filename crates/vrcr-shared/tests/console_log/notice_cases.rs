@@ -29,7 +29,7 @@ event_case!(
     hosts_add_failed,
     HostsAddFailed,
     Red,
-    "VRCResolver couldn't enable video playback in public worlds."
+    "VRCResolver couldn't set up videos for public worlds. Type repair to be asked again."
 );
 event_case!(
     hosts_remove_failed,
@@ -41,37 +41,31 @@ event_case!(
     hosts_setup_slow,
     HostsSetupSlow,
     Yellow,
-    "Windows is still setting up public-world playback. VRCResolver will carry on without it."
+    "Windows took too long to set up videos for public worlds. Type repair to be asked again."
 );
 event_case!(
     hosts_permission_declined,
     HostsPermissionDeclined,
     Yellow,
-    "Permission was declined. Videos from this PC may not play in public worlds."
+    "Permission for videos in public worlds was declined. Type repair to be asked again."
 );
 event_case!(
     hosts_setup_launch_failed,
     HostsSetupLaunchFailed,
     Yellow,
-    "Windows couldn't open public-world playback setup."
-);
-event_case!(
-    hosts_permission_needed,
-    HostsPermissionNeeded,
-    Yellow,
-    "Windows will ask for permission to let videos from this PC play in public worlds."
+    "Windows couldn't open video setup for public worlds. Type repair to be asked again."
 );
 event_case!(
     hosts_setup_incomplete,
     HostsSetupIncomplete,
     Yellow,
-    "Public-world playback setup didn't finish. Videos from this PC may not play in public worlds."
+    "Video setup for public worlds didn't finish. Type repair to be asked again."
 );
 event_case!(
     secure_playback_retry,
     SecurePlaybackRetry,
     Yellow,
-    "Secure video playback couldn't start. Trying an unsecured local connection."
+    "Secure video couldn't start. Trying video without a secure connection."
 );
 event_case!(
     report_rejected,
@@ -86,52 +80,46 @@ event_case!(
     "VRCResolver couldn't send the error report."
 );
 event_case!(
-    secure_permission_needed,
-    SecurePermissionNeeded,
-    Yellow,
-    "Windows will ask for permission to set up secure video playback on this PC."
-);
-event_case!(
     secure_permission_declined,
     SecurePermissionDeclined,
     Yellow,
-    "Permission was declined. Videos from this PC will use an unsecured local connection."
+    "Permission for secure video was declined. Type repair to be asked again."
 );
 event_case!(
     secure_setup_slow,
     SecureSetupSlow,
     Yellow,
-    "Secure video setup is taking too long. Videos from this PC will use an unsecured local connection."
+    "Windows took too long to set up secure video. Type repair to be asked again."
 );
 event_case!(
     secure_setup_launch_failed,
     SecureSetupLaunchFailed,
     Yellow,
-    "Windows couldn't open secure video setup. Videos from this PC will use an unsecured local connection."
+    "Windows couldn't open secure video setup. Type repair to be asked again."
 );
 event_case!(
     secure_setup_incomplete,
     SecureSetupIncomplete,
     Yellow,
-    "Secure video setup didn't finish. Videos from this PC will use an unsecured local connection."
+    "Secure video setup didn't finish. Type repair to be asked again."
 );
 event_case!(
     certificate_read_failed,
     CertificateReadFailed,
     Yellow,
-    "VRCResolver couldn't read its security certificate. Videos from this PC will use an unsecured local connection."
+    "VRCResolver couldn't read its secure video setup. Type repair to be asked again."
 );
 event_case!(
     certificate_create_failed,
     CertificateCreateFailed,
     Yellow,
-    "VRCResolver couldn't create a security certificate. Videos from this PC will use an unsecured local connection."
+    "VRCResolver couldn't prepare secure video playback. Type repair to be asked again."
 );
 event_case!(
     certificate_save_failed,
     CertificateSaveFailed,
     Yellow,
-    "VRCResolver couldn't save its security certificate. Secure video setup may be needed again next time."
+    "VRCResolver couldn't save its secure video setup. Type repair to be asked again."
 );
 event_case!(
     secure_port_invalid,
@@ -155,7 +143,7 @@ event_case!(
     old_certificate_remove_failed,
     OldCertificateRemoveFailed,
     Yellow,
-    "Secure video setup couldn't remove an old security certificate."
+    "VRCResolver couldn't remove an old security certificate."
 );
 event_case!(
     old_connection_remove_failed,
@@ -209,7 +197,7 @@ event_case!(
     close_handler_failed,
     CloseHandlerFailed,
     Yellow,
-    "VRCResolver couldn't watch for this window closing. Close it with the quit command to restore VRChat's video player."
+    "VRChat's video player may need to be restored after you close this window. Open VRCResolver again if videos stop working."
 );
 event_case!(
     closing,

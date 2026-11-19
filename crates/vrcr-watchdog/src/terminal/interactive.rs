@@ -9,9 +9,9 @@ use vrcr_shared::console::OverlayGuard;
 use vrcr_shared::win::KeyEvent;
 
 use super::commands::{Context, Registry};
+use super::history::HistoryStore;
 use super::input::InputBuffer;
 use super::renderer::{Renderer, Services};
-use super::session::SessionStore;
 use super::text::{ACTIVE_REFRESH, CommandLine, IDLE_REFRESH};
 
 #[derive(Clone, Copy)]
@@ -38,7 +38,6 @@ pub enum Key {
     End,
     CtrlU,
     CtrlL,
-    CtrlD,
     CtrlC,
     Char(char),
     Ignored,
@@ -55,7 +54,6 @@ impl KeyDecoder {
             match ev.vk {
                 0x55 => return Key::CtrlU,
                 0x4C => return Key::CtrlL,
-                0x44 => return Key::CtrlD,
                 0x43 => return Key::CtrlC,
                 _ => {}
             }
@@ -111,17 +109,17 @@ pub fn animations_allowed(support: OutputSupport, disabled: Option<&str>) -> boo
 
 pub struct Core {
     renderer: Renderer,
-    session: Arc<SessionStore>,
+    history: HistoryStore,
     commands: Registry,
     stopped: AtomicBool,
 }
 
 impl Core {
-    pub fn new(services: Services, session: Arc<SessionStore>) -> Core {
-        let input = InputBuffer::new(session.load_history());
+    pub fn new(services: Services, history: HistoryStore) -> Core {
+        let input = InputBuffer::new(history.load_history());
         Core {
-            renderer: Renderer::new(services, std::sync::Arc::clone(&session), input),
-            session,
+            renderer: Renderer::new(services, input),
+            history,
             commands: Registry::with_defaults(),
             stopped: AtomicBool::new(false),
         }
@@ -147,11 +145,6 @@ impl Core {
         match key {
             Key::CtrlU | Key::Escape => self.edit(|b| b.clear(), false),
             Key::CtrlL => self.renderer.clear_screen(),
-            Key::CtrlD => {
-                if self.input_text().is_empty() {
-                    self.renderer.request_shutdown();
-                }
-            }
             Key::CtrlC => {
                 self.edit_quiet(|b| b.clear(), false);
                 self.renderer.warn("input cancelled.");
@@ -231,7 +224,7 @@ impl Core {
             self.redraw();
             return;
         }
-        self.session.record_command(&command_text);
+        self.history.record_command(&command_text);
         self.renderer.echo_command(&command_text);
         let parsed = CommandLine::parse(&command_text);
         let Some(command) = self.commands.get(&parsed.verb) else {
@@ -241,7 +234,6 @@ impl Core {
         };
         let ctx = Context {
             renderer: &self.renderer,
-            session: &self.session,
             commands: &self.commands,
         };
         if let Err(panic) = catch_unwind(AssertUnwindSafe(|| command.run(&ctx, &parsed.args))) {
@@ -261,6 +253,7 @@ struct StopSignal {
 }
 
 impl StopSignal {
+    #[cfg(windows)]
     fn is_set(&self) -> bool {
         *self.stopped.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -289,9 +282,9 @@ pub struct Terminal {
 }
 
 impl Terminal {
-    pub fn new(services: Services, session: Arc<SessionStore>) -> Terminal {
+    pub fn new(services: Services, history: HistoryStore) -> Terminal {
         Terminal {
-            core: Arc::new(Core::new(services, session)),
+            core: Arc::new(Core::new(services, history)),
             signal: Arc::new(StopSignal {
                 stopped: Mutex::new(false),
                 wake: Condvar::new(),
@@ -310,7 +303,6 @@ impl Terminal {
         if self.started.swap(true, Ordering::SeqCst) || !key_input_available() {
             return false;
         }
-        self.core.session.start();
         *self.overlay.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.core.renderer.attach());
         self.core.renderer.log_ready();
         let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
@@ -344,7 +336,6 @@ impl Terminal {
                 .unwrap_or_else(|e| e.into_inner())
                 .take(),
         );
-        self.core.session.stop();
         let waiting: Vec<Receiver<()>> =
             std::mem::take(&mut *self.done.lock().unwrap_or_else(|e| e.into_inner()));
         for rx in waiting {

@@ -84,9 +84,7 @@ fn available_message_only_for_a_newer_remote() {
     let stable = json!({"tag_name": "v2026.10.14.0", "html_url": "https://example.test/r", "prerelease": false});
     assert_eq!(
         update::available_message(&stable, false, "2026.10.13.2").as_deref(),
-        Some(
-            "version v2026.10.14.0 is available; type /update to install (https://example.test/r)"
-        )
+        Some("version v2026.10.14.0 is available; type update to install (https://example.test/r)")
     );
     assert_eq!(
         update::available_message(&stable, false, "2026.10.14.0"),
@@ -108,12 +106,12 @@ fn available_message_only_for_a_newer_remote() {
     let bare = json!({"tag_name": "v9.0", "prerelease": true});
     assert_eq!(
         update::available_message(&bare, false, "1.0").as_deref(),
-        Some("version v9.0 (prerelease) is available; type /update to install")
+        Some("version v9.0 (prerelease) is available; type update to install")
     );
     let list = json!([{"tag_name": "v9.0-rc", "html_url": "u", "prerelease": true}]);
     assert_eq!(
         update::available_message(&list, true, "1.0").as_deref(),
-        Some("version v9.0-rc (prerelease) is available; type /update to install (u)")
+        Some("version v9.0-rc (prerelease) is available; type update to install (u)")
     );
     assert_eq!(update::available_message(&list, false, "1.0"), None);
 }
@@ -158,32 +156,8 @@ fn update_announcement_uses_the_release_tag_and_keeps_the_log_detail() {
         "  Version v2.0-rc is available. Type update to install it.\n"
     );
     assert!(out.logs().contains(
-        "[update] version v2.0-rc (prerelease) is available; type /update to install (example.test"
+        "[update] version v2.0-rc (prerelease) is available; type update to install (example.test"
     ));
-}
-
-#[test]
-fn disabled_update_check_logs_and_spawns_nothing() {
-    let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
-    let log_path = dir.path().join("w.log");
-    let (ux, _) = capture_ux();
-    assert!(
-        update::start_background_check(
-            vrcr_watchdog::maintenance::update::CheckPolicy {
-                enabled: false,
-                include_prereleases: false
-            },
-            "1.0",
-            ux,
-            &Log::to_file(&log_path)
-        )
-        .is_none()
-    );
-    assert!(
-        fs::read_to_string(&log_path)
-            .unwrap_or_default()
-            .contains("[update] startup update check disabled by settings")
-    );
 }
 
 #[test]
@@ -209,15 +183,7 @@ fn updater_command_carries_the_request_env() {
 fn start_update_reports_missing_failed_and_started() {
     let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
     let missing = update::start_update(dir.path(), |_| panic!("must not spawn"));
-    assert_eq!(
-        missing,
-        UpdateStart::UpdaterMissing(dir.path().join(update::UPDATER_EXE))
-    );
-    assert!(
-        missing
-            .message()
-            .starts_with("updater not found in install folder: ")
-    );
+    assert_eq!(missing, UpdateStart::UpdaterMissing);
     fs::write(dir.path().join(update::UPDATER_EXE), b"x").unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
         update::start_update(dir.path(), |_| Err(std::io::Error::other("nope"))),
@@ -236,7 +202,6 @@ fn start_update_reports_missing_failed_and_started() {
         lock(&spawned).clone().map(std::path::PathBuf::from),
         Some(dir.path().join(update::UPDATER_EXE))
     );
-    assert_eq!(UpdateStart::Failed.message(), "update could not start.");
 }
 
 #[test]
