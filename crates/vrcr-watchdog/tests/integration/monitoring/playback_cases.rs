@@ -10,7 +10,7 @@ fn native_resolution_points_to_repair_only_when_the_wrapper_was_missing() {
     deps.stats = Some(Arc::clone(&stats));
     deps.wrapper_missing = Some(Box::new(move || state.load(Ordering::Relaxed)));
     let mut monitor = rig.monitor_with(deps);
-    let source = "https://source.example.test/watch?id=7";
+    let source = "https://youtube.com/watch?v=abc123XYZ09";
     let result = "https://media.example.test/video.mp4";
     let hint = "Type repair to reconnect VRCResolver to VRChat's video player.";
     let feed = |monitor: &mut VrcLogMonitor, source, result| {
@@ -28,7 +28,10 @@ fn native_resolution_points_to_repair_only_when_the_wrapper_was_missing() {
         source,
         "http://localhost.youtube.com:31415/play/2",
     );
-    stats.playback.record_resolve_request(source, rig.now());
+    stats.playback.record_resolve_request(
+        "https://www.youtube.com/watch?v=abc123XYZ09&si=example",
+        rig.now(),
+    );
     feed(&mut monitor, source, result);
     assert!(!rig.out.text().contains(hint));
 

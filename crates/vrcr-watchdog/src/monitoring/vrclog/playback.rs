@@ -158,15 +158,16 @@ impl VrcLogMonitor {
             .stats
             .as_ref()
             .is_none_or(|stats| stats.playback.first_video_failure(&failed, now));
-        if external_video_url(observed) && self.setup_hint_due(now) {
-            self.deps.ux.event(Notice::PublicVideoSetupMissing);
-            self.setup_hint.shown = true;
-        } else if first_failure {
+        if first_failure {
             self.deps.ux.video(
                 vrcr_shared::console::VideoStatus::Failed,
                 &failed,
                 "VRChat couldn't load the video.",
             );
+        }
+        if external_video_url(observed) && self.setup_hint_due(now) {
+            self.deps.ux.event(Notice::PublicVideoSetupMissing);
+            self.setup_hint.shown = true;
         }
         if self.audio_missing {
             let audio = (self.deps.audio)();

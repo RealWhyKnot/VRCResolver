@@ -167,6 +167,20 @@ fn url_key(value: &str) -> String {
     crate::relay::manifest::target_namespace(&normalized)
 }
 
+fn resolve_request_key(url: &str) -> String {
+    if let Some(video_id) = crate::local::youtube::video_id(url) {
+        return crate::relay::manifest::target_namespace(&format!(
+            "https://www.youtube.com/watch?v={video_id}"
+        ));
+    }
+    url_key(url)
+}
+
+fn request_is_recent(now: SystemTime, at: SystemTime) -> bool {
+    now.duration_since(at)
+        .is_ok_and(|age| age <= RESOLVE_REQUEST_WINDOW)
+}
+
 pub fn stream_id(value: &str) -> String {
     let Some(url) = Url::parse(value).ok() else {
         return "unknown".to_owned();
@@ -278,8 +292,7 @@ impl PlaybackLog {
             .resolve_requests
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        requests
-            .retain(|_, at| now.duration_since(*at).unwrap_or_default() <= RESOLVE_REQUEST_WINDOW);
+        requests.retain(|_, at| request_is_recent(now, *at));
         if requests.len() >= CAPACITY
             && let Some(oldest) = requests
                 .iter()
@@ -288,15 +301,15 @@ impl PlaybackLog {
         {
             requests.remove(&oldest);
         }
-        requests.insert(url_key(url), now);
+        requests.insert(resolve_request_key(url), now);
     }
 
     pub(crate) fn recently_requested(&self, url: &str, now: SystemTime) -> bool {
         self.resolve_requests
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .get(&url_key(url))
-            .is_some_and(|at| now.duration_since(*at).unwrap_or_default() <= RESOLVE_REQUEST_WINDOW)
+            .get(&resolve_request_key(url))
+            .is_some_and(|at| request_is_recent(now, *at))
     }
 
     fn lock(&self) -> MutexGuard<'_, HashMap<String, Play>> {
@@ -528,5 +541,55 @@ impl PlaybackLog {
             .flat_map(|(_, play)| play.close("shutdown", now))
             .collect();
         emit(ux, lines);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::UNIX_EPOCH;
+
+    use vrcr_shared::profile;
+    use vrcr_shared::wire::Player;
+
+    use super::*;
+
+    #[test]
+    fn resolve_requests_match_the_same_youtube_video_after_quality_capping() {
+        let playback = PlaybackLog::default();
+        let mut request = profile::wrapper_request(
+            "request".to_owned(),
+            "https://www.youtube.com/watch?v=abc123XYZ09&si=example",
+            Player::AvPro,
+            Some("best[height<=2160]"),
+            false,
+        );
+        playback.record_resolve_request(&request.url, UNIX_EPOCH);
+
+        assert!(profile::apply_default_quality_cap(&mut request));
+        assert!(playback.recently_requested(&request.url, UNIX_EPOCH));
+        assert!(
+            playback.recently_requested("https://youtube.com/watch?v=abc123XYZ09", UNIX_EPOCH,)
+        );
+        assert!(
+            !playback.recently_requested("https://youtube.com/watch?v=abc123XYZ08", UNIX_EPOCH,)
+        );
+    }
+
+    #[test]
+    fn resolve_requests_preserve_other_hosts_and_queries_and_reject_backwards_time() {
+        let playback = PlaybackLog::default();
+        let now = UNIX_EPOCH + Duration::from_secs(5);
+        let request = "https://www.example.com/video?id=7";
+        playback.record_resolve_request("HTTPS://WWW.EXAMPLE.COM:443/video?id=7", now);
+
+        assert!(playback.recently_requested(request, now));
+        assert!(playback.recently_requested(request, now + RESOLVE_REQUEST_WINDOW));
+        assert!(!playback.recently_requested(
+            request,
+            now + RESOLVE_REQUEST_WINDOW + Duration::from_secs(1)
+        ));
+        assert!(!playback.recently_requested(request, UNIX_EPOCH));
+        assert!(!playback.recently_requested("https://example.com/video?id=7", now));
+        assert!(!playback.recently_requested("https://www.example.com/video?id=8", now));
     }
 }

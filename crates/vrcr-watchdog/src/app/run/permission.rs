@@ -68,10 +68,12 @@ pub(super) fn ask(changes: Changes, closing: &CancellationToken, ux: &Ux) -> Dec
         return Decision::Closed;
     }
     if result < 0 {
-        let error = io::Error::from_raw_os_error(result);
         ux.log_warn(
             Component::Terminal,
-            &format!("Could not open the Windows permission dialog: {error}"),
+            &format!(
+                "Could not open the Windows permission dialog: 0x{:08X}",
+                result.cast_unsigned()
+            ),
         );
         return Decision::Closed;
     }

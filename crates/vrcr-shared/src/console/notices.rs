@@ -162,7 +162,7 @@ impl Ux {
             ),
             Notice::CloseHandlerFailed => (
                 Color::Yellow,
-                "VRChat's video player may need to be restored after you close this window. Open VRCResolver again if videos stop working.",
+                "Next time you open VRCResolver, it will put VRChat's video player back.",
             ),
             Notice::Closing => (
                 Color::Gray,

@@ -197,7 +197,7 @@ event_case!(
     close_handler_failed,
     CloseHandlerFailed,
     Yellow,
-    "VRChat's video player may need to be restored after you close this window. Open VRCResolver again if videos stop working."
+    "Next time you open VRCResolver, it will put VRChat's video player back."
 );
 event_case!(
     closing,

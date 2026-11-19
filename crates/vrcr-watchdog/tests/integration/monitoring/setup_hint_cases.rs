@@ -12,6 +12,7 @@ fn external_load_failure_points_to_repair_once_until_setup_recovers() {
     let probes = Arc::new(AtomicU32::new(0));
     let count = Arc::clone(&probes);
     let mut deps = rig.deps(AudioCheck::new(AudioState::Ok, Some("Speakers")));
+    deps.stats = Some(Arc::new(Stats::new(rig.now())));
     deps.setup = Some(SetupProbe {
         pass: Box::new(SetupPass::default),
         incomplete: Box::new(move || {
@@ -25,7 +26,13 @@ fn external_load_failure_points_to_repair_once_until_setup_recovers() {
     rig.feed(&mut monitor, local);
     assert!(!rig.out.text().contains(SETUP_HINT));
     assert_eq!(probes.load(Ordering::Relaxed), 0);
+    let before = rig.out.text().len();
     rig.feed(&mut monitor, EXTERNAL_FAILURE);
+    let output = rig.out.text();
+    let (row, _) = output[before..].split_once(SETUP_HINT).expect("setup hint");
+    assert!(row.contains("Failed"));
+    assert!(row.contains("media.example.test"));
+    assert!(row.contains("VRChat couldn't load the video."));
     for _ in 0..29 {
         rig.clock.advance(secs(1));
         monitor.poll_once(rig.now());
