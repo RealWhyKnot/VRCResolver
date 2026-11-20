@@ -11,6 +11,12 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
+_No notable changes since the last release._
+
+---
+
+## [v2026.11.20.0](https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.11.20.0) - 2026-11-20
+
 ### Added
 - **console:** Rewrite the console in plain words (c10f395)
 - **console:** Show server errors in the console (5022381)
