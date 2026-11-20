@@ -15,6 +15,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **console:** Rewrite the console in plain words (c10f395)
 - **console:** Show server errors in the console (5022381)
 - **relay:** Play a slow live stream straight from the CDN (b7aba7f)
+- **console:** Add repair, trim commands, ask before UAC (7e30c83)
 
 ### Changed
 - **deps:** Bump the minor-and-patch group with 3 updates (#85) (92437fc)
@@ -26,6 +27,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **patch:** Poll for re-apply in the running-target test (e6a2dbb)
 - **vrclog:** Keep quieting repeats after 64 failed links (116ee5f)
 - **vrclog:** Report a failing link once every 10 s (52352c1)
+- **console:** Keep Failed row, match request keys (306e973)
 
 ---
 
