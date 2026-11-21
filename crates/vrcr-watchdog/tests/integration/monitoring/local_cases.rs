@@ -130,3 +130,16 @@ fn a_local_address_the_watchdog_never_issued_changes_nothing() {
     assert!(!r.rig.gate_open());
     assert_eq!(r.rig.sink.all(), Vec::new());
 }
+
+#[test]
+fn a_confirmed_local_play_clears_the_failure_hint_and_its_strikes() {
+    let mut r = LocalRig::new();
+    let hint = r.rig.hint.clone().unwrap_or_else(|| panic!("hint"));
+    hint.record_load_failure(WATCH);
+    assert!(r.prefers_og());
+    r.open();
+    r.rig.feed(&mut r.monitor, "fwidth=1280 fheight=720\n");
+    assert!(!r.prefers_og());
+    assert_eq!(hint.strikes(WATCH), 0);
+    assert!(r.rig.file_log().contains("failure hint cleared"));
+}

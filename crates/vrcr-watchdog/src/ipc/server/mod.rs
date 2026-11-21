@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 
 use tokio::time::Instant;
@@ -6,9 +6,11 @@ use tokio::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite};
 use vrcr_shared::budget::retry;
 use vrcr_shared::console::{Component, Outcome, ResolveStatus, Ux};
+use vrcr_shared::first_party::FirstPartyPolicy;
 use vrcr_shared::log::Log;
 use vrcr_shared::logutil::{bare_host, sanitize_for_console};
 use vrcr_shared::profile;
+use vrcr_shared::source_url;
 use vrcr_shared::wire::{
     self, DEFAULT_MAX_HEIGHT, Player, ResolveRequest, ResolveResponse, WrapperEventNotify, action,
     fallback, feedback, og_reason,
@@ -16,6 +18,7 @@ use vrcr_shared::wire::{
 
 use super::framing::{self, cid_suffix};
 use super::{Feedback, Mesh, MeshResult, caller_opted_into_v2};
+use crate::emitted::{EmittedUrls, Origin};
 use crate::health::{self, HealthGate, Transition};
 use crate::local::{self, Ask, Step};
 use crate::og_hint::{self, OgFallbackHint};
@@ -62,11 +65,7 @@ pub fn is_healthy_outcome(
             ))
 }
 
-pub fn bypasses_health_gate(req: &ResolveRequest, hint: Option<&OgFallbackHint>) -> bool {
-    req.skip_native_hint == Some(true) || hint.is_some_and(|h| h.is_og_blocked(&req.url))
-}
-
-pub fn is_site_wide_og_block(reason: Option<&str>) -> bool {
+pub fn is_og_block(reason: Option<&str>) -> bool {
     matches!(reason, Some("sign_in_required" | "cf_403" | "rate_limited"))
 }
 
@@ -125,6 +124,16 @@ impl<M: Mesh> IpcBuilder<M> {
         self
     }
 
+    pub fn emitted(mut self, emitted: Arc<EmittedUrls>) -> Self {
+        self.ipc.emitted = Some(emitted);
+        self
+    }
+
+    pub fn first_party(mut self, policy: Arc<RwLock<FirstPartyPolicy>>) -> Self {
+        self.ipc.first_party = policy;
+        self
+    }
+
     pub fn build(self) -> Arc<Ipc<M>> {
         Arc::new(self.ipc)
     }
@@ -141,6 +150,8 @@ pub struct Ipc<M: Mesh> {
     verified_codecs: Codecs,
     report_fallback: FallbackSink,
     local: Option<Arc<dyn Step>>,
+    emitted: Option<Arc<EmittedUrls>>,
+    first_party: Arc<RwLock<FirstPartyPolicy>>,
 }
 
 enum Failure {
@@ -171,6 +182,8 @@ impl<M: Mesh> Ipc<M> {
                 verified_codecs: Arc::new(|| None),
                 report_fallback: Arc::new(|_, _| {}),
                 local: None,
+                emitted: None,
+                first_party: Arc::new(RwLock::new(FirstPartyPolicy::default())),
             },
         }
     }
@@ -290,6 +303,7 @@ impl<M: Mesh> Ipc<M> {
                 delivered_height: None,
                 detail: n.reason.clone(),
                 correlation_id: n.rid.clone(),
+                source_url: Some(url.to_owned()),
             });
         }
     }
@@ -303,8 +317,8 @@ impl<M: Mesh> Ipc<M> {
         };
         let reason = sanitize_for_console(n.reason.as_deref().unwrap_or("?"), 32);
         let mut evicted = 0;
-        let mut hint_cleared = false;
         let mut newly_blocked = false;
+        let mut hint_active = false;
         if !url.is_empty() {
             evicted = self
                 .cache
@@ -312,10 +326,10 @@ impl<M: Mesh> Ipc<M> {
                 .map(|c| c.evict_by_url(url))
                 .unwrap_or(0);
             if let Some(h) = self.hint.as_deref() {
-                if is_site_wide_og_block(n.reason.as_deref()) {
+                if is_og_block(n.reason.as_deref()) {
                     newly_blocked = h.record_og_blocked(url);
                 }
-                hint_cleared = h.try_clear(url);
+                hint_active = h.should_prefer_og(url);
             }
         }
         if self
@@ -323,11 +337,13 @@ impl<M: Mesh> Ipc<M> {
             .playback
             .first_video_failure(url, SystemTime::now())
         {
-            self.ux.video(
-                vrcr_shared::console::VideoStatus::Failed,
-                &host,
-                "VRChat couldn't play it either.",
-            );
+            let message = if source_url::is_direct_media(url) {
+                "yt-dlp couldn't read it, so VRChat will try the link directly."
+            } else {
+                "VRChat's own yt-dlp couldn't load it either."
+            };
+            self.ux
+                .video(vrcr_shared::console::VideoStatus::Failed, &host, message);
         }
         let suffix = match reason.as_str() {
             "content_not_found" => " (video unavailable upstream)",
@@ -344,21 +360,20 @@ impl<M: Mesh> Ipc<M> {
             ),
         );
         if newly_blocked {
-            let site = og_hint::site_key(url);
             self.ux.log_warn(
                 Component::Wrapper,
                 &format!(
-                    "VRChat's own resolver is blocked on {site}, so {site} videos stay on our resolver for {} min",
+                    "VRChat's own resolver is blocked on this {host} link for {} min",
                     og_hint::OG_BLOCKED_TTL.as_secs() / 60
                 ),
             );
         }
         self.log.line(&format!(
-            "[wrapper] wrapper_og_failed rid={} host={host} reason={reason} exit={} elapsed_ms={} evicted={evicted} hint_cleared={}",
+            "[wrapper] wrapper_og_failed rid={} host={host} reason={reason} exit={} elapsed_ms={} evicted={evicted} hint_active={}",
             sanitize_for_console(n.rid.as_deref().unwrap_or("?"), 16),
             n.exit_code,
             n.elapsed_ms,
-            if hint_cleared { "True" } else { "False" }
+            if hint_active { "True" } else { "False" }
         ));
         if !url.is_empty() {
             self.mesh.send_playback_feedback(Feedback {
@@ -368,6 +383,7 @@ impl<M: Mesh> Ipc<M> {
                 delivered_height: None,
                 detail: Some(og_failed_detail_for(n.reason.as_deref()).to_owned()),
                 correlation_id: n.rid.clone(),
+                source_url: Some(url.to_owned()),
             });
         }
     }
@@ -382,27 +398,50 @@ impl<M: Mesh> Ipc<M> {
     #[cfg(windows)]
     async fn accept_loop(self: Arc<Self>, pipe_name: String) {
         let Some(sddl) = startup::pipe_security(super::pipe::current_user_sid(), &self.ux) else {
+            self.ux.log_error(
+                Component::Ipc,
+                &format!(
+                    "pipe {pipe_name} not started: no access rules for it, so VRChat's video player can't reach VRCResolver"
+                ),
+            );
             return;
         };
         let path = format!(r"\\.\pipe\{pipe_name}");
         let mut clients = tokio::task::JoinSet::new();
         let mut last_capacity_warning = None;
+        let mut create_failures = startup::PipeFailures::default();
+        let mut connect_failures = startup::PipeFailures::default();
         loop {
             let mut server = match super::pipe::create(&path, &sddl) {
                 Ok(s) => s,
                 Err(e) => {
-                    self.ux.log_warn(
-                        Component::Ipc,
-                        &format!("could not create pipe instance: {e}"),
-                    );
+                    if let Some(count) = create_failures.failed(Instant::now()) {
+                        self.ux
+                            .log_warn(Component::Ipc, &startup::create_failure_line(count, &e));
+                    }
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
             };
+            let failed = create_failures.recovered();
+            if failed > 0 {
+                self.log.line(&format!(
+                    "[ipc] pipe instance created again after {failed} failed tries"
+                ));
+            }
             if let Err(e) = server.connect().await {
-                self.ux
-                    .log_warn(Component::Ipc, &format!("accept failed: {e}"));
+                if let Some(count) = connect_failures.failed(Instant::now()) {
+                    self.ux
+                        .log_warn(Component::Ipc, &startup::connect_failure_line(count, &e));
+                }
+                tokio::time::sleep(startup::CONNECT_BACKOFF).await;
                 continue;
+            }
+            let failed = connect_failures.recovered();
+            if failed > 0 {
+                self.log.line(&format!(
+                    "[ipc] pipe accepted a client again after {failed} failed tries"
+                ));
             }
             while clients.try_join_next().is_some() {}
             if clients.len() >= 128 {
@@ -466,6 +505,8 @@ fn remaining_ms(deadline: Instant) -> i64 {
     )
     .unwrap_or(i64::MAX)
 }
+
+mod delivery;
 
 mod resolution;
 

@@ -1,44 +1,22 @@
 use serde_json::{Value, json};
-use url::Url;
 
 pub const CLIENT_NAME_ID: &str = "101";
 pub const CLIENT_VERSION: &str = "1.02";
 pub const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
 pub const SIGN_IN_WALL: &str = "sign_in_wall";
-const GUARD_PREFIX: &str = ")]}'";
-const ID_LENGTH: usize = 11;
-const ID_PATHS: [&str; 4] = ["shorts", "embed", "live", "v"];
-const WATCH_HOSTS: [&str; 5] = [
-    "youtube.com",
-    "www.youtube.com",
-    "m.youtube.com",
-    "music.youtube.com",
-    "www.youtube-nocookie.com",
+pub const VIDEO_LOCKED: &str = "video_locked";
+const LOCKED_HINTS: [&str; 6] = [
+    "your age",
+    "age-restricted",
+    "inappropriate",
+    "private",
+    "member",
+    "purchase",
 ];
-const SHORT_HOST: &str = "youtu.be";
+const GUARD_PREFIX: &str = ")]}'";
 
 pub fn video_id(url: &str) -> Option<String> {
-    let url = Url::parse(url.trim()).ok()?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return None;
-    }
-    let host = url.host_str()?.to_ascii_lowercase();
-    let mut segments = url.path_segments()?;
-    let first = segments.next().unwrap_or_default();
-    let id = if host == SHORT_HOST {
-        first.to_owned()
-    } else if !WATCH_HOSTS.contains(&host.as_str()) {
-        return None;
-    } else if first == "watch" {
-        url.query_pairs()
-            .find(|(key, _)| key == "v")
-            .map(|(_, value)| value.into_owned())?
-    } else if ID_PATHS.contains(&first) {
-        segments.next()?.to_owned()
-    } else {
-        return None;
-    };
-    is_video_id(&id).then_some(id)
+    vrcr_shared::source_url::youtube_video_id(url)
 }
 
 pub fn visitor_data(body: &str) -> Option<String> {
@@ -80,7 +58,7 @@ pub fn manifest_url(player: &str, video_id: &str) -> Result<String, &'static str
         .and_then(Value::as_str);
     match status {
         Some("OK") => {}
-        Some("LOGIN_REQUIRED") => return Err(SIGN_IN_WALL),
+        Some("LOGIN_REQUIRED") => return Err(login_wall(&value)),
         _ => return Err("not_playable"),
     }
     let details = value.get("videoDetails");
@@ -105,9 +83,25 @@ pub fn manifest_url(player: &str, video_id: &str) -> Result<String, &'static str
         .ok_or("no_hls")
 }
 
-fn is_video_id(id: &str) -> bool {
-    id.len() == ID_LENGTH
-        && id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+fn login_wall(value: &Value) -> &'static str {
+    let status = value.get("playabilityStatus");
+    let messages = status
+        .and_then(|s| s.get("messages"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
+    let text = status
+        .and_then(|s| s.get("reason"))
+        .into_iter()
+        .chain(messages)
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    let is_locked = !text.contains("bot") && LOCKED_HINTS.iter().any(|hint| text.contains(hint));
+    if is_locked {
+        VIDEO_LOCKED
+    } else {
+        SIGN_IN_WALL
+    }
 }

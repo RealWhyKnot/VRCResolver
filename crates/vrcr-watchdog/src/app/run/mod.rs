@@ -3,7 +3,7 @@ use std::io::Write as _;
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use tokio::runtime::{Handle, Runtime};
@@ -13,7 +13,7 @@ use vrcr_shared::console::{Banner, Component, Ux};
 use vrcr_shared::crash::Crash;
 use vrcr_shared::log::Log;
 use vrcr_shared::paths::AppPaths;
-use vrcr_shared::win::{self, CtrlEvent, HkcuKey, MutexError, NamedMutex, RegDword};
+use vrcr_shared::win::{self, HkcuKey, MutexError, NamedMutex, RegDword};
 use vrcr_shared::{legacy, tools, wininet, wire};
 
 use super::setup;
@@ -23,6 +23,7 @@ use super::{
     legacy_program_data_root, snapshot_state, stage_wrapper_hashes, start_relay, step_budget,
 };
 use crate::clock;
+use crate::emitted::EmittedUrls;
 use crate::health::{self, HealthGate};
 use crate::hosts::{self, HostsManager, HostsTicker, TickerHandle};
 use crate::ipc::{Ipc, Mesh};
@@ -36,6 +37,7 @@ use crate::mesh::reporting::Reporter;
 use crate::mesh::{Config, MeshClient, connect};
 use crate::monitoring::heartbeat::{self, Heartbeat};
 use crate::monitoring::perf::{self, PerfReporter, Phases, SystemInfo};
+use crate::monitoring::vrchat::{self, VrchatProcesses};
 use crate::monitoring::vrclog::{MonitorDeps, RelayWedge, SetupPass, SetupProbe, VrcLogMonitor};
 use crate::og_hint::{self, OgFallbackHint};
 use crate::relay::server::RelayDeps;
@@ -49,6 +51,7 @@ use crate::settings::Store;
 use crate::stats::Stats;
 use crate::terminal::renderer::Action;
 use crate::terminal::{HistoryStore, Services, Terminal, animations_allowed, interactive_allowed};
+use lifecycle::Lifecycle;
 
 impl InstanceMutex for NamedMutex {
     fn try_acquire(&mut self) -> bool {
@@ -141,6 +144,7 @@ pub fn run(build: BuildInfo, args: &[String]) -> i32 {
     };
     let code = {
         let _entered = runtime.enter();
+        let life = Arc::new(Lifecycle::new(runtime.handle().clone()));
         let app = App {
             build,
             paths,
@@ -150,9 +154,11 @@ pub fn run(build: BuildInfo, args: &[String]) -> i32 {
             reporter,
             crash,
             parts: Arc::new(Parts::default()),
-            life: Arc::new(Lifecycle::new(runtime.handle().clone())),
+            life: Arc::clone(&life),
         };
-        app.watch(&runtime)
+        let code = app.watch(&runtime);
+        life.finish();
+        code
     };
     runtime.shutdown_timeout(Duration::from_millis(500));
     drop(held);
@@ -190,86 +196,6 @@ fn run_child(mode: ChildMode, args: &[String], paths: &AppPaths, ux: &Ux) -> i32
     }
 }
 
-struct Lifecycle {
-    handle: Handle,
-    coordinator: OnceLock<ShutdownCoordinator>,
-    started: AtomicBool,
-    fast: AtomicBool,
-    closed: Mutex<bool>,
-    wake: Condvar,
-    closing: CancellationToken,
-}
-
-impl Lifecycle {
-    fn new(handle: Handle) -> Lifecycle {
-        Lifecycle {
-            handle,
-            coordinator: OnceLock::new(),
-            started: AtomicBool::new(false),
-            fast: AtomicBool::new(false),
-            closed: Mutex::new(false),
-            wake: Condvar::new(),
-            closing: CancellationToken::new(),
-        }
-    }
-
-    fn begin(
-        &self,
-        trigger: &str,
-        fast: bool,
-    ) -> Option<impl Future<Output = ()> + Send + 'static> {
-        let coordinator = self.coordinator.get()?;
-        if !self.started.swap(true, Ordering::SeqCst) {
-            self.fast.store(fast, Ordering::SeqCst);
-            self.closing.cancel();
-        }
-        let _entered = self.handle.enter();
-        Some(coordinator.run(trigger, fast))
-    }
-
-    fn shutdown(&self, trigger: &str, fast: bool, limit: Option<Duration>) {
-        let Some(done) = self.begin(trigger, fast) else {
-            return;
-        };
-        match limit {
-            Some(limit) => {
-                let _ = self
-                    .handle
-                    .block_on(async { tokio::time::timeout(limit, done).await });
-            }
-            None => self.handle.block_on(done),
-        }
-    }
-
-    fn signal_closed(&self) {
-        *self.closed.lock().unwrap_or_else(|e| e.into_inner()) = true;
-        self.wake.notify_all();
-    }
-
-    fn wait_for_close(&self) {
-        let guard = self.closed.lock().unwrap_or_else(|e| e.into_inner());
-        let _guard = self
-            .wake
-            .wait_while(guard, |closed| !*closed)
-            .unwrap_or_else(|e| e.into_inner());
-    }
-
-    fn on_ctrl(&self, event: CtrlEvent) {
-        let trigger = match event {
-            CtrlEvent::CtrlC => {
-                drop(self.begin("ctrl-c", false));
-                self.signal_closed();
-                return;
-            }
-            CtrlEvent::Close => "console-close",
-            CtrlEvent::Logoff => "logoff",
-            CtrlEvent::Shutdown => "system-shutdown",
-        };
-        self.shutdown(trigger, true, Some(CLOSE_WAIT));
-        self.signal_closed();
-    }
-}
-
 type Task = (CancellationToken, JoinHandle<()>);
 
 #[derive(Default)]
@@ -285,6 +211,7 @@ struct Parts {
     cache: Mutex<Option<Arc<ResolveCache>>>,
     patch: Mutex<Option<Arc<PatchManager>>>,
     ports: Mutex<Option<Arc<RelayPortManager>>>,
+    vrchat: Mutex<Option<vrchat::WatchHandle>>,
 }
 
 fn put<T>(slot: &Mutex<Option<T>>, value: T) {
@@ -324,6 +251,9 @@ where
 impl Parts {
     fn steps(&self) -> Vec<ShutdownStep> {
         let mut steps = Vec::new();
+        if let Some(watch) = take(&self.vrchat) {
+            watch.stop();
+        }
         if let Some(terminal) = peek(&self.terminal) {
             steps.push(step("terminal", move || blocking(move || terminal.stop())));
         }
@@ -559,6 +489,7 @@ impl App {
     }
 }
 
+mod lifecycle;
 mod permission;
 mod repair;
 mod session_end;

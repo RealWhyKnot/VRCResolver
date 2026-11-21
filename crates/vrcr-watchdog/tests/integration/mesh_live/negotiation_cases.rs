@@ -143,6 +143,7 @@ async fn playback_feedback_honours_the_advertised_features() {
         delivered_height: Some(720),
         detail: Some("ignored".to_owned()),
         correlation_id: None,
+        source_url: None,
     };
 
     t.client.send_playback_feedback(fb(feedback::CACHE_PLAY));

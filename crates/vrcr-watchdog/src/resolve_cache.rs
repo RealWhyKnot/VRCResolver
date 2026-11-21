@@ -212,11 +212,15 @@ impl ResolveCache {
         if url.is_empty() {
             return 0;
         }
+        let wanted = vrcr_shared::source_url::normalize(url);
+        let matches = |candidate: Option<&str>| {
+            candidate.is_some_and(|c| c == url || vrcr_shared::source_url::normalize(c) == wanted)
+        };
         let mut g = self.shared.loaded();
         let before = g.file.entries.len();
         g.file.entries.retain(|_, e| {
-            e.url.as_deref() != Some(url)
-                && e.response.as_ref().and_then(|r| r.url.as_deref()) != Some(url)
+            !matches(e.url.as_deref())
+                && !matches(e.response.as_ref().and_then(|r| r.url.as_deref()))
         });
         let removed = before - g.file.entries.len();
         if removed > 0 {

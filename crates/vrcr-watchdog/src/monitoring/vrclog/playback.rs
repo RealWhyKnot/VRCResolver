@@ -26,6 +26,7 @@ impl VrcLogMonitor {
         {
             self.remember_delivered_height(&url, height, now);
             self.confirm_playback(&url);
+            self.confirm_route(&url);
             self.start_playing(&url, at, now);
             self.send(&url, feedback::PLAYING, elapsed_ms(at, now), Some(height));
             return;
@@ -33,16 +34,33 @@ impl VrcLogMonitor {
         if line.contains("[AVProVideo] Error:") {
             self.player_error = Some(crate::diagnostics::player_error(line));
             if line.contains("Loading failed") {
-                self.on_load_failed(now);
+                self.on_load_failed(now, true);
             }
             return;
         }
-        let accepted = line.contains("[AVProVideo] Using playback path:");
-        if accepted || line.contains("Now Playing:") || line.contains("Load Url:") {
-            if accepted && let Some((url, _)) = self.active.clone() {
+        if let Some(kind) = world_player_error(line) {
+            if self.player_error.is_none() {
+                self.player_error = Some(kind.to_owned());
+            }
+            self.on_load_failed(now, false);
+            return;
+        }
+        if line.contains("[AVProVideo] Using playback path:") {
+            if let Some((url, _)) = self.active.clone() {
                 self.confirm_playback(&url);
             }
             self.stall = None;
+            return;
+        }
+        if let Some(announced) = announced_url(line) {
+            let keep = announced.is_some_and(|url| {
+                self.stall
+                    .as_ref()
+                    .is_some_and(|stall| !self.stall_matches(stall, url))
+            });
+            if !keep {
+                self.stall = None;
+            }
         }
     }
 
@@ -127,15 +145,28 @@ impl VrcLogMonitor {
         }
     }
 
-    pub(super) fn on_load_failed(&mut self, now: SystemTime) {
-        let recent = self.last_opening.take_if(|(_, at)| {
-            now.duration_since(*at)
-                .map_or(true, |d| d <= AVPRO_OPEN_FAIL_WINDOW)
-        });
+    pub(super) fn on_load_failed(&mut self, now: SystemTime, from_avpro: bool) {
+        let recent = self
+            .last_opening
+            .take_if(|(_, at)| {
+                now.duration_since(*at)
+                    .map_or(true, |d| d <= AVPRO_OPEN_FAIL_WINDOW)
+            })
+            .or_else(|| self.stall.as_ref().map(|s| (s.url.clone(), s.at)))
+            .or_else(|| self.active.clone().filter(|_| from_avpro));
         if let Some((observed, at)) = recent {
             self.report_load_failure(&observed, elapsed_ms(at, now), now);
         } else {
             self.stall = None;
+            self.deps.log.line(&format!(
+                "[vrclog] {} with no open video error={}",
+                if from_avpro {
+                    "load_failure"
+                } else {
+                    "world player error"
+                },
+                self.player_error.as_deref().unwrap_or("loading_failed")
+            ));
             return;
         }
         if let Some((url, _)) = &self.active
@@ -339,16 +370,19 @@ impl VrcLogMonitor {
                 .as_ref()
                 .and_then(|plays| plays.failed(reported))
         } else {
-            self.deps
-                .cache
-                .as_ref()
-                .and_then(|cache| cache.source_url_for_resolved(reported))
+            self.origin(reported).map(|o| o.source_url)
         };
-        if let (Some(hint), Some(source)) = (&self.deps.og_hint, source) {
-            hint.record_load_failure(&source);
-            og_hint_armed = true;
+        let mut evicted = 0;
+        if let Some(source) = source {
+            let (count, lease) = crate::og_hint::arm(
+                self.deps.cache.as_deref(),
+                self.deps.og_hint.as_deref(),
+                &source,
+            );
+            evicted += count;
+            og_hint_armed = lease.is_some();
         }
-        let evicted = self
+        evicted += self
             .deps
             .cache
             .as_ref()
@@ -376,6 +410,7 @@ impl VrcLogMonitor {
         if local::is_play_url(url) {
             return;
         }
+        let origin = self.origin(url);
         self.deps.mesh.send_playback_feedback(Feedback {
             url: url.to_owned(),
             kind,
@@ -390,7 +425,8 @@ impl VrcLogMonitor {
                 feedback::SILENT_STALL => Some("silent_stall".to_owned()),
                 _ => None,
             },
-            correlation_id: None,
+            correlation_id: origin.as_ref().and_then(|o| o.correlation_id.clone()),
+            source_url: origin.map(|o| o.source_url),
         });
     }
 
@@ -459,6 +495,41 @@ impl VrcLogMonitor {
                 redact_url(&url)
             ));
         }
+    }
+}
+
+const ANNOUNCE_MARKERS: [&str; 2] = ["Load Url:", "Now Playing:"];
+
+fn announced_url(line: &str) -> Option<Option<&str>> {
+    let rest = ANNOUNCE_MARKERS
+        .iter()
+        .find_map(|marker| line.split_once(marker).map(|(_, rest)| rest))?;
+    Some(
+        rest.split_whitespace()
+            .next()
+            .filter(|token| token.contains("://")),
+    )
+}
+
+pub(super) fn world_player_error(line: &str) -> Option<&'static str> {
+    let lower = line.to_ascii_lowercase();
+    if lower.contains("ratelimited") || lower.contains("rate limited") {
+        return None;
+    }
+    if line.contains("Video Error: PlayerError") {
+        Some("protv_player_error")
+    } else if lower.contains("nowplaying") && line.contains("\"type\":\"mediaError\"") {
+        Some("protv_media_error")
+    } else if line.contains("Video error event: PlayerError")
+        || line.contains("Error code: Player Error")
+    {
+        Some("videotxl_player_error")
+    } else if lower.contains("usharpvideo")
+        && (lower.contains("video error") || lower.contains("video failed"))
+    {
+        Some("usharpvideo_error")
+    } else {
+        None
     }
 }
 

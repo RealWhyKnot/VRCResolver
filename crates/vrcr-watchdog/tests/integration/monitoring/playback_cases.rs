@@ -129,18 +129,16 @@ fn load_failure_arms_the_og_hint_before_evicting_the_cache() {
 }
 
 #[test]
-fn a_late_load_failure_is_not_attributed_to_the_old_open() {
+fn a_late_load_failure_falls_back_to_the_open_that_never_started() {
     let r = Rig::new().with_gate();
     let mut m = r.monitor();
     r.feed(&mut m, &format!("[AVProVideo] Opening {PLAYBACK}\n"));
-    r.clock.advance(ms(10_001));
+    r.clock.advance(ms(35_001));
     r.feed(&mut m, "[AVProVideo] Error: Loading failed\n");
     assert_eq!(
         r.sink.all(),
-        <[(std::string::String, &str, i32, std::option::Option<i32>); 0]>::default()
+        vec![(PLAYBACK.to_owned(), feedback::LOAD_FAILURE, 35_001, None)]
     );
-    assert!(!r.out.logs().contains("load_failure"));
-    assert_eq!(m.last_opened_url(), Some(PLAYBACK));
     assert!(!m.stall_armed());
 }
 

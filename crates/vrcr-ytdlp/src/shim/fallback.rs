@@ -1,4 +1,8 @@
+use vrcr_shared::logutil::sanitize_for_console;
+
 use super::*;
+
+const OG_STDERR_SNIPPET_CHARS: usize = 300;
 
 impl Shim {
     pub(super) async fn re_ask(&mut self, ctx: &ReAsk<'_>, og_failure: &str) -> Option<String> {
@@ -103,14 +107,7 @@ impl Shim {
         re_ask: Option<&ReAsk<'_>>,
         timed: bool,
     ) -> i32 {
-        let known_hashes = self.cfg.state_root.join("wrapper_hashes.txt");
-        let og_path = fallback_binary::select(
-            &self.cfg.exe_dir,
-            self.cfg.vrc_tools_dir.as_deref(),
-            |p| p.is_file(),
-            |p| wrapper_identity::classify(p, Some(&known_hashes)) == WrapperKind::Ours,
-        );
-        let Some(og_path) = og_path else {
+        let Some(og_path) = select_og(&self.cfg) else {
             self.log("FALLBACK no-og: no usable vanilla yt-dlp found");
             return self
                 .re_ask_or_fail(args, url, re_ask, timed, "no_og_binary")
@@ -159,6 +156,12 @@ impl Shim {
         } else {
             og::classify_failure(&stderr_text)
         };
+        if run.exit != 0 && !stderr_text.trim().is_empty() {
+            self.log(&format!(
+                "FALLBACK og stderr: {}",
+                sanitize_for_console(stderr_text.trim(), OG_STDERR_SNIPPET_CHARS)
+            ));
+        }
         if run.exit != 0
             && let Some(url) = url.filter(|u| !u.is_empty())
         {

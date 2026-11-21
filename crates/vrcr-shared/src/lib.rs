@@ -14,6 +14,7 @@ pub mod profile;
 pub mod relay;
 pub mod relay_tls;
 pub mod release;
+pub mod source_url;
 pub mod stop;
 pub mod tools;
 pub mod trust_gateway;

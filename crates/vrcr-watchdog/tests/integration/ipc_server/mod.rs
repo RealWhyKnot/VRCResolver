@@ -37,6 +37,7 @@ enum Step {
     },
     Hang,
     Fail,
+    Raw(Box<ResolveResponse>),
 }
 
 fn resolved_step() -> Step {
@@ -141,6 +142,15 @@ impl Mesh for FakeMesh {
         match step {
             Step::Hang => std::future::pending().await,
             Step::Fail => Err("boom".to_owned()),
+            Step::Raw(mut resp) => {
+                resp.id.clone_from(&req.id);
+                Ok(MeshResult {
+                    frame: serde_json::to_vec(&resp).unwrap_or_default(),
+                    action: resp.action.clone(),
+                    reason: resp.reason.clone(),
+                    retry_after_ms: resp.retry_after_ms,
+                })
+            }
             Step::Reply {
                 action,
                 reason,
@@ -401,6 +411,8 @@ mod cache_cases;
 mod contracts_cases;
 
 mod events_cases;
+
+mod fallback_cases;
 
 mod health_cases;
 

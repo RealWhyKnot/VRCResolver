@@ -1,5 +1,8 @@
 use super::*;
-use vrcr_watchdog::relay::retry::{Answer, CAPACITY, RECREATE, RetryMemory, delay, key, reason};
+use vrcr_watchdog::relay::retry::{
+    Answer, CAPACITY, RECREATE, RetryMemory, TERMINAL_STATUSES, delay, key, reason,
+    terminal_failure,
+};
 
 #[test]
 fn retry_after_is_bounded_for_numbers_dates_and_bad_values() {
@@ -222,4 +225,60 @@ fn retry_named_failure_without_retry_after_is_not_treated_as_untyped() {
         until: now + Duration::from_secs(1),
     };
     assert!(RetryMemory::default().confirmed("key", &answer, now));
+}
+
+fn vrcdn_segment(status: u16) -> TimingSample {
+    sample(
+        "GET",
+        "/play/live1/samohte.live.ts",
+        "https://stream.vrcdn.live/live/samohte.live.ts",
+        status,
+        30,
+        40,
+    )
+}
+
+#[test]
+fn terminal_failures_cover_auth_gone_and_gateway_statuses() {
+    for status in [401, 403, 404, 410, 502, 503, 504] {
+        assert!(TERMINAL_STATUSES.contains(&status));
+        assert_eq!(
+            terminal_failure(&vrcdn_segment(status)),
+            Some(format!("http_{status}")),
+            "{status}"
+        );
+    }
+    for status in [200, 206, 304, 400, 416, 429, 500] {
+        assert_eq!(terminal_failure(&vrcdn_segment(status)), None, "{status}");
+    }
+}
+
+#[test]
+fn terminal_failure_prefers_the_status_the_player_saw() {
+    let mut sample = vrcdn_segment(200);
+    sample.player_status = 401;
+    assert_eq!(terminal_failure(&sample).as_deref(), Some("http_401"));
+    let mut recovered = vrcdn_segment(503);
+    recovered.player_status = 200;
+    assert_eq!(terminal_failure(&recovered), None);
+}
+
+#[test]
+fn terminal_failure_reports_upstream_timeouts() {
+    let mut sample = vrcdn_segment(0);
+    sample.failure = Some("upstream_timeout".to_owned());
+    assert_eq!(
+        terminal_failure(&sample).as_deref(),
+        Some("upstream_timeout")
+    );
+}
+
+#[test]
+fn terminal_failure_ignores_suppressed_and_non_get_requests() {
+    let mut suppressed = vrcdn_segment(401);
+    suppressed.suppressed = true;
+    assert_eq!(terminal_failure(&suppressed), None);
+    let mut head = vrcdn_segment(401);
+    head.method = "HEAD".to_owned();
+    assert_eq!(terminal_failure(&head), None);
 }

@@ -1,6 +1,7 @@
 use std::fs;
 
 use tempfile::TempDir;
+use vrcr_shared::win::CtrlEvent;
 
 use super::*;
 use crate::terminal::commands::Registry;
@@ -104,4 +105,58 @@ fn check_window_close(waiting_dialog: bool) {
     assert!(!original.exists());
     assert!(state_dir.join("clean_exit.flag").is_file());
     assert!(started.elapsed() < CLOSE_WAIT);
+}
+
+fn counting_coordinator(restores: &Arc<std::sync::atomic::AtomicUsize>) -> ShutdownCoordinator {
+    let restores = Arc::clone(restores);
+    ShutdownCoordinator::new(
+        Arc::new(move |_| {
+            restores.fetch_add(1, Ordering::SeqCst);
+            Ok(true)
+        }),
+        Arc::new(Vec::new),
+        Arc::new(|_| {}),
+    )
+}
+
+#[test]
+fn a_window_close_after_ctrl_c_waits_for_the_exit_without_touching_the_runtime() {
+    let runtime = Runtime::new().unwrap_or_else(|e| panic!("{e}"));
+    let life = Arc::new(Lifecycle::new(runtime.handle().clone()));
+    let restores = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    assert!(
+        life.coordinator
+            .set(counting_coordinator(&restores))
+            .is_ok()
+    );
+    life.on_ctrl(CtrlEvent::CtrlC);
+    life.wait_for_close();
+    life.shutdown("console-exit", false, None);
+    let (closed, close_returned) = std::sync::mpsc::channel();
+    let closer = {
+        let life = Arc::clone(&life);
+        std::thread::spawn(move || {
+            life.on_ctrl(CtrlEvent::Close);
+            closed
+                .send(())
+                .expect("test is waiting for the close callback");
+        })
+    };
+    assert!(
+        close_returned
+            .recv_timeout(Duration::from_millis(200))
+            .is_err()
+    );
+    runtime.shutdown_timeout(Duration::from_millis(500));
+    life.finish();
+    close_returned
+        .recv_timeout(CLOSE_WAIT)
+        .expect("close callback returns once the exit finished");
+    closer.join().expect("close callback never panics");
+    let started = std::time::Instant::now();
+    for event in [CtrlEvent::CtrlC, CtrlEvent::Close, CtrlEvent::Logoff] {
+        life.on_ctrl(event);
+    }
+    assert!(started.elapsed() < CLOSE_WAIT);
+    assert_eq!(restores.load(Ordering::SeqCst), 1);
 }

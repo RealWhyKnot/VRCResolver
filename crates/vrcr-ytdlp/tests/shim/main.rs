@@ -139,6 +139,16 @@ impl StubPipe {
         Self { lines, task }
     }
 
+    async fn lines_until_quiet(&mut self, quiet: Duration) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+        while let Ok(Some(line)) = tokio::time::timeout(quiet, self.lines.recv()).await {
+            out.push(
+                serde_json::from_str(&line).expect("local test fixture operation must succeed"),
+            );
+        }
+        out
+    }
+
     async fn next_line(&mut self) -> serde_json::Value {
         let line = tokio::time::timeout(Duration::from_secs(10), self.lines.recv())
             .await
@@ -152,6 +162,27 @@ impl Drop for StubPipe {
     fn drop(&mut self) {
         self.task.abort();
     }
+}
+
+const PRIOR_FAILURE_REPLY: &str =
+    r#"{"action":"fallback_native","id":"srv1","reason":"prior_load_failure"}"#;
+const CDN4_LIVE: &str = "https://live.cdn4.io/ttfcvr/index.m3u8";
+const VRCDN_LIVE: &str = "https://stream.vrcdn.live/live/samohte.live.ts";
+const QUIET: Duration = Duration::from_millis(750);
+
+fn install_fake_og(rig: &Rig) {
+    let executable_directory = rig.dir.path().join("exe");
+    std::fs::create_dir_all(&executable_directory).expect("executable directory");
+    let system_root = std::env::var_os("SystemRoot").expect("Windows directory");
+    std::fs::copy(
+        PathBuf::from(system_root).join("System32/cmd.exe"),
+        executable_directory.join("yt-dlp-og.exe"),
+    )
+    .expect("local fake extractor");
+}
+
+fn actions(lines: &[serde_json::Value]) -> Vec<&str> {
+    lines.iter().filter_map(|l| l["action"].as_str()).collect()
 }
 
 fn resolved_line(url: &str) -> String {
@@ -277,23 +308,6 @@ async fn notify_reaches_the_watchdog_while_the_pipe_is_up() {
 }
 
 #[tokio::test]
-async fn connect_retry_reaches_a_late_watchdog_and_notifies_still_go_out() {
-    let rig = Rig::new();
-    let reply = r#"{"action":"fallback_native","id":"srv1","reason":"resolve_failed"}"#;
-    let mut server = StubPipe::start(&rig.pipe_name, Some(reply), Duration::from_millis(1400));
-    let mut shim = rig.shim();
-    let out = shim
-        .resolve_over_pipe(URL, Player::AvPro, None, None, false)
-        .await;
-    assert_eq!(out.fallback_reason, Some(og_reason::SERVER_FALLBACK_NATIVE));
-    server.next_line().await;
-    shim.notify_og_fallback(Some(URL), og_reason::SERVER_FALLBACK_NATIVE, 2000, None)
-        .await;
-    assert_eq!(server.next_line().await["action"], "og_fallback_notify");
-    assert!(rig.log().contains("pipe reconnect OK retry=1"));
-}
-
-#[tokio::test]
 async fn run_prints_exactly_the_resolved_url_and_exits_zero() {
     let rig = Rig::new();
     let line = resolved_line(&format!("  {RESOLVED}  "));
@@ -399,19 +413,12 @@ async fn fallback_logs_omit_child_payloads_and_preserve_stdout() {
         Some(r#"{"action":"fallback_native","id":"srv1","reason":"resolve_failed"}"#),
         Duration::ZERO,
     );
-    let executable_directory = rig.dir.path().join("exe");
-    std::fs::create_dir_all(&executable_directory).expect("executable directory");
-    let system_root = std::env::var_os("SystemRoot").expect("Windows directory");
-    std::fs::copy(
-        PathBuf::from(system_root).join("System32/cmd.exe"),
-        executable_directory.join("yt-dlp-og.exe"),
-    )
-    .expect("local fake extractor");
+    install_fake_og(&rig);
     let code = rig
         .shim()
         .run(&strings(&[
             "/c",
-            "echo private-stdout& echo HTTP Error 404 private-stderr 1>&2& exit 3",
+            "echo private-stdout& echo HTTP Error 404 https://cdn.example.com/v?sig=private-stderr 1>&2& exit 3",
             URL,
         ]))
         .await;
@@ -419,6 +426,10 @@ async fn fallback_logs_omit_child_payloads_and_preserve_stdout() {
     assert!(rig.stdout.text().contains("private-stdout"));
     let text = rig.log();
     assert!(text.contains("stdout_bytes="));
+    assert!(
+        text.contains("FALLBACK og stderr: HTTP Error 404 "),
+        "{text}"
+    );
     assert!(!text.contains("private-stdout"), "{text}");
     assert!(!text.contains("private-stderr"), "{text}");
     assert_eq!(server.next_line().await["action"], "resolve");
@@ -495,3 +506,6 @@ fn the_shim_binary_carries_the_wrapper_marker_and_identity() {
         vrcr_shared::wrapper_identity::WrapperKind::Ours
     );
 }
+
+mod connect_cases;
+mod fallback_cases;

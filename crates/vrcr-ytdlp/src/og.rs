@@ -8,6 +8,8 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
 pub const TIMEOUT_EXIT_CODE: i32 = 1;
+#[cfg(windows)]
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DRAIN_AFTER_EXIT: Duration = Duration::from_secs(5);
 const MAX_STDOUT_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_STDERR_BYTES: u64 = 1024 * 1024;
@@ -64,7 +66,7 @@ pub async fn run(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000);
+    cmd.creation_flags(CREATE_NO_WINDOW);
     let mut child = cmd.spawn()?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -146,7 +148,7 @@ async fn kill_tree(child: &mut tokio::process::Child) {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .kill_on_drop(true)
-            .creation_flags(0x0800_0000);
+            .creation_flags(CREATE_NO_WINDOW);
         let _ = tokio::time::timeout(Duration::from_secs(5), taskkill.status()).await;
     }
     let _ = child.start_kill();

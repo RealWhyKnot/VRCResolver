@@ -13,10 +13,14 @@ use super::ProcessInfo;
 const FILETIME_TO_UNIX_SECS: u64 = 11_644_473_600;
 
 pub fn list_processes() -> Vec<ProcessInfo> {
+    snapshot_processes().unwrap_or_default()
+}
+
+pub fn snapshot_processes() -> Option<Vec<ProcessInfo>> {
     // SAFETY: The snapshot API takes only scalar arguments and returns an owned handle or failure.
     let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     if snap == INVALID_HANDLE_VALUE || snap.is_null() {
-        return Vec::new();
+        return None;
     }
     let mut out = Vec::new();
     // SAFETY: PROCESSENTRY32W contains only integers and fixed-size arrays, valid when zeroed.
@@ -37,7 +41,7 @@ pub fn list_processes() -> Vec<ProcessInfo> {
     }
     // SAFETY: snap is the successfully opened snapshot handle and is closed exactly once.
     unsafe { CloseHandle(snap) };
-    out
+    Some(out)
 }
 
 pub fn process_start_time(pid: u32) -> Option<SystemTime> {

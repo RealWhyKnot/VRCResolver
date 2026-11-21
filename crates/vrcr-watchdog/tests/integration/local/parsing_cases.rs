@@ -391,3 +391,105 @@ fn relay_paths_name_one_manifest() {
         assert_eq!(local::token(path), None, "path {path}");
     }
 }
+
+#[test]
+fn a_bot_wall_is_told_apart_from_a_login_locked_video() {
+    let reply =
+        |status: serde_json::Value| serde_json::json!({"playabilityStatus": status}).to_string();
+    let cases = [
+        (
+            reply(serde_json::json!({"status": "LOGIN_REQUIRED"})),
+            youtube::SIGN_IN_WALL,
+        ),
+        (
+            reply(serde_json::json!({
+                "status": "LOGIN_REQUIRED",
+                "reason": "Sign in to confirm you\u{2019}re not a bot",
+            })),
+            youtube::SIGN_IN_WALL,
+        ),
+        (
+            reply(serde_json::json!({
+                "status": "LOGIN_REQUIRED",
+                "reason": "Sign in to confirm your age",
+            })),
+            youtube::VIDEO_LOCKED,
+        ),
+        (
+            reply(serde_json::json!({
+                "status": "LOGIN_REQUIRED",
+                "reason": "This video is private",
+            })),
+            youtube::VIDEO_LOCKED,
+        ),
+        (
+            reply(serde_json::json!({
+                "status": "LOGIN_REQUIRED",
+                "messages": ["Join this channel to get access to members-only content"],
+            })),
+            youtube::VIDEO_LOCKED,
+        ),
+        (
+            reply(serde_json::json!({
+                "status": "LOGIN_REQUIRED",
+                "reason": "This video may be inappropriate for some users.",
+            })),
+            youtube::VIDEO_LOCKED,
+        ),
+        (
+            reply(serde_json::json!({
+                "status": "LOGIN_REQUIRED",
+                "reason": "Sign in to confirm you're not a bot",
+                "messages": ["This helps protect our community, including members"],
+            })),
+            youtube::SIGN_IN_WALL,
+        ),
+    ];
+    for (player, expected) in cases {
+        assert_eq!(
+            youtube::manifest_url(&player, VIDEO),
+            Err(expected),
+            "{player}"
+        );
+    }
+}
+
+#[test]
+fn redirects_stay_on_https_media_hosts_for_at_most_three_requests() {
+    let url = |text: &str| Url::parse(text).unwrap_or_else(|e| panic!("{e}"));
+    let first = url("https://manifest.googlevideo.com/api/manifest/hls_variant/x");
+    let media = url("https://rr1---sn-abc.googlevideo.com/videoplayback/seg");
+    assert!(local::is_redirect_allowed(
+        &media,
+        std::slice::from_ref(&first)
+    ));
+    assert!(local::is_redirect_allowed(
+        &media,
+        &[first.clone(), media.clone()]
+    ));
+    assert!(!local::is_redirect_allowed(
+        &media,
+        &[first.clone(), media.clone(), media.clone()]
+    ));
+    let downgraded = url("http://rr1---sn-abc.googlevideo.com/videoplayback/seg");
+    assert!(!local::is_redirect_allowed(
+        &downgraded,
+        std::slice::from_ref(&first)
+    ));
+    let foreign = url("https://example.com/seg");
+    assert!(!local::is_redirect_allowed(
+        &foreign,
+        std::slice::from_ref(&first)
+    ));
+    let same_host = url("https://manifest.googlevideo.com/other");
+    assert!(local::is_redirect_allowed(
+        &same_host,
+        std::slice::from_ref(&first)
+    ));
+    let plain = url("http://127.0.0.1:9/hls/master.m3u8");
+    let local_origin = url("http://127.0.0.1:9/hls/start.m3u8");
+    assert!(!local::is_redirect_allowed(
+        &plain,
+        std::slice::from_ref(&local_origin)
+    ));
+}

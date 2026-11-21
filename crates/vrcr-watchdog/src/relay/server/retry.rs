@@ -1,5 +1,6 @@
 use super::*;
 use crate::relay::retry::{self, Answer, MAX_BODY, RECREATE};
+use crate::stats::RelayKind;
 
 pub(super) async fn inspect(mut response: UpstreamResponse) -> (UpstreamResponse, Option<Bytes>) {
     let mut buffered = Vec::new();
@@ -89,4 +90,70 @@ impl Inner {
         }
         ex.retry_reason = Some(retry::RECREATE.to_owned());
     }
+
+    pub(super) fn route_failure(
+        &self,
+        sample: &TimingSample,
+        slow: bool,
+        now: SystemTime,
+    ) -> Option<String> {
+        if sample.target_url.is_empty() {
+            return None;
+        }
+        let kind = hitch::relay_kind(sample);
+        let play = play_key(sample);
+        if kind == RelayKind::Segment
+            && (200..300).contains(&sample.status)
+            && sample.failure.is_none()
+        {
+            remember_play(&self.served_plays, &play, now);
+        }
+        retry::terminal_failure(sample)
+            .filter(|_| kind == RelayKind::Manifest || !has_play(&self.served_plays, &play))
+            .or_else(|| slow.then(|| "slow_live".to_owned()))
+    }
+
+    pub(super) fn route_failed(&self, sample: &TimingSample, reason: String, now: SystemTime) {
+        let Some(failed) = &self.deps.recovery.failed else {
+            return;
+        };
+        if !remember_play(&self.failed_plays, &play_key(sample), now) {
+            return;
+        }
+        failed(&retry::RouteFailure {
+            source_url: self.deps.stats.playback.source_for_path(&sample.local_path),
+            target_url: sample.target_url.clone(),
+            reason,
+        });
+    }
+}
+
+fn play_key(sample: &TimingSample) -> String {
+    crate::relay::activity::play_id(&sample.local_path)
+        .unwrap_or(&sample.target_url)
+        .to_owned()
+}
+
+fn has_play(plays: &Mutex<HashMap<String, SystemTime>>, play: &str) -> bool {
+    plays
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(play)
+}
+
+fn remember_play(plays: &Mutex<HashMap<String, SystemTime>>, play: &str, now: SystemTime) -> bool {
+    let mut plays = plays.lock().unwrap_or_else(|e| e.into_inner());
+    if plays.contains_key(play) {
+        return false;
+    }
+    if plays.len() >= retry::MAX_FAILED_PLAYS
+        && let Some(oldest) = plays
+            .iter()
+            .min_by_key(|(_, at)| **at)
+            .map(|(k, _)| k.clone())
+    {
+        plays.remove(&oldest);
+    }
+    plays.insert(play.to_owned(), now);
+    true
 }

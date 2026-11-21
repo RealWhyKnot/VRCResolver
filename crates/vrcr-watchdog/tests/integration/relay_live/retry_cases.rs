@@ -5,6 +5,9 @@ use vrcr_watchdog::ipc::Feedback;
 #[path = "playback_cases.rs"]
 mod playback_cases;
 
+#[path = "route_failure_cases.rs"]
+mod route_failure_cases;
+
 struct FailingOrigin {
     status: AtomicU16,
     hits: AtomicUsize,
@@ -186,6 +189,7 @@ async fn retry_suppression_reports_exact_counts_in_existing_feedback_detail() {
                 ms_since_open: feedback.ms_since_open,
                 client_id: "existing",
                 correlation_id: feedback.correlation_id.as_deref(),
+                source_url: feedback.source_url.as_deref(),
                 timestamp: SystemTime::UNIX_EPOCH,
                 delivered_height: None,
                 detail: feedback.detail.as_deref(),

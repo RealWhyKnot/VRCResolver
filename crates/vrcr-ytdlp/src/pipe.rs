@@ -1,11 +1,12 @@
 use std::io;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 pub const NOTIFY_TIMEOUT: Duration = Duration::from_millis(1500);
 pub const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+#[cfg(windows)]
 const CONNECT_POLL: Duration = Duration::from_millis(25);
 
 #[derive(Debug)]
@@ -34,16 +35,22 @@ pub type PipeStream = tokio::net::windows::named_pipe::NamedPipeClient;
 
 #[cfg(windows)]
 pub async fn connect(pipe_name: &str, timeout: Duration) -> Result<PipeStream, ConnectError> {
+    use std::time::Instant;
     use tokio::net::windows::named_pipe::ClientOptions;
+    const ERROR_FILE_NOT_FOUND: i32 = 2;
     const ERROR_PIPE_BUSY: i32 = 231;
     let name = full_name(pipe_name);
     let deadline = Instant::now() + timeout;
     loop {
         match ClientOptions::new().open(&name) {
             Ok(client) => return Ok(client),
+            Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {}
             Err(e)
                 if e.kind() == io::ErrorKind::NotFound
-                    || e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {}
+                    || e.raw_os_error() == Some(ERROR_FILE_NOT_FOUND) =>
+            {
+                return Err(ConnectError::NotFound);
+            }
             Err(e) => return Err(ConnectError::Other(e)),
         }
         let now = Instant::now();
@@ -60,22 +67,18 @@ pub type PipeStream = tokio::net::UnixStream;
 #[cfg(not(windows))]
 pub async fn connect(pipe_name: &str, timeout: Duration) -> Result<PipeStream, ConnectError> {
     let path = std::env::temp_dir().join(pipe_name);
-    let deadline = Instant::now() + timeout;
-    loop {
-        match tokio::net::UnixStream::connect(&path).await {
-            Ok(s) => return Ok(s),
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
-                ) => {}
-            Err(e) => return Err(ConnectError::Other(e)),
+    match tokio::time::timeout(timeout, tokio::net::UnixStream::connect(&path)).await {
+        Ok(Ok(s)) => Ok(s),
+        Ok(Err(e))
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            Err(ConnectError::NotFound)
         }
-        let now = Instant::now();
-        if now >= deadline {
-            return Err(ConnectError::TimedOut);
-        }
-        tokio::time::sleep(CONNECT_POLL.min(deadline - now)).await;
+        Ok(Err(e)) => Err(ConnectError::Other(e)),
+        Err(_) => Err(ConnectError::TimedOut),
     }
 }
 

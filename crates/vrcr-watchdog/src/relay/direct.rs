@@ -95,12 +95,12 @@ pub struct SlowStreams {
 }
 
 impl SlowStreams {
-    pub fn observe(&self, sample: &TimingSample, ux: &Ux) {
+    pub fn observe(&self, sample: &TimingSample, ux: &Ux) -> bool {
         if sample.suppressed || !sample.method.eq_ignore_ascii_case("GET") {
-            return;
+            return false;
         }
         let Some(play) = play_id(&sample.local_path) else {
-            return;
+            return false;
         };
         let switch = self
             .tracks
@@ -108,7 +108,7 @@ impl SlowStreams {
             .unwrap_or_else(|e| e.into_inner())
             .record(play, sample);
         let message = match switch {
-            Switch::Stay => return,
+            Switch::Stay => return false,
             Switch::ToDirect => format!(
                 "live video {play} is loading slower than it plays through the server; switching it to direct playback"
             ),
@@ -117,6 +117,7 @@ impl SlowStreams {
             ),
         };
         ux.log_warn(Component::Relay, &message);
+        matches!(switch, Switch::ToDirect)
     }
 
     pub fn direct_origin(&self, play: &str, target: &str) -> Option<Url> {

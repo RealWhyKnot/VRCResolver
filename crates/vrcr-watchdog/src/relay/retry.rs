@@ -8,11 +8,40 @@ use sha2::{Digest, Sha256};
 
 pub type Invalidator = Arc<dyn Fn(&str) + Send + Sync>;
 pub type Reporter = Arc<dyn Fn(crate::ipc::Feedback) + Send + Sync>;
+pub type Failer = Arc<dyn Fn(&RouteFailure) + Send + Sync>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteFailure {
+    pub source_url: Option<String>,
+    pub target_url: String,
+    pub reason: String,
+}
 
 #[derive(Clone, Default)]
 pub struct Hooks {
     pub invalidate: Option<Invalidator>,
     pub report: Option<Reporter>,
+    pub failed: Option<Failer>,
+}
+
+pub const TERMINAL_STATUSES: [u16; 7] = [401, 403, 404, 410, 502, 503, 504];
+pub const MAX_FAILED_PLAYS: usize = 128;
+
+pub fn terminal_failure(sample: &crate::relay::hitch::TimingSample) -> Option<String> {
+    if sample.suppressed || !sample.method.eq_ignore_ascii_case("GET") {
+        return None;
+    }
+    if sample.failure.as_deref() == Some("upstream_timeout") {
+        return Some("upstream_timeout".to_owned());
+    }
+    let status = if sample.player_status != 0 {
+        sample.player_status
+    } else {
+        sample.status
+    };
+    TERMINAL_STATUSES
+        .contains(&status)
+        .then(|| format!("http_{status}"))
 }
 
 pub const CAPACITY: usize = 256;

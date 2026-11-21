@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use vrcr_ytdlp::WRAPPER_MARKER;
-use vrcr_ytdlp::shim::{Shim, ShimConfig};
+use vrcr_ytdlp::shim::{Shim, ShimConfig, exec_og_without_runtime};
 
 #[used]
 static MARKER: [u8; WRAPPER_MARKER.len()] = WRAPPER_MARKER;
@@ -16,19 +16,23 @@ fn main() -> ExitCode {
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
-    let runtime = match tokio::runtime::Builder::new_current_thread()
+    let cfg = ShimConfig::from_env(VERSION);
+    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-    {
-        Ok(rt) => rt,
-        Err(_) => return ExitCode::SUCCESS,
+    else {
+        return exit_code(exec_og_without_runtime(&cfg, &args));
     };
     let mut shim = Shim::new(
-        ShimConfig::from_env(VERSION),
+        cfg,
         Box::new(std::io::stdout()),
         Box::new(std::io::stderr()),
     );
     let code = runtime.block_on(shim.run(&args));
     std::hint::black_box(&MARKER);
+    exit_code(code)
+}
+
+fn exit_code(code: i32) -> ExitCode {
     ExitCode::from(u8::try_from(code & 0xFF).unwrap_or(1))
 }

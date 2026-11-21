@@ -43,6 +43,7 @@
     "extractor_unsupported",
     "internal_error",
     "js_challenge",
+    "playback_failed",
     "resolve_cost_exceeds_deadline",
     "source_bound_to_viewer",
     "unity_unsupported_format",

@@ -26,6 +26,7 @@ pub struct Feedback {
     pub delivered_height: Option<i32>,
     pub detail: Option<String>,
     pub correlation_id: Option<String>,
+    pub source_url: Option<String>,
 }
 
 pub trait Mesh: Send + Sync + 'static {

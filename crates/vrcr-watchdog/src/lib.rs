@@ -2,6 +2,7 @@ pub mod app;
 pub mod clock;
 pub mod diagnostics;
 pub mod display;
+pub mod emitted;
 pub mod health;
 pub mod hosts;
 pub mod ipc;

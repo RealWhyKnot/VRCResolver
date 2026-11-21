@@ -59,21 +59,52 @@ impl Inner {
         resolved_url: Option<&str>,
         resolved: bool,
         result: MeshResult,
-    ) {
+    ) -> bool {
         if id.is_empty() {
-            return;
+            return false;
         }
         let cid = lock(&self.inflight_cids).remove(id);
         if resolved && let (Some(cid), Some(url)) = (cid.as_deref(), resolved_url) {
             self.remember_resolved_url_cid(url, cid);
         }
         let mut sink = lock(&self.pending);
-        if let Some(tx) = sink.remove(id) {
-            drop(sink);
-            if resolved {
-                self.reconnect_attempt.store(0, Ordering::SeqCst);
-            }
-            let _ = tx.send(result);
+        let Some(tx) = sink.remove(id) else {
+            return false;
+        };
+        drop(sink);
+        if resolved {
+            self.reconnect_attempt.store(0, Ordering::SeqCst);
+        }
+        let _ = tx.send(result);
+        true
+    }
+
+    pub(super) fn notify_revocation(&self, revocation: &Revocation) {
+        if revocation.reason.as_deref() != Some(fallback::PLAYBACK_FAILED) {
+            self.log.line(&format!(
+                "[mesh] late fallback_native ignored id={} reason={}",
+                sanitize_for_console(&revocation.request_id, 32),
+                sanitize_for_console(revocation.reason.as_deref().unwrap_or("?"), 32)
+            ));
+            return;
+        }
+        let sink = self
+            .revoked
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        self.log.line(&format!(
+            "[mesh] unsolicited fallback_native id={}{} reason={}",
+            sanitize_for_console(&revocation.request_id, 32),
+            revocation
+                .correlation_id
+                .as_deref()
+                .map(|c| format!(" cid={}", sanitize_for_console(c, 32)))
+                .unwrap_or_default(),
+            sanitize_for_console(revocation.reason.as_deref().unwrap_or("?"), 32)
+        ));
+        if let Some(sink) = sink {
+            sink(revocation);
         }
     }
 
@@ -114,6 +145,17 @@ impl Inner {
                 } else {
                     None
                 };
+                let revocation = (!resolved).then(|| Revocation {
+                    request_id: id.to_owned(),
+                    correlation_id: frames::str_field(&root, frames::CORRELATION_ID)
+                        .filter(|c| !c.is_empty())
+                        .map(str::to_owned),
+                    url: frames::str_field(&root, "source_url")
+                        .or_else(|| frames::str_field(&root, "url"))
+                        .filter(|u| !u.is_empty())
+                        .map(str::to_owned),
+                    reason: reason.clone(),
+                });
                 if resolved && let Some(bytes) = root.get("bytes_estimate").and_then(Value::as_i64)
                 {
                     self.stats.record_bytes_estimate(bytes);
@@ -128,7 +170,11 @@ impl Inner {
                     reason,
                     retry_after_ms,
                 };
-                self.finish_resolve(id, url.filter(|u| !u.is_empty()), resolved, result);
+                if !self.finish_resolve(id, url.filter(|u| !u.is_empty()), resolved, result)
+                    && let Some(revocation) = revocation
+                {
+                    self.notify_revocation(&revocation);
+                }
             }
             action::WELCOME => self.on_welcome(link, payload),
             action::WELCOME_CACHED => self.on_welcome_cached(link, payload),
@@ -414,7 +460,19 @@ impl Inner {
                     reason: resp.reason.clone(),
                     retry_after_ms: resp.retry_after_ms,
                 };
-                self.finish_resolve(&resp.id, None, false, result);
+                if !self.finish_resolve(&resp.id, None, false, result) {
+                    self.notify_revocation(&Revocation {
+                        request_id: resp.id.clone(),
+                        correlation_id: resp
+                            .extra
+                            .get(frames::CORRELATION_ID)
+                            .and_then(Value::as_str)
+                            .filter(|c| !c.is_empty())
+                            .map(str::to_owned),
+                        url: resp.url.filter(|u| !u.is_empty()),
+                        reason: resp.reason,
+                    });
+                }
             }
             BinaryFrame::ResolveLog { id, message } => self.log.line(&format!(
                 "[mesh][resolve_log] id={} {}",

@@ -56,7 +56,7 @@ async fn proxied_player_failures_share_wrapper_dedupe_and_reopening_resets_it() 
             let text = out.text();
             assert_eq!(text.matches("Failed").count(), expected, "{text}");
             let sentence = if wrapper_first {
-                "VRChat couldn't play it either."
+                "VRChat's own yt-dlp couldn't load it either."
             } else {
                 "VRChat couldn't load the video."
             };
@@ -113,14 +113,14 @@ async fn wrapper_and_player_failure_print_only_the_first_row_and_keep_both_logs(
             let text = out.text();
             assert_eq!(text.matches("Failed").count(), expected, "{text}");
             let first = if wrapper_first {
-                "VRChat couldn't play it either."
+                "VRChat's own yt-dlp couldn't load it either."
             } else {
                 "VRChat couldn't load the video."
             };
             let second = if wrapper_first {
                 "VRChat couldn't load the video."
             } else {
-                "VRChat couldn't play it either."
+                "VRChat's own yt-dlp couldn't load it either."
             };
             assert_eq!(text.matches(first).count(), expected);
             assert!(!text.contains(second));
@@ -241,7 +241,7 @@ fn wrapper_event_detection_only_looks_at_the_head() {
 }
 
 #[tokio::test]
-async fn og_failed_notify_blocks_og_only_for_site_wide_reasons() {
+async fn og_failed_notify_keeps_the_hint_and_blocks_og_for_that_url_only() {
     for (why, blocked) in [
         ("sign_in_required", true),
         ("cf_403", true),
@@ -250,19 +250,28 @@ async fn og_failed_notify_blocks_og_only_for_site_wide_reasons() {
         ("timeout", false),
     ] {
         let hint = Arc::new(OgFallbackHint::default());
-        hint.record_load_failure("https://youtu.be/abc");
+        hint.record_load_failure("https://youtu.be/abcdefghijk");
         let mesh = FakeMesh::offline();
         let ipc = Ipc::builder(std::sync::Arc::clone(&mesh), Ux::sink(), Log::disabled())
             .og_hint(std::sync::Arc::clone(&hint))
             .build();
         let line = format!(
-            "{{\"action\":\"wrapper_og_failed\",\"url\":\"https://youtu.be/abc\",\"reason\":\"{why}\",\"exit_code\":1,\"rid\":\"r1\"}}"
+            "{{\"action\":\"wrapper_og_failed\",\"url\":\"https://youtu.be/abcdefghijk\",\"reason\":\"{why}\",\"exit_code\":1,\"rid\":\"r1\"}}"
         );
         assert_eq!(exchange(&ipc, &line).await, "", "{why}");
-        assert_eq!(hint.live_entry_count(), 0, "{why}");
+        assert_eq!(hint.live_entry_count(), 1, "{why}");
         assert_eq!(
-            hint.is_og_blocked("https://www.youtube.com/watch?v=zzz"),
+            hint.should_prefer_og("https://www.youtube.com/watch?v=abcdefghijk"),
+            !blocked,
+            "{why}"
+        );
+        assert_eq!(
+            hint.is_og_blocked("https://www.youtube.com/watch?v=abcdefghijk"),
             blocked,
+            "{why}"
+        );
+        assert!(
+            !hint.is_og_blocked("https://www.youtube.com/watch?v=zzzzzzzzzzz"),
             "{why}"
         );
         let fb = mesh.feedback();
@@ -273,6 +282,10 @@ async fn og_failed_notify_blocks_og_only_for_site_wide_reasons() {
             Some(og_failed_detail_for(Some(why)))
         );
         assert_eq!(fb[0].correlation_id.as_deref(), Some("r1"));
+        assert_eq!(
+            fb[0].source_url.as_deref(),
+            Some("https://youtu.be/abcdefghijk")
+        );
     }
 }
 
@@ -354,7 +367,7 @@ async fn bundled_failure_is_one_plain_row_with_technical_detail_in_the_log() {
     assert_eq!(
         output.text(),
         format!(
-            "  Failed     {:<28}VRChat couldn't play it either.\n",
+            "  Failed     {:<28}VRChat's own yt-dlp couldn't load it either.\n",
             "youtube.com"
         )
     );

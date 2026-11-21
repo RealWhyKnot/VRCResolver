@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::wire::fallback;
 
 pub const TOTAL: Duration = Duration::from_millis(TOTAL_MS.cast_unsigned());
-pub const OG_RESERVE: Duration = Duration::from_secs(5);
+pub const OG_RESERVE: Duration = Duration::from_secs(12);
 pub const RE_ASK_RESERVE: Duration = Duration::from_secs(5);
 pub const OG_HARD_CAP: Duration = Duration::from_secs(300);
 pub const RE_ASK_MIN_WINDOW_MS: i64 = 2250;

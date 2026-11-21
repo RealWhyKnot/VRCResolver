@@ -82,11 +82,29 @@ impl<M: Mesh> Ipc<M> {
         let node_host = self.mesh.current_node_host();
         let hint = self.hint.as_deref();
 
-        if req.skip_native_hint == Some(true) {
-            if let Some(h) = hint {
-                h.try_clear(&req.url);
+        if self.is_first_party_playback(&req.url) {
+            let frame = ResolveResponse {
+                action: action::RESOLVED.to_owned(),
+                id: id.clone(),
+                url: Some(req.url.clone()),
+                ..ResolveResponse::default()
+            };
+            self.remember_emitted(&req, &req.url, cid.as_deref());
+            if let Ok(frame) = serde_json::to_vec(&frame) {
+                trace.reply(&frame, false);
+                let _ = framing::write_frame(pipe, &frame).await;
             }
-        } else if hint.is_some_and(|h| h.should_prefer_og(&req.url)) {
+            self.ux.log_write(
+                Component::Ipc,
+                &format!(
+                    "first-party playback URL passed through id={id}{} host={host}",
+                    cid_suffix(cid.as_deref())
+                ),
+            );
+            return;
+        }
+
+        if hint.is_some_and(|h| h.should_prefer_og(&req.url)) {
             self.ux.skipped(&host, "prior_load_failure", None);
             trace.reason = "prior_load_failure";
             trace.sent = "fallback_native";
@@ -102,9 +120,8 @@ impl<M: Mesh> Ipc<M> {
         }
 
         let mut is_probe = false;
-        if let Some(gate) = self.health.as_deref()
-            && !bypasses_health_gate(&req, hint)
-        {
+        let mut og_rescue = false;
+        if let Some(gate) = self.health.as_deref() {
             let (paused, shift) = gate.should_short_circuit(self.mesh.is_connected());
             if shift == Transition::Closed {
                 self.ux.resolver_restored();
@@ -113,8 +130,18 @@ impl<M: Mesh> Ipc<M> {
                     "resolver restored -- mesh resolving re-enabled",
                 );
             }
-            if paused {
+            og_rescue = paused && hint.is_some_and(|h| h.is_og_blocked(&req.url));
+            if og_rescue {
+                self.ux.log_write(
+                    Component::Ipc,
+                    &format!(
+                        "resolver paused, resolving anyway because VRChat's own resolver is blocked on this link id={id}{} host={host}",
+                        cid_suffix(cid.as_deref())
+                    ),
+                );
+            } else if paused {
                 if let Some(frame) = self.local_frame(&req, &id, deadline).await {
+                    self.remember_frame(&req, &frame, cid.as_deref());
                     self.ux.resolve_outcome(&Outcome {
                         host: &host,
                         player: &player_label,
@@ -181,6 +208,7 @@ impl<M: Mesh> Ipc<M> {
 
         if let Some(hit) = cached {
             height = response_height(&hit.frame);
+            self.remember_frame(&req, &hit.frame, cid.as_deref());
             trace.reply(&hit.frame, true);
             if framing::write_frame(pipe, &hit.frame).await.is_err() {
                 trace.finished = false;
@@ -206,6 +234,7 @@ impl<M: Mesh> Ipc<M> {
                         .filter(|c| !c.is_empty())
                         .unwrap_or_else(|| id.clone()),
                 ),
+                source_url: Some(req.url.clone()),
             });
         } else {
             if req.correlation_id.as_deref().unwrap_or_default().is_empty()
@@ -236,6 +265,7 @@ impl<M: Mesh> Ipc<M> {
                     let frame = local.as_deref().unwrap_or(&result.frame);
                     trace.retried = req.id != trace.request.id;
                     height = response_height(frame);
+                    self.remember_frame(&req, frame, cid.as_deref());
                     trace.reply(frame, false);
                     if framing::write_frame(pipe, frame).await.is_err() {
                         trace.finished = false;
@@ -267,6 +297,7 @@ impl<M: Mesh> Ipc<M> {
                 Some(frame) => {
                     via_local = true;
                     height = response_height(&frame);
+                    self.remember_frame(&req, &frame, cid.as_deref());
                     trace.reply(&frame, false);
                     let _ = framing::write_frame(pipe, &frame).await;
                 }
@@ -321,6 +352,7 @@ impl<M: Mesh> Ipc<M> {
 
         if let Some(gate) = self.health.as_deref()
             && !via_cache
+            && !og_rescue
         {
             let healthy =
                 is_healthy_outcome(fail_reason, &outcome, server_reason.as_deref(), budget_ms);
@@ -480,7 +512,22 @@ impl<M: Mesh> Ipc<M> {
         let Some(cache) = self.cache.as_deref() else {
             return;
         };
+        if self
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.should_prefer_og(&req.url))
+        {
+            self.log.line(&format!(
+                "[resolve-cache] store skipped id={id} host={host} reason=failure_hint_active"
+            ));
+            return;
+        }
         match serde_json::from_slice::<ResolveResponse>(frame) {
+            Ok(parsed) if parsed.live == Some(true) && parsed.validated == Some(false) => {
+                self.log.line(&format!(
+                    "[resolve-cache] store skipped id={id} host={host} reason=unvalidated_live"
+                ));
+            }
             Ok(parsed) => {
                 let default_ttl = parsed.expires_at.as_deref().unwrap_or_default().is_empty();
                 cache.store(

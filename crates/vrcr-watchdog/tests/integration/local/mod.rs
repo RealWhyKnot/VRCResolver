@@ -49,6 +49,7 @@ seg1.ts
 enum Mode {
     Plays,
     SignInWall,
+    VideoLocked,
     Live,
     NoManifest,
     ForeignManifest,
@@ -61,7 +62,7 @@ enum Mode {
 struct FakeOrigin {
     port: u16,
     hits: Arc<Mutex<Vec<String>>>,
-    visitor_language: Arc<Mutex<Option<String>>>,
+    heads: Arc<Mutex<Vec<(String, String)>>>,
     is_walled: Arc<AtomicBool>,
 }
 
@@ -75,25 +76,25 @@ impl FakeOrigin {
             .unwrap_or_else(|e| panic!("{e}"))
             .port();
         let hits = Arc::new(Mutex::new(Vec::new()));
-        let visitor_language = Arc::new(Mutex::new(None));
+        let heads = Arc::new(Mutex::new(Vec::new()));
         let is_walled = Arc::new(AtomicBool::new(mode == Mode::SignInWall));
         let seen = Arc::clone(&hits);
-        let language = Arc::clone(&visitor_language);
+        let seen_heads = Arc::clone(&heads);
         let walled = Arc::clone(&is_walled);
         tokio::spawn(async move {
             while let Ok((stream, _)) = listener.accept().await {
                 let seen = Arc::clone(&seen);
-                let language = Arc::clone(&language);
+                let seen_heads = Arc::clone(&seen_heads);
                 let walled = Arc::clone(&walled);
-                tokio::spawn(
-                    async move { serve(stream, port, mode, &seen, &walled, &language).await },
-                );
+                tokio::spawn(async move {
+                    serve(stream, port, mode, &seen, &walled, &seen_heads).await
+                });
             }
         });
         FakeOrigin {
             port,
             hits,
-            visitor_language,
+            heads,
             is_walled,
         }
     }
@@ -102,11 +103,15 @@ impl FakeOrigin {
         self.hits.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn visitor_language(&self) -> Option<String> {
-        self.visitor_language
+    fn header(&self, path: &str, name: &str) -> Option<String> {
+        self.heads
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .clone()
+            .iter()
+            .filter(|(seen, _)| seen == path)
+            .flat_map(|(_, head)| head.lines().filter_map(|line| line.split_once(':')))
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.trim().to_owned())
     }
 
     fn local(&self, manifests: &Arc<Manifests>) -> Local {
@@ -135,7 +140,7 @@ async fn serve(
     mode: Mode,
     hits: &Mutex<Vec<String>>,
     is_walled: &AtomicBool,
-    visitor_language: &Mutex<Option<String>>,
+    heads: &Mutex<Vec<(String, String)>>,
 ) {
     let Some((head, body)) = read_request(&mut stream).await else {
         return;
@@ -145,20 +150,17 @@ async fn serve(
     hits.lock()
         .unwrap_or_else(|e| e.into_inner())
         .push(path.clone());
+    heads
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push((path.clone(), head.clone()));
     let has_visitor = head.to_ascii_lowercase().contains(&format!(
         "x-goog-visitor-id: {}",
         VISITOR.to_ascii_lowercase()
     ));
     let (status, reply) = match path.as_str() {
         "/sw.js_data" if mode == Mode::VisitorDown => (503, String::new()),
-        "/sw.js_data" => {
-            *visitor_language.lock().unwrap_or_else(|e| e.into_inner()) = head
-                .lines()
-                .filter_map(|line| line.split_once(':'))
-                .find(|(name, _)| name.eq_ignore_ascii_case("accept-language"))
-                .map(|(_, value)| value.trim().to_owned());
-            (200, visitor_reply())
-        }
+        "/sw.js_data" => (200, visitor_reply()),
         "/youtubei/v1/player?prettyPrint=false" => {
             let is_known = has_visitor && body.contains(VIDEO) && body.contains("VISIONOS");
             let is_refused = !is_known || is_walled.load(Ordering::SeqCst);
@@ -213,6 +215,11 @@ fn visitor_reply() -> String {
 }
 
 fn player_reply(port: u16, mode: Mode, is_refused: bool) -> String {
+    if mode == Mode::VideoLocked {
+        let reason = "Sign in to confirm your age";
+        return serde_json::json!({"playabilityStatus": {"status": "LOGIN_REQUIRED", "reason": reason}})
+            .to_string();
+    }
     if is_refused {
         return "{\"playabilityStatus\":{\"status\":\"LOGIN_REQUIRED\"}}".to_owned();
     }

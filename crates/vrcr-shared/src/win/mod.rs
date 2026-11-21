@@ -66,7 +66,7 @@ pub struct ProcessInfo {
 mod processes;
 
 #[cfg(windows)]
-pub use processes::{list_processes, process_start_time};
+pub use processes::{list_processes, process_start_time, snapshot_processes};
 
 #[cfg(windows)]
 mod process_control;
@@ -117,6 +117,11 @@ pub fn free_disk_bytes(_path: &std::path::Path) -> Option<u64> {
 #[cfg(not(windows))]
 pub fn list_processes() -> Vec<ProcessInfo> {
     Vec::new()
+}
+
+#[cfg(not(windows))]
+pub fn snapshot_processes() -> Option<Vec<ProcessInfo>> {
+    None
 }
 
 #[cfg(not(windows))]

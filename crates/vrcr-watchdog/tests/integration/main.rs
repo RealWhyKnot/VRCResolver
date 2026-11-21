@@ -3,6 +3,7 @@ mod common;
 
 mod app;
 mod diagnostics;
+mod emitted;
 mod hosts;
 mod ipc_server;
 mod local;

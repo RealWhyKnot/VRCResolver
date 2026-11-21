@@ -79,10 +79,11 @@ fn three_slow_segments_out_of_four_switch_the_video_to_direct() {
     let (ux, out) = capture_ux();
     let slow = watching("live1", &ux);
     for total in [2600, 900, 2400] {
-        slow.observe(&segment("live1", total), &ux);
+        assert!(!slow.observe(&segment("live1", total), &ux));
         assert_eq!(slow.direct_origin("live1", &proxied(ORIGIN)), None);
     }
-    slow.observe(&segment("live1", 3100), &ux);
+    assert!(slow.observe(&segment("live1", 3100), &ux));
+    assert!(!slow.observe(&segment("live1", 3100), &ux));
     assert_eq!(
         slow.direct_origin("live1", &proxied(ORIGIN))
             .map(String::from),

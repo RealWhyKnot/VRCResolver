@@ -71,11 +71,16 @@ fn msgpack_resolved_with_trailing_nils_decodes() {
 fn msgpack_resolved_tolerates_extra_trailing_fields() {
     let mut items = vec![s("resolved"), s("id1"), s("https://example.com")];
     items.extend(std::iter::repeat_n(Mp::Nil, 10));
+    items.extend([Mp::Boolean(true), s("proxy"), Mp::Boolean(false)]);
     items.push(s(""));
     items.push(Mp::Nil);
     let r = resolved(&encode(items));
     assert_eq!(r.id, "id1");
     assert_eq!(r.url.as_deref(), Some("https://example.com"));
+    assert_eq!(
+        (r.live, r.delivery.as_deref(), r.validated),
+        (Some(true), Some("proxy"), Some(false))
+    );
 }
 
 #[test]

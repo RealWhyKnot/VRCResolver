@@ -10,6 +10,7 @@ use vrcr_shared::logutil::bare_host;
 use vrcr_shared::paths::AppPaths;
 use vrcr_shared::profile;
 use vrcr_shared::relay;
+use vrcr_shared::source_url;
 use vrcr_shared::trust_gateway;
 use vrcr_shared::url_guard;
 use vrcr_shared::wire::{self, Player, ResolveResponse, WrapperEventNotify, action, og_reason};
@@ -89,6 +90,39 @@ fn ms(d: Duration) -> i64 {
     i64::try_from(d.as_millis()).unwrap_or(i64::MAX)
 }
 
+fn re_ask_allowed(reason: &str) -> bool {
+    matches!(
+        reason,
+        og_reason::PIPE_CONNECT_FAILED | og_reason::PIPE_RESOLVE_FAILED
+    )
+}
+
+fn select_og(cfg: &ShimConfig) -> Option<PathBuf> {
+    let known_hashes = cfg.state_root.join("wrapper_hashes.txt");
+    fallback_binary::select(
+        &cfg.exe_dir,
+        cfg.vrc_tools_dir.as_deref(),
+        |p| p.is_file(),
+        |p| wrapper_identity::classify(p, Some(&known_hashes)) == WrapperKind::Ours,
+    )
+}
+
+pub fn exec_og_without_runtime(cfg: &ShimConfig, args: &[String]) -> i32 {
+    let Some(og_path) = select_og(cfg) else {
+        return 1;
+    };
+    let working_dir = og_path
+        .parent()
+        .map_or_else(|| cfg.exe_dir.clone(), PathBuf::from);
+    let mut cmd = std::process::Command::new(&og_path);
+    cmd.args(args)
+        .current_dir(working_dir)
+        .stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut cmd, og::CREATE_NO_WINDOW);
+    cmd.status().ok().and_then(|s| s.code()).unwrap_or(1)
+}
+
 impl Shim {
     pub fn new(
         cfg: ShimConfig,
@@ -141,24 +175,8 @@ impl Shim {
                 "no-url-fallback",
             )
         } else if self.policy.is_playback_proxy_url(&url) {
-            let emitted = self.wrap_for_gateway(&url, true);
-            self.write_url(&emitted);
-            let wrapped = emitted != url;
-            self.log(&format!(
-                "direct first-party playback URL host={} emitted-host={} bytes={} trust_gateway={}",
-                bare_host(&url),
-                bare_host(&emitted),
-                emitted.len(),
-                if wrapped { "wrapped" } else { "passthrough" }
-            ));
-            (
-                0,
-                if wrapped {
-                    "direct-first-party-playback-wrapped"
-                } else {
-                    "direct-first-party-playback"
-                },
-            )
+            self.first_party_playback(&url, player, format_arg.as_deref())
+                .await
         } else {
             self.resolve_or_fall_back(args, &url, player, format_arg.as_deref())
                 .await
@@ -211,19 +229,89 @@ impl Shim {
         let reason = result
             .fallback_reason
             .unwrap_or(og_reason::PIPE_RESOLVE_FAILED);
+        self.fall_back(args, url, player, format_arg, reason, result.public_message)
+            .await
+    }
+
+    async fn first_party_playback(
+        &mut self,
+        url: &str,
+        player: Player,
+        format_arg: Option<&str>,
+    ) -> (i32, &'static str) {
+        let result = self
+            .resolve_over_pipe(url, player, format_arg, None, false)
+            .await;
+        let checked = result
+            .url
+            .as_deref()
+            .filter(|u| !u.is_empty() && url_guard::is_safe_to_emit(Some(u)))
+            .map(str::to_owned);
+        let target = if let Some(resolved) = checked {
+            resolved
+        } else {
+            self.log(&format!(
+                "first-party playback URL kept as is reason={}",
+                result
+                    .fallback_reason
+                    .unwrap_or(og_reason::PIPE_RESOLVE_FAILED)
+            ));
+            url.to_owned()
+        };
+        let emitted = self.wrap_for_gateway(&target, true);
+        self.write_url(&emitted);
+        let wrapped = emitted != target;
+        self.log(&format!(
+            "direct first-party playback URL host={} emitted-host={} bytes={} trust_gateway={}",
+            bare_host(url),
+            bare_host(&emitted),
+            emitted.len(),
+            if wrapped { "wrapped" } else { "passthrough" }
+        ));
+        (
+            0,
+            if wrapped {
+                "direct-first-party-playback-wrapped"
+            } else {
+                "direct-first-party-playback"
+            },
+        )
+    }
+
+    async fn fall_back(
+        &mut self,
+        args: &[String],
+        url: &str,
+        player: Player,
+        format_arg: Option<&str>,
+        reason: &'static str,
+        public_message: Option<String>,
+    ) -> (i32, &'static str) {
         if self.server_fallback_reason.is_none() {
             self.server_fallback_reason = Some(reason.to_owned());
         }
         let elapsed = self.elapsed_ms();
-        self.notify_og_fallback(Some(url), reason, elapsed, result.public_message)
+        self.notify_og_fallback(Some(url), reason, elapsed, public_message)
             .await;
+        if source_url::is_direct_media(url) && url_guard::is_safe_to_emit(Some(url)) {
+            self.write_url(url);
+            self.log(&format!(
+                "FALLBACK direct media: emitted source URL host={} reason={reason}",
+                bare_host(url)
+            ));
+            return (0, "direct-media-fallback");
+        }
         let re_ask = ReAsk {
             url,
             player,
             format_arg,
         };
+        let allowed = re_ask_allowed(reason);
+        if !allowed {
+            self.log(&format!("FALLBACK og result is final reason={reason}"));
+        }
         (
-            self.exec_fallback(args, Some(url), Some(&re_ask), true)
+            self.exec_fallback(args, Some(url), allowed.then_some(&re_ask), true)
                 .await,
             "pipe-failed-og-fallback",
         )
@@ -263,7 +351,7 @@ impl Shim {
                 }
                 Err(e) => {
                     let elapsed = ms(started.elapsed());
-                    self.log(&match e {
+                    self.log(&match &e {
                         ConnectError::TimedOut => {
                             format!(
                                 "pipe connect TIMED OUT after {elapsed} ms (watchdog not running?)"
@@ -274,7 +362,11 @@ impl Shim {
                         }
                         ConnectError::Other(e) => format!("pipe connect failed: {e:?}"),
                     });
-                    if retries == 0 && total_ms - elapsed > 2000 {
+                    if retries == 0
+                        && matches!(e, ConnectError::TimedOut)
+                        && total_ms - elapsed > 2000
+                        && !self.policy.is_playback_proxy_url(url)
+                    {
                         retries += 1;
                         self.log("pipe connect retry in 750 ms");
                         tokio::time::sleep(Duration::from_millis(750)).await;

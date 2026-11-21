@@ -382,7 +382,12 @@ fn og_window_follows_the_budget_rules() {
         budget::og_window(ms(16_000), true, Some(41_500)),
         ms(12_000)
     );
-    assert_eq!(budget::og_window(ms(16_000), true, Some(20_000)), ms(7_000));
+    assert_eq!(
+        budget::og_window(ms(16_000), true, Some(20_000)),
+        budget::OG_RESERVE
+    );
+    assert_eq!(budget::og_window(ms(10_000), true, None), ms(13_000));
+    assert_eq!(budget::OG_RESERVE, ms(12_000));
     assert_eq!(
         budget::og_window(ms(26_500), true, Some(41_500)),
         budget::OG_RESERVE

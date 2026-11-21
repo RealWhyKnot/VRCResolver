@@ -26,7 +26,7 @@ use vrcr_watchdog::monitoring::vrclog::{
     self, MonitorDeps, PlaybackSink, RelayWedge, VrcLogMonitor, initial_read_offset_for_new_file,
     parse_observed_resolution, should_rescan_directory,
 };
-use vrcr_watchdog::og_hint::{self, OgFallbackHint};
+use vrcr_watchdog::og_hint::OgFallbackHint;
 use vrcr_watchdog::relay::RelayActivity;
 use vrcr_watchdog::resolve_cache::{Key, ResolveCache};
 use vrcr_watchdog::stats::{
@@ -109,10 +109,7 @@ impl Rig {
             self.clock.now(),
             Log::disabled(),
         )));
-        self.hint = Some(Arc::new(OgFallbackHint::new(
-            og_hint::DEFAULT_TTL,
-            self.clock.now(),
-        )));
+        self.hint = Some(Arc::new(OgFallbackHint::new(self.clock.now())));
         self
     }
 
@@ -256,6 +253,8 @@ impl LogDir {
 }
 
 mod audio_cases;
+
+mod fallback_cases;
 
 mod contracts_cases;
 

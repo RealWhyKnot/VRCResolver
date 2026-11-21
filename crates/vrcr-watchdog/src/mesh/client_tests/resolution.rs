@@ -182,6 +182,7 @@ async fn feedback_without_a_link_is_dropped() {
         delivered_height: None,
         detail: None,
         correlation_id: None,
+        source_url: None,
     });
     assert!(!h.client.is_connected());
     drop(h.dir);

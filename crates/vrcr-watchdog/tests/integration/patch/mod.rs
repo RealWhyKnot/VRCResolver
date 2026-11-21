@@ -204,3 +204,5 @@ mod guards_cases;
 mod recovery_cases;
 
 mod restore_cases;
+
+mod vrchat_exit_cases;

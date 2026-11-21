@@ -205,6 +205,7 @@ fn diagnostics_feedback_is_bounded_and_has_only_technical_fields() {
             ms_since_open: 12500,
             client_id: "existing-client",
             correlation_id: Some("existing-correlation"),
+            source_url: None,
             timestamp: now(1),
             delivered_height: None,
             detail: Some(
@@ -456,6 +457,7 @@ fn diagnostics_feedback_rejects_paths_and_unrecognised_failure_sources() {
             ms_since_open: 0,
             client_id: "existing",
             correlation_id: None,
+            source_url: None,
             timestamp: now(1),
             delivered_height: None,
             detail: None,

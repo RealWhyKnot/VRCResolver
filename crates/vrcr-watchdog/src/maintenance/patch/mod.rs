@@ -48,6 +48,7 @@ struct ClassifyCache {
 
 struct TickState {
     restored: bool,
+    paused: bool,
     last_patch: Option<Instant>,
     classify: Option<ClassifyCache>,
     previous: Option<Stamp>,
@@ -205,6 +206,7 @@ impl PatchManager {
             worker: Mutex::new(None),
             state: Mutex::new(TickState {
                 restored: false,
+                paused: false,
                 last_patch: None,
                 classify: None,
                 previous: None,
@@ -374,7 +376,7 @@ impl PatchManager {
 
     pub fn tick_once(&self) {
         let mut st = self.lock();
-        if st.restored {
+        if st.restored || st.paused {
             return;
         }
         self.tick_core(&mut st, false);
@@ -388,6 +390,7 @@ impl PatchManager {
         let target = dir.join(TARGET_NAME);
         let mut st = self.lock();
         let missing = !st.restored
+            && !st.paused
             && match fs::metadata(&target) {
                 Ok(meta) => {
                     meta.is_file()
@@ -404,7 +407,7 @@ impl PatchManager {
         let mut st = self.lock();
         let fixed = if st.restored {
             None
-        } else if self.classify(&mut st, &target) == WrapperKind::Ours {
+        } else if st.paused || self.classify(&mut st, &target) == WrapperKind::Ours {
             Some(false)
         } else {
             self.tick_core(&mut st, true);
@@ -428,3 +431,6 @@ impl Drop for PatchManager {
 }
 
 mod patching;
+mod vrchat;
+
+pub use vrchat::{PatchSession, VRCHAT_EXIT};

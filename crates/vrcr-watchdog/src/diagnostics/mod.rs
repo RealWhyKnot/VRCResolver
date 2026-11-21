@@ -458,6 +458,7 @@ impl PlaybackLog {
                     delivered_height: None,
                     detail: Some(context.retry_reason.clone()),
                     correlation_id: Some(play.id.clone()),
+                    source_url: Some(play.source_url.clone()),
                 })
             })
             .collect()

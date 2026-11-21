@@ -14,10 +14,12 @@ use vrcr_shared::first_party::FirstPartyPolicy;
 use vrcr_shared::log::Log;
 use vrcr_shared::logutil::redact_url;
 use vrcr_shared::paths::AppPaths;
-use vrcr_shared::trust_gateway::{GATEWAY_HOST, extract_target};
+use vrcr_shared::source_url;
+use vrcr_shared::trust_gateway::{GATEWAY_HOST, extract_target, is_local_gateway_host};
 use vrcr_shared::wire::feedback;
 
 use crate::clock::Now;
+use crate::emitted::{EmittedUrls, Origin};
 use crate::health::{self, HealthGate, Transition};
 use crate::ipc::{Feedback, Mesh};
 use crate::local;
@@ -27,7 +29,7 @@ use crate::og_hint::OgFallbackHint;
 use crate::relay::RelayActivity;
 use crate::resolve_cache::ResolveCache;
 
-pub const AVPRO_OPEN_FAIL_WINDOW: Duration = Duration::from_secs(10);
+pub const AVPRO_OPEN_FAIL_WINDOW: Duration = Duration::from_secs(35);
 pub const DELIVERED_HEIGHT_TTL: Duration = Duration::from_secs(10 * 60);
 pub const PLAYING_FEEDBACK_INTERVAL: Duration = Duration::from_secs(15);
 pub const DEFAULT_SILENT_STALL_WINDOW: Duration = Duration::from_secs(12);
@@ -98,6 +100,7 @@ pub struct MonitorDeps {
     pub cache: Option<Arc<ResolveCache>>,
     pub stats: Option<Arc<crate::stats::Stats>>,
     pub og_hint: Option<Arc<OgFallbackHint>>,
+    pub emitted: Option<Arc<EmittedUrls>>,
     pub health: Option<Arc<HealthGate>>,
     pub local: Option<Arc<Manifests>>,
     pub relay_wedge: Option<RelayWedge>,
@@ -123,6 +126,7 @@ impl MonitorDeps {
             cache: None,
             stats: None,
             og_hint: None,
+            emitted: None,
             health: None,
             local: None,
             relay_wedge: None,
@@ -313,14 +317,70 @@ impl VrcLogMonitor {
         self.deps.policy.read().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn is_attributed(&self, url: &str) -> bool {
-        !url.is_empty()
-            && (self.policy().is_playback_proxy_url(url)
-                || self
-                    .deps
+    pub fn origin(&self, url: &str) -> Option<Origin> {
+        if url.trim().is_empty() {
+            return None;
+        }
+        self.deps
+            .emitted
+            .as_ref()
+            .and_then(|map| map.origin_by_url(url))
+            .or_else(|| {
+                self.deps
                     .cache
                     .as_ref()
-                    .is_some_and(|c| c.source_url_for_resolved(url).is_some()))
+                    .and_then(|c| c.source_url_for_resolved(url))
+                    .map(|source_url| Origin {
+                        source_url,
+                        correlation_id: None,
+                    })
+            })
+    }
+
+    fn is_attributed(&self, url: &str) -> bool {
+        !url.is_empty() && (self.policy().is_playback_proxy_url(url) || self.origin(url).is_some())
+    }
+
+    fn confirm_route(&self, url: &str) {
+        let Some(hint) = &self.deps.og_hint else {
+            return;
+        };
+        let source = if local::is_play_url(url) {
+            self.deps.local.as_ref().and_then(|plays| plays.source(url))
+        } else {
+            self.origin(url)
+                .map(|origin| origin.source_url)
+                .or_else(|| self.relay_source(url))
+        };
+        if let Some(source) = source
+            && hint.try_clear(&source)
+        {
+            self.deps.log.line(&format!(
+                "[vrclog] playback confirmed, failure hint cleared url={}",
+                redact_url(&source)
+            ));
+        }
+    }
+
+    fn relay_source(&self, url: &str) -> Option<String> {
+        let parsed = url::Url::parse(url.trim()).ok()?;
+        if !parsed.host_str().is_some_and(is_local_gateway_host) {
+            return None;
+        }
+        self.deps
+            .stats
+            .as_ref()?
+            .playback
+            .source_for_path(parsed.path())
+    }
+
+    fn stall_matches(&self, stall: &Stall, line_url: &str) -> bool {
+        let canonical = self.canonical(&stall.url);
+        source_url::same_source(line_url, &stall.url)
+            || source_url::same_source(line_url, &canonical)
+            || self
+                .origin(&canonical)
+                .is_some_and(|o| source_url::same_source(line_url, &o.source_url))
     }
 
     fn confirm_playback(&self, url: &str) {

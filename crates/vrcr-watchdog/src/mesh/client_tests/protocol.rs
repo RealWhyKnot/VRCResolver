@@ -416,3 +416,172 @@ async fn one_outage_with_ten_failed_attempts_prints_only_loss_and_recovery() {
     h.client.inner.console_disconnected();
     assert_eq!(h.out.text().lines().count(), 2);
 }
+
+fn revocations(h: &Harness) -> Arc<std::sync::Mutex<Vec<crate::mesh::client::Revocation>>> {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = Arc::clone(&seen);
+    h.client.on_revocation(move |r| {
+        sink.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(r.clone());
+    });
+    seen
+}
+
+#[tokio::test]
+async fn an_unsolicited_fallback_frame_revokes_the_earlier_answer() {
+    let h = Harness::new();
+    let seen = revocations(&h);
+    h.json(r#"{"action":"fallback_native","id":"srv-7","correlation_id":"cid-7","source_url":"https://live.cdn4.io/ttfcvr/index.m3u8","reason":"playback_failed"}"#)
+        .await;
+    let got = seen.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    assert_eq!(
+        got,
+        vec![crate::mesh::client::Revocation {
+            request_id: "srv-7".to_owned(),
+            correlation_id: Some("cid-7".to_owned()),
+            url: Some("https://live.cdn4.io/ttfcvr/index.m3u8".to_owned()),
+            reason: Some(fallback::PLAYBACK_FAILED.to_owned()),
+        }]
+    );
+    assert!(
+        h.log()
+            .contains("[mesh] unsolicited fallback_native id=srv-7 cid=cid-7")
+    );
+}
+
+#[tokio::test]
+async fn a_fallback_for_a_pending_request_is_not_a_revocation() {
+    let h = Harness::new();
+    let seen = revocations(&h);
+    let mut rx = h.pending("r1");
+    h.json(r#"{"action":"fallback_native","id":"r1","reason":"discovery_in_progress"}"#)
+        .await;
+    assert!(done(&mut rx).is_some());
+    assert_eq!(seen.lock().unwrap_or_else(|e| e.into_inner()).len(), 0);
+}
+
+#[tokio::test]
+async fn an_unsolicited_resolved_frame_is_not_a_revocation() {
+    let h = Harness::new();
+    let seen = revocations(&h);
+    h.json(r#"{"action":"resolved","id":"late","url":"https://media.example/v.mp4"}"#)
+        .await;
+    assert_eq!(seen.lock().unwrap_or_else(|e| e.into_inner()).len(), 0);
+}
+
+#[tokio::test]
+async fn a_server_revocation_frame_in_msgpack_carries_ids_and_source() {
+    let h = Harness::new();
+    let seen = revocations(&h);
+    h.binary(&mp_frame(vec![
+        mp_str(action::FALLBACK_NATIVE),
+        mp_str("req-1"),
+        mp_str("playback_failed"),
+        rmpv::Value::Nil,
+        rmpv::Value::Nil,
+        mp_str("cid-1"),
+        mp_str("https://www.youtube.com/watch?v=abc"),
+    ]))
+    .await;
+    let got = seen.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    assert_eq!(
+        got,
+        vec![crate::mesh::client::Revocation {
+            request_id: "req-1".to_owned(),
+            correlation_id: Some("cid-1".to_owned()),
+            url: Some("https://www.youtube.com/watch?v=abc".to_owned()),
+            reason: Some("playback_failed".to_owned()),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn an_unsolicited_binary_fallback_frame_revokes_by_request_id() {
+    let h = Harness::new();
+    let seen = revocations(&h);
+    h.binary(&mp_frame(vec![
+        mp_str(action::FALLBACK_NATIVE),
+        mp_str("srv-8"),
+        mp_str(fallback::PLAYBACK_FAILED),
+    ]))
+    .await;
+    let got = seen.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].request_id, "srv-8");
+    assert_eq!(got[0].reason.as_deref(), Some(fallback::PLAYBACK_FAILED));
+}
+
+#[tokio::test]
+async fn late_fallback_answers_to_timed_out_requests_are_not_revocations() {
+    let h = Harness::new();
+    let seen = revocations(&h);
+    h.json(r#"{"action":"fallback_native","id":"late-1","reason":"all_configs_failed"}"#)
+        .await;
+    h.json(r#"{"action":"fallback_native","id":"late-2"}"#)
+        .await;
+    h.binary(&mp_frame(vec![
+        mp_str(action::FALLBACK_NATIVE),
+        mp_str("late-3"),
+        mp_str(fallback::CLIENT_DEADLINE_EXCEEDED),
+    ]))
+    .await;
+    assert_eq!(seen.lock().unwrap_or_else(|e| e.into_inner()).len(), 0);
+    assert!(
+        h.log()
+            .contains("[mesh] late fallback_native ignored id=late-1 reason=all_configs_failed")
+    );
+}
+
+fn resolved_with_delivery(tail: Vec<rmpv::Value>) -> Vec<u8> {
+    let mut items = vec![mp_str(action::RESOLVED), mp_str("r1")];
+    items.extend(std::iter::repeat_n(rmpv::Value::Nil, 11));
+    items.extend(tail);
+    mp_frame(items)
+}
+
+async fn binary_resolved(h: &Harness, frame: &[u8]) -> ResolveResponse {
+    let mut rx = h.pending("r1");
+    h.binary(frame).await;
+    let result = done(&mut rx).unwrap_or_else(|| panic!("still pending"));
+    serde_json::from_slice(&result.frame).unwrap_or_else(|e| panic!("{e}"))
+}
+
+#[tokio::test]
+async fn binary_resolved_decodes_live_delivery_and_validated() {
+    let h = Harness::new();
+    let present = resolved_with_delivery(vec![
+        rmpv::Value::Boolean(true),
+        mp_str("relay"),
+        rmpv::Value::Boolean(false),
+    ]);
+    let frame = binary_resolved(&h, &present).await;
+    assert_eq!(frame.live, Some(true));
+    assert_eq!(frame.delivery.as_deref(), Some("relay"));
+    assert_eq!(frame.validated, Some(false));
+
+    let nil = rmpv::Value::Nil;
+    let frame = binary_resolved(
+        &h,
+        &resolved_with_delivery(vec![nil.clone(), nil.clone(), nil]),
+    )
+    .await;
+    assert_eq!(
+        (frame.live, frame.delivery, frame.validated),
+        (None, None, None)
+    );
+
+    let frame = binary_resolved(&h, &resolved_with_delivery(Vec::new())).await;
+    assert_eq!(
+        (frame.live, frame.delivery, frame.validated),
+        (None, None, None)
+    );
+}
+
+#[tokio::test]
+async fn binary_resolved_rejects_a_non_boolean_live_flag() {
+    let h = Harness::new();
+    let mut rx = h.pending("r1");
+    h.binary(&resolved_with_delivery(vec![mp_str("yes")])).await;
+    assert!(done(&mut rx).is_none());
+}

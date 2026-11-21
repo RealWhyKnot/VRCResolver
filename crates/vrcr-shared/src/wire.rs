@@ -56,6 +56,7 @@ pub mod fallback {
     pub const PROTOCOL_ERROR: &str = "protocol_error";
     pub const UNITY_UNSUPPORTED_FORMAT: &str = "unity_unsupported_format";
     pub const WARP_DOWN: &str = "warp_down";
+    pub const PLAYBACK_FAILED: &str = "playback_failed";
     pub const VALIDATION_FAILED_PREFIX: &str = "validation_failed_";
 }
 
@@ -249,6 +250,12 @@ pub struct ResolveResponse {
     pub public_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_after_ms: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validated: Option<bool>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -321,6 +328,8 @@ pub struct PlaybackFeedbackFrame {
     pub client_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delivered_height: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]

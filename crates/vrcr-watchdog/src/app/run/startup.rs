@@ -62,7 +62,8 @@ impl App {
             self.log.clone(),
         ));
         put(&self.parts.cache, std::sync::Arc::clone(&cache));
-        let og_hint = Arc::new(OgFallbackHint::new(og_hint::DEFAULT_TTL, clock::system()));
+        let og_hint = Arc::new(OgFallbackHint::new(clock::system()));
+        let emitted = Arc::new(EmittedUrls::new(clock::system()));
         let health = Arc::new(HealthGate::new(
             health::DEFAULT_COOLDOWN,
             health::DEFAULT_VERDICT_TIMEOUT,
@@ -92,7 +93,38 @@ impl App {
                 move |req, reason| reporter.report_fallback(req, reason, None)
             })
             .local(local_step)
+            .emitted(std::sync::Arc::clone(&emitted))
+            .first_party(mesh.first_party())
             .build();
+        mesh.on_revocation({
+            let emitted = std::sync::Arc::clone(&emitted);
+            let cache = std::sync::Arc::clone(&cache);
+            let og_hint = std::sync::Arc::clone(&og_hint);
+            let ux = self.ux.clone();
+            move |revocation| {
+                let Some(origin) = emitted.origin_for_revocation(
+                    &revocation.request_id,
+                    revocation.correlation_id.as_deref(),
+                    revocation.url.as_deref(),
+                ) else {
+                    return;
+                };
+                let (evicted, lease) =
+                    og_hint::arm(Some(&cache), Some(&og_hint), &origin.source_url);
+                ux.log_write(
+                    Component::Mesh,
+                    &format!(
+                        "server withdrew a resolved link host={} reason={} evicted={evicted} og_hint={}",
+                        vrcr_shared::logutil::bare_host(&origin.source_url),
+                        vrcr_shared::logutil::sanitize_for_console(
+                            revocation.reason.as_deref().unwrap_or("?"),
+                            32
+                        ),
+                        og_hint::lease_label(lease)
+                    ),
+                );
+            }
+        });
         put(
             &self.parts.ipc,
             vec![ipc.serve(wire::PIPE_NAME), ipc.serve(legacy::PIPE_NAME)],
@@ -126,7 +158,8 @@ impl App {
         );
         deps.cache = Some(Arc::clone(&cache));
         deps.stats = Some(Arc::clone(&stats));
-        deps.og_hint = Some(og_hint);
+        deps.og_hint = Some(std::sync::Arc::clone(&og_hint));
+        deps.emitted = Some(std::sync::Arc::clone(&emitted));
         deps.health = Some(health);
         deps.local = Some(Arc::clone(&manifests));
         deps.relay_wedge = Some(RelayWedge {
@@ -147,6 +180,21 @@ impl App {
         if !patcher.start() {
             self.life.shutdown("patch-refused", false, None);
             return 2;
+        }
+        match vrchat::spawn(
+            Box::new(VrchatProcesses),
+            Arc::new(patch::PatchSession::new(
+                Arc::clone(&patcher),
+                &state_root,
+                self.ux.clone(),
+            )),
+            vrchat::Timing::LIVE,
+        ) {
+            Some(watch) => put(&self.parts.vrchat, watch),
+            None => self.ux.log_warn(
+                Component::Patch,
+                "could not start the VRChat exit watcher; yt-dlp.exe stays patched until VRCResolver closes",
+            ),
         }
         phases.mark("patch");
 
@@ -328,6 +376,33 @@ impl App {
                     mesh.first_party(),
                     RelayShared {
                         recovery: crate::relay::retry::Hooks {
+                            failed: Some({
+                                let cache = Arc::clone(&cache);
+                                let ux = self.ux.clone();
+                                Arc::new(move |failure| {
+                                    let source = failure
+                                        .source_url
+                                        .clone()
+                                        .or_else(|| {
+                                            emitted
+                                                .origin_by_url(&failure.target_url)
+                                                .map(|o| o.source_url)
+                                        })
+                                        .unwrap_or_else(|| failure.target_url.clone());
+                                    let (evicted, lease) =
+                                        og_hint::arm(Some(&cache), Some(&og_hint), &source);
+                                    cache.evict_by_url(&failure.target_url);
+                                    ux.log_write(
+                                        Component::Relay,
+                                        &format!(
+                                            "relay route failed host={} reason={} evicted={evicted} og_hint={}",
+                                            vrcr_shared::logutil::bare_host(&source),
+                                            failure.reason,
+                                            og_hint::lease_label(lease)
+                                        ),
+                                    );
+                                })
+                            }),
                             invalidate: Some(Arc::new(move |url| {
                                 cache.evict_by_url(url);
                             })),

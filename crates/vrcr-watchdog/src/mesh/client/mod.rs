@@ -199,6 +199,16 @@ enum ReplyWait {
     Dropped,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Revocation {
+    pub request_id: String,
+    pub correlation_id: Option<String>,
+    pub url: Option<String>,
+    pub reason: Option<String>,
+}
+
+type RevocationSink = Arc<dyn Fn(&Revocation) + Send + Sync>;
+
 struct Inner {
     cfg: Config,
     ux: Ux,
@@ -212,6 +222,7 @@ struct Inner {
     pending: Mutex<HashMap<String, oneshot::Sender<MeshResult>>>,
     inflight_cids: Mutex<HashMap<String, String>>,
     recent_cids: Mutex<HashMap<String, (String, Instant)>>,
+    revoked: RwLock<Option<RevocationSink>>,
     parse_failures: Mutex<HashMap<String, (Instant, u32)>>,
     current: Mutex<Option<Arc<Link>>>,
     ready: Mutex<Option<Arc<Link>>>,
@@ -260,6 +271,7 @@ impl MeshClient {
                 pending: Mutex::new(HashMap::new()),
                 inflight_cids: Mutex::new(HashMap::new()),
                 recent_cids: Mutex::new(HashMap::new()),
+                revoked: RwLock::new(None),
                 parse_failures: Mutex::new(HashMap::new()),
                 current: Mutex::new(None),
                 ready: Mutex::new(None),
@@ -320,6 +332,14 @@ impl MeshClient {
 
     pub fn first_party(&self) -> Arc<RwLock<FirstPartyPolicy>> {
         Arc::clone(&self.inner.first_party)
+    }
+
+    pub fn on_revocation(&self, sink: impl Fn(&Revocation) + Send + Sync + 'static) {
+        *self
+            .inner
+            .revoked
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(sink));
     }
 
     pub fn client_id(&self) -> &str {
@@ -421,6 +441,7 @@ impl Mesh for MeshClient {
             ms_since_open: fb.ms_since_open,
             client_id: &inner.client_id,
             correlation_id: cid.as_deref(),
+            source_url: fb.source_url.as_deref(),
             timestamp: SystemTime::now(),
             delivered_height: fb.delivered_height,
             detail,

@@ -54,6 +54,7 @@ fn playback_feedback_payload_drops_empty_optionals() {
         ms_since_open: 1200,
         client_id: "cid0",
         correlation_id: Some(""),
+        source_url: None,
         timestamp: at,
         delivered_height: Some(0),
         detail: Some(""),
@@ -64,6 +65,7 @@ fn playback_feedback_payload_drops_empty_optionals() {
     assert_eq!(v["ms_since_open"], 1200);
     assert_eq!(v["client_id"], "cid0");
     assert!(v.get("correlation_id").is_none_or(Value::is_null));
+    assert!(v.get("source_url").is_none_or(Value::is_null));
     assert!(v.get("delivered_height").is_none_or(Value::is_null));
     assert!(v.get("detail").is_none_or(Value::is_null));
     let text = playback_feedback_payload(vrcr_watchdog::mesh::frames::PlaybackFeedback {
@@ -73,12 +75,14 @@ fn playback_feedback_payload_drops_empty_optionals() {
         ms_since_open: 5,
         client_id: "c",
         correlation_id: Some("k1"),
+        source_url: Some("https://www.youtube.com/watch?v=k1"),
         timestamp: at,
         delivered_height: Some(720),
         detail: Some("d"),
     });
     let v: Value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(v["correlation_id"], "k1");
+    assert_eq!(v["source_url"], "https://www.youtube.com/watch?v=k1");
     assert_eq!(v["delivered_height"], 720);
     assert_eq!(v["detail"], "d");
 }

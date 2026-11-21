@@ -11,6 +11,8 @@ use vrcr_shared::wire::{PlaybackFeedbackFrame, ResolveResponse, action, fallback
 use super::connect::Probe;
 use crate::ipc::MeshResult;
 
+pub const CORRELATION_ID: &str = "correlation_id";
+
 pub const WIRE_DEADLINE_MARGIN_MS: i64 = 500;
 pub const PING_FRAME: &str = r#"{"action":"ping"}"#;
 pub const PONG_FRAME: &str = r#"{"action":"pong"}"#;
@@ -120,6 +122,7 @@ pub struct PlaybackFeedback<'a> {
     pub ms_since_open: i32,
     pub client_id: &'a str,
     pub correlation_id: Option<&'a str>,
+    pub source_url: Option<&'a str>,
     pub timestamp: SystemTime,
     pub delivered_height: Option<i32>,
     pub detail: Option<&'a str>,
@@ -133,6 +136,7 @@ pub fn playback_feedback_payload(input: PlaybackFeedback<'_>) -> String {
         ms_since_open,
         client_id,
         correlation_id,
+        source_url,
         timestamp,
         delivered_height,
         detail,
@@ -146,6 +150,9 @@ pub fn playback_feedback_payload(input: PlaybackFeedback<'_>) -> String {
         ms_since_open,
         client_id: client_id.to_owned(),
         correlation_id: correlation_id.filter(|c| !c.is_empty()).map(str::to_owned),
+        source_url: source_url
+            .filter(|s| !s.is_empty() && *s != url)
+            .map(str::to_owned),
         delivered_height: delivered_height.filter(|h| *h > 0),
         detail: detail.filter(|d| !d.is_empty()).map(str::to_owned),
     };
@@ -253,6 +260,9 @@ pub fn decode_binary(payload: &[u8]) -> Result<BinaryFrame, String> {
                 bytes_estimate: f.int64(10)?,
                 expires_at: f.text(11)?,
                 resolved_height: f.int32(12)?,
+                live: f.boolean(13)?,
+                delivery: f.text(14)?,
+                validated: f.boolean(15)?,
                 ..Default::default()
             }))
         }
@@ -261,14 +271,20 @@ pub fn decode_binary(payload: &[u8]) -> Result<BinaryFrame, String> {
                 items: &items,
                 what: "fallback_native",
             };
-            Ok(BinaryFrame::FallbackNative(ResolveResponse {
+            let mut resp = ResolveResponse {
                 action: action::FALLBACK_NATIVE.to_owned(),
                 id: f.text(1)?.unwrap_or_default(),
                 reason: f.text(2)?,
                 public_message: f.text(3)?,
                 retry_after_ms: f.int32(4)?,
+                url: f.text(6)?,
                 ..Default::default()
-            }))
+            };
+            if let Some(cid) = f.text(5)? {
+                resp.extra
+                    .insert(CORRELATION_ID.to_owned(), Value::String(cid));
+            }
+            Ok(BinaryFrame::FallbackNative(resp))
         }
         action::RESOLVE_LOG => {
             let f = Fields {
@@ -301,6 +317,17 @@ impl Fields<'_> {
                 .ok_or_else(|| format!("{} deserialize: field {i} is not valid utf-8", self.what)),
             Some(_) => Err(format!(
                 "{} deserialize: field {i} is not a string",
+                self.what
+            )),
+        }
+    }
+
+    fn boolean(&self, i: usize) -> Result<Option<bool>, String> {
+        match self.items.get(i) {
+            None | Some(Mp::Nil) => Ok(None),
+            Some(Mp::Boolean(b)) => Ok(Some(*b)),
+            Some(_) => Err(format!(
+                "{} deserialize: field {i} is not a boolean",
                 self.what
             )),
         }

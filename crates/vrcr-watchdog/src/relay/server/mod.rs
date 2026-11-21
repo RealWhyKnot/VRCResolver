@@ -2,13 +2,14 @@ mod request;
 
 use request::handle;
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::task::Poll;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -97,6 +98,8 @@ struct Inner {
     live_playlists: super::live::history::History,
     retries: super::retry::RetryMemory,
     slow: super::direct::SlowStreams,
+    failed_plays: Mutex<HashMap<String, SystemTime>>,
+    served_plays: Mutex<HashMap<String, SystemTime>>,
     in_flight: AtomicUsize,
     req_counter: AtomicU64,
     request_prefix: String,
@@ -148,6 +151,8 @@ impl RelayServer {
             live_playlists: super::live::history::History::default(),
             retries: super::retry::RetryMemory::default(),
             slow: super::direct::SlowStreams::default(),
+            failed_plays: Mutex::new(HashMap::new()),
+            served_plays: Mutex::new(HashMap::new()),
             in_flight: AtomicUsize::new(0),
             req_counter: AtomicU64::new(0),
             request_prefix: uuid::Uuid::new_v4().simple().to_string(),
@@ -502,7 +507,10 @@ impl Inner {
             &self.deps.ux,
         );
         self.report_retries(false);
-        self.slow.observe(sample, &self.deps.ux);
+        let slow = self.slow.observe(sample, &self.deps.ux);
+        if let Some(reason) = self.route_failure(sample, slow, now) {
+            self.route_failed(sample, reason, now);
+        }
         if sample.status < 300 && sample.failure.is_none() {
             self.deps.hitch.record_diagnostic(
                 sample,

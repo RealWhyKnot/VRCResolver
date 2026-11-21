@@ -180,7 +180,11 @@ macro_rules! video_case {
     };
 }
 
-video_case!(bundled_failed, Failed, "VRChat couldn't play it either.");
+video_case!(
+    bundled_failed,
+    Failed,
+    "VRChat's own yt-dlp couldn't load it either."
+);
 video_case!(
     silent_stall,
     Stalled,

@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, ORIGIN, REFERER};
+use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, ORIGIN, RANGE, REFERER};
 use reqwest::{Client, RequestBuilder};
 use url::Url;
 use vrcr_shared::trust_gateway::is_local_gateway_host;
@@ -27,6 +27,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 const MEDIA_HOSTS: [&str; 2] = ["googlevideo.com", "youtube.com"];
 const MAX_REDIRECTS: usize = 3;
+const PROBE_RANGE: &str = "bytes=0-1023";
 const VISITOR_CAP: usize = 256 * 1024;
 const PLAYER_CAP: usize = 4 * 1024 * 1024;
 const MASTER_CAP: usize = 1024 * 1024;
@@ -100,19 +101,22 @@ fn is_host_within(host: &str, known: &str) -> bool {
             .is_some_and(|rest| rest.ends_with('.'))
 }
 
+pub fn is_redirect_allowed(next: &Url, previous: &[Url]) -> bool {
+    previous.len() < MAX_REDIRECTS
+        && next.scheme() == "https"
+        && next.host_str().is_some_and(|host| {
+            let host = host.to_ascii_lowercase();
+            let is_same = previous
+                .last()
+                .and_then(Url::host_str)
+                .is_some_and(|previous| previous.eq_ignore_ascii_case(&host));
+            is_same || MEDIA_HOSTS.iter().any(|known| is_host_within(&host, known))
+        })
+}
+
 fn redirects() -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(|attempt| {
-        let is_allowed = attempt.previous().len() <= MAX_REDIRECTS
-            && attempt.url().host_str().is_some_and(|host| {
-                let host = host.to_ascii_lowercase();
-                let is_same = attempt
-                    .previous()
-                    .last()
-                    .and_then(Url::host_str)
-                    .is_some_and(|previous| previous.eq_ignore_ascii_case(&host));
-                is_same || MEDIA_HOSTS.iter().any(|known| is_host_within(&host, known))
-            });
-        if is_allowed {
+        if is_redirect_allowed(attempt.url(), attempt.previous()) {
             attempt.follow()
         } else {
             attempt.stop()
@@ -120,23 +124,17 @@ fn redirects() -> reqwest::redirect::Policy {
     })
 }
 
-struct Fault<'a> {
-    manifests: &'a Manifests,
-    is_armed: bool,
-}
-
-impl Drop for Fault<'_> {
-    fn drop(&mut self) {
-        if self.is_armed {
-            self.manifests.fault();
-        }
-    }
-}
-
 fn is_about_the_video(reason: &str) -> bool {
     matches!(
         reason,
-        "not_youtube" | "relay_down" | "resting" | "not_playable" | "live" | "no_hls" | "no_h264"
+        "not_youtube"
+            | "relay_down"
+            | "resting"
+            | "not_playable"
+            | "live"
+            | "no_hls"
+            | "no_h264"
+            | youtube::VIDEO_LOCKED
     )
 }
 
@@ -173,17 +171,11 @@ impl Local {
     }
 
     async fn watched(&self, ask: Ask<'_>) -> Result<Play, &'static str> {
-        let mut fault = Fault {
-            manifests: &self.manifests,
-            is_armed: true,
-        };
         let played = self.attempt(ask).await;
         match &played {
-            Ok(_) => {
-                fault.is_armed = false;
-                self.manifests.answered();
-            }
-            Err(reason) => fault.is_armed = !is_about_the_video(reason),
+            Ok(_) => self.manifests.answered(),
+            Err(reason) if !is_about_the_video(reason) => self.manifests.fault(),
+            Err(_) => {}
         }
         played
     }
@@ -301,6 +293,7 @@ impl Local {
         let mut response = self
             .http
             .get(segment)
+            .header(RANGE, PROBE_RANGE)
             .send()
             .await
             .ok()

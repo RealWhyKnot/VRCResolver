@@ -54,7 +54,7 @@ fn main() {
     ux.video(
         VideoStatus::Failed,
         "youtube.com",
-        "VRChat couldn't play it either.",
+        "VRChat's own yt-dlp couldn't load it either.",
     );
     ROW.store(5, Ordering::Relaxed);
     ux.notice(

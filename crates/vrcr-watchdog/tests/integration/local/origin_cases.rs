@@ -15,7 +15,15 @@ async fn a_video_resolves_to_a_manifest_the_relay_can_serve() {
     let local = origin.local(&manifests);
     assert!(local.covers(WATCH));
     let played = play(&local).await.unwrap_or_else(|e| panic!("{e}"));
-    assert_eq!(origin.visitor_language().as_deref(), Some("en-US,en;q=0.9"));
+    assert_eq!(
+        origin.header("/sw.js_data", "accept-language").as_deref(),
+        Some("en-US,en;q=0.9")
+    );
+    assert_eq!(
+        origin.header("/hls/seg0.ts", "range").as_deref(),
+        Some("bytes=0-1023")
+    );
+    assert_eq!(origin.header("/hls/master.m3u8", "range"), None);
     assert_eq!(played.height, 1080);
     assert_eq!(played.video_codec, "avc1.64002A");
     assert_eq!(played.audio_codec.as_deref(), Some("mp4a.40.2"));
@@ -157,20 +165,50 @@ async fn refusals_about_one_video_never_rest_the_step() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_abandoned_attempt_counts_as_a_fault() {
+async fn an_abandoned_attempt_is_never_a_fault() {
     let origin = FakeOrigin::start(Mode::Plays).await;
     let manifests = Arc::new(Manifests::default());
     let local = origin.local(&manifests);
-    for _ in 0..FAULTS_BEFORE_REST {
+    for _ in 0..FAULTS_BEFORE_REST * 2 {
         drop(local.play(ask()));
-    }
-    assert!(!manifests.is_resting());
-    for _ in 0..FAULTS_BEFORE_REST {
         let mut attempt = local.play(ask());
         let waker = std::task::Waker::noop();
         let mut context = std::task::Context::from_waker(waker);
         assert!(attempt.as_mut().poll(&mut context).is_pending());
         drop(attempt);
+    }
+    assert!(!manifests.is_resting());
+    for _ in 0..FAULTS_BEFORE_REST * 2 {
+        let _ = tokio::time::timeout(Duration::from_millis(1), local.play(ask())).await;
+    }
+    assert!(!manifests.is_resting());
+    assert_eq!(play(&local).await.map(|played| played.height), Ok(1080));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_video_locked_behind_a_login_never_rests_the_step_or_drops_the_visitor() {
+    let origin = FakeOrigin::start(Mode::VideoLocked).await;
+    let manifests = Arc::new(Manifests::default());
+    let local = origin.local(&manifests);
+    for _ in 0..FAULTS_BEFORE_REST * 2 {
+        assert_eq!(play(&local).await, Err(youtube::VIDEO_LOCKED));
+    }
+    assert!(!manifests.is_resting());
+    let visitor_hits = origin
+        .hits()
+        .iter()
+        .filter(|path| *path == "/sw.js_data")
+        .count();
+    assert_eq!(visitor_hits, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_sign_in_wall_rests_the_step_like_any_site_fault() {
+    let origin = FakeOrigin::start(Mode::SignInWall).await;
+    let manifests = Arc::new(Manifests::default());
+    let local = origin.local(&manifests);
+    for _ in 0..FAULTS_BEFORE_REST {
+        assert_eq!(play(&local).await, Err(youtube::SIGN_IN_WALL));
     }
     assert!(manifests.is_resting());
 }

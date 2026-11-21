@@ -119,26 +119,36 @@ async fn open_health_gate_short_circuits_to_resolver_unhealthy() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn open_health_gate_lets_the_wrapper_re_ask_through() {
+async fn open_health_gate_holds_wrapper_re_asks() {
     let mesh = FakeMesh::offline();
     let ipc = Ipc::builder(std::sync::Arc::clone(&mesh), Ux::sink(), Log::disabled())
         .health(open_gate(vrcr_watchdog::clock::system()))
         .build();
     let v = ask(&ipc, &req("avpro", ",\"skip_native_hint\":true")).await;
-    assert_eq!(reason(&v), fallback::SERVER_UNREACHABLE);
-    assert_eq!(mesh.resolves().len(), 3);
+    assert_eq!(reason(&v), og_reason::RESOLVER_UNHEALTHY);
+    assert_eq!(mesh.resolves().len(), 0);
 }
 
 #[tokio::test(start_paused = true)]
-async fn open_health_gate_keeps_sites_with_blocked_og_on_the_server() {
+async fn open_health_gate_lets_only_the_og_blocked_url_through() {
     let hint = Arc::new(OgFallbackHint::default());
-    hint.record_og_blocked("https://youtu.be/abc");
-    let ipc = Ipc::builder(FakeMesh::offline(), Ux::sink(), Log::disabled())
+    hint.record_og_blocked("https://youtu.be/defghijklmn");
+    let mesh = FakeMesh::connected(vec![resolved_step()]);
+    let ipc = Ipc::builder(std::sync::Arc::clone(&mesh), Ux::sink(), Log::disabled())
         .og_hint(hint)
         .health(open_gate(vrcr_watchdog::clock::system()))
         .build();
-    let line = "{\"action\":\"resolve\",\"id\":\"x1\",\"url\":\"https://www.youtube.com/watch?v=def\",\"player\":\"avpro\"}";
-    assert_eq!(reason(&ask(&ipc, line).await), fallback::SERVER_UNREACHABLE);
+    let line = "{\"action\":\"resolve\",\"id\":\"x1\",\"url\":\"https://www.youtube.com/watch?v=defghijklmn\",\"player\":\"avpro\"}";
+    assert_eq!(ask(&ipc, line).await["url"], MESH_MEDIA);
+    assert_eq!(mesh.resolves().len(), 1);
+    let other = line
+        .replace("defghijklmn", "zzzzzzzzzzz")
+        .replace("x1", "x2");
+    assert_eq!(
+        reason(&ask(&ipc, &other).await),
+        og_reason::RESOLVER_UNHEALTHY
+    );
+    assert_eq!(mesh.resolves().len(), 1);
 }
 
 #[tokio::test]
