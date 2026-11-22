@@ -104,6 +104,12 @@ impl<M: Mesh> Ipc<M> {
             return;
         }
 
+        if self.is_native_fallback_host(&req.url) {
+            self.answer_native_fallback(pipe, &mut trace, &host, cid.as_deref())
+                .await;
+            return;
+        }
+
         if hint.is_some_and(|h| h.should_prefer_og(&req.url)) {
             self.ux.skipped(&host, "prior_load_failure", None);
             trace.reason = "prior_load_failure";
@@ -247,6 +253,11 @@ impl<M: Mesh> Ipc<M> {
                 .resolve_with_retries(&mut req, deadline, cid.as_deref())
                 .await
             {
+                Ok(result) if native_fallback::is_native_fallback_reply(&result) => {
+                    self.answer_native_fallback(pipe, &mut trace, &host, cid.as_deref())
+                        .await;
+                    return;
+                }
                 Ok(mut result) => {
                     let local = if result.action == action::FALLBACK_NATIVE {
                         if let Ok(mut response) =

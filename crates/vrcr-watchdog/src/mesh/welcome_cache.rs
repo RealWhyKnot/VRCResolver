@@ -27,6 +27,7 @@ pub struct Entry {
     pub server_version: Option<String>,
     pub first_party_hosts: Option<Vec<String>>,
     pub playback_proxy_paths: Option<Vec<String>>,
+    pub native_fallback_hosts: Option<Vec<String>>,
     pub stored_at: Option<String>,
 }
 
@@ -80,6 +81,7 @@ impl WelcomeCache {
                 server_version: welcome.server_version.clone(),
                 first_party_hosts: welcome.first_party_hosts.clone(),
                 playback_proxy_paths: welcome.playback_proxy_paths.clone(),
+                native_fallback_hosts: welcome.native_fallback_hosts.clone(),
                 stored_at: Some(iso8601_utc(SystemTime::now())),
             },
         );

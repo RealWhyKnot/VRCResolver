@@ -115,6 +115,7 @@ fn seed_cache(path: &Path) {
             feature::WELCOME_HOSTS.to_owned(),
         ]),
         first_party_hosts: Some(vec!["example.org".to_owned()]),
+        native_fallback_hosts: Some(vec!["ksync.arcanescripts.com".to_owned()]),
         server_version: Some("s1".to_owned()),
         ..WelcomeFrame::default()
     };
@@ -137,6 +138,8 @@ fn done(rx: &mut oneshot::Receiver<MeshResult>) -> Option<MeshResult> {
 }
 
 mod contracts;
+
+mod native_fallback;
 
 mod protocol;
 

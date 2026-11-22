@@ -95,6 +95,7 @@ impl App {
             .local(local_step)
             .emitted(std::sync::Arc::clone(&emitted))
             .first_party(mesh.first_party())
+            .native_fallback(mesh.native_fallback())
             .build();
         mesh.on_revocation({
             let emitted = std::sync::Arc::clone(&emitted);

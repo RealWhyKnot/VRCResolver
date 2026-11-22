@@ -1,7 +1,9 @@
 mod notices;
 pub use notices::Notice;
 mod presentation;
-pub use presentation::{VideoStatus, connection_duration, fallback_sentence};
+pub use presentation::{
+    NATIVE_FALLBACK_SENTENCE, VideoStatus, connection_duration, fallback_sentence,
+};
 
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, MutexGuard};

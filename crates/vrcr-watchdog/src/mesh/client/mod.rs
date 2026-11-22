@@ -19,6 +19,7 @@ use vrcr_shared::console::{Component, Ux};
 use vrcr_shared::first_party::FirstPartyPolicy;
 use vrcr_shared::log::Log;
 use vrcr_shared::logutil::sanitize_for_console;
+use vrcr_shared::native_fallback::NativeFallbackHosts;
 use vrcr_shared::wire::{
     self, ClientHelloFrame, ResolveRequest, ResolveResponse, WelcomeCachedFrame, WelcomeFrame,
     action, fallback, feature, feedback, format,
@@ -218,6 +219,7 @@ struct Inner {
     welcome_cache: WelcomeCache,
     tls: OnceLock<Result<Arc<rustls::ClientConfig>, String>>,
     first_party: Arc<RwLock<FirstPartyPolicy>>,
+    native_fallback: Arc<RwLock<NativeFallbackHosts>>,
     server: Mutex<Server>,
     pending: Mutex<HashMap<String, oneshot::Sender<MeshResult>>>,
     inflight_cids: Mutex<HashMap<String, String>>,
@@ -264,6 +266,7 @@ impl MeshClient {
                 welcome_cache,
                 tls: OnceLock::new(),
                 first_party: Arc::new(RwLock::new(FirstPartyPolicy::default())),
+                native_fallback: Arc::new(RwLock::new(NativeFallbackHosts::default())),
                 server: Mutex::new(Server {
                     negotiated_format: format::JSON.to_owned(),
                     ..Server::default()
@@ -332,6 +335,10 @@ impl MeshClient {
 
     pub fn first_party(&self) -> Arc<RwLock<FirstPartyPolicy>> {
         Arc::clone(&self.inner.first_party)
+    }
+
+    pub fn native_fallback(&self) -> Arc<RwLock<NativeFallbackHosts>> {
+        Arc::clone(&self.inner.native_fallback)
     }
 
     pub fn on_revocation(&self, sink: impl Fn(&Revocation) + Send + Sync + 'static) {

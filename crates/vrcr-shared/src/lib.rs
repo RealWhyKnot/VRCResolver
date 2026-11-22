@@ -9,6 +9,7 @@ pub mod install_manifest;
 pub mod legacy;
 pub mod log;
 pub mod logutil;
+pub mod native_fallback;
 pub mod paths;
 pub mod profile;
 pub mod relay;

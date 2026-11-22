@@ -419,3 +419,5 @@ mod health_cases;
 mod local_cases;
 
 mod requests_cases;
+
+mod native_fallback_cases;

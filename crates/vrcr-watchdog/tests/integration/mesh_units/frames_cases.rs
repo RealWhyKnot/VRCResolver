@@ -203,6 +203,7 @@ fn contract_client_fallback_reasons_exist_on_the_server() {
         fallback::DISCOVERY_IN_PROGRESS,
         fallback::UNITY_UNSUPPORTED_FORMAT,
         fallback::WARP_DOWN,
+        fallback::NATIVE_FALLBACK_HOST,
     ] {
         assert!(
             server.iter().any(|r| r == reason),
@@ -280,6 +281,61 @@ fn contract_client_needed_features_are_listed_by_the_server() {
             "{f} not in the welcome sample"
         );
     }
+}
+
+const SAMPLE_NATIVE_FALLBACK_HOSTS: [&str; 2] =
+    ["*.native.example.test", "ksync.arcanescripts.com"];
+
+#[test]
+fn contract_welcome_sample_carries_the_native_fallback_hosts_last() {
+    let c = contract();
+    let raw = c["json_samples"][action::WELCOME]
+        .as_str()
+        .unwrap_or_else(|| panic!("no welcome sample"));
+    let region = raw.find("\"node_region\"");
+    let hosts = raw.find("\"native_fallback_hosts\"");
+    assert!(region.is_some() && hosts > region, "{raw}");
+    let welcome: WelcomeFrame = serde_json::from_str(raw).unwrap_or_else(|e| panic!("{e}"));
+    let listed = welcome.native_fallback_hosts.unwrap_or_default();
+    assert_eq!(listed, sorted(&SAMPLE_NATIVE_FALLBACK_HOSTS));
+    assert_eq!(
+        NativeFallbackHosts::new(&listed).entries(),
+        listed.as_slice()
+    );
+    assert!(!welcome.extra.contains_key("native_fallback_hosts"));
+    let feature = feature::WELCOME_NATIVE_FALLBACK;
+    assert!(strings(&c, "server_features").iter().any(|f| f == feature));
+    assert!(
+        welcome
+            .features
+            .unwrap_or_default()
+            .iter()
+            .any(|f| f == feature)
+    );
+}
+
+#[test]
+fn contract_welcome_without_native_fallback_hosts_still_parses() {
+    let c = contract();
+    let mut old = json_sample(&c, action::WELCOME);
+    old.as_object_mut()
+        .unwrap_or_else(|| panic!("the welcome sample is an object"))
+        .remove("native_fallback_hosts");
+    let parsed: WelcomeFrame = serde_json::from_value(old).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(parsed.native_fallback_hosts, None);
+    assert_eq!(parsed.node.as_deref(), Some("node1"));
+    assert_eq!(parsed.welcome_hash.as_deref(), Some("0123456789abcdef"));
+    assert_eq!(
+        parsed.first_party_hosts,
+        Some(sorted(&["example.test", "node1.example.test"]))
+    );
+    assert!(NativeFallbackHosts::new(parsed.native_fallback_hosts.unwrap_or_default()).is_empty());
+}
+
+#[test]
+fn contract_cached_welcome_never_carries_native_fallback_hosts() {
+    let cached = json_sample(&contract(), action::WELCOME_CACHED);
+    assert_eq!(cached.get("native_fallback_hosts"), None);
 }
 
 #[test]

@@ -29,6 +29,9 @@ impl VideoStatus {
     }
 }
 
+pub const NATIVE_FALLBACK_SENTENCE: &str =
+    "This site blocks our servers, so VRChat plays it directly.";
+
 pub fn fallback_sentence(reason: &str) -> &'static str {
     match reason {
         "server_unreachable" => "Couldn't reach the server.",
@@ -165,6 +168,10 @@ impl Ux {
     }
 
     pub fn skipped(&self, host: &str, reason: &str, message: Option<&str>) {
+        if reason == crate::wire::fallback::NATIVE_FALLBACK_HOST {
+            self.video(VideoStatus::Skipped, host, NATIVE_FALLBACK_SENTENCE);
+            return;
+        }
         let clean = crate::logutil::public_message(message.unwrap_or_default());
         let why = if clean.is_empty() {
             fallback_sentence(reason)

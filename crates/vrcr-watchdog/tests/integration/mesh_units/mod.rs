@@ -13,6 +13,7 @@ use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use vrcr_shared::console::{Style, Ux};
 use vrcr_shared::first_party::ALLOWED_PATH_EXTENSIONS;
 use vrcr_shared::log::Log;
+use vrcr_shared::native_fallback::NativeFallbackHosts;
 use vrcr_shared::wire::{
     self, CLIENT_PROTOCOL_VERSION, Player, ResolveRequest, ResolveResponse, SUBPROTOCOL_V3,
     WelcomeFrame, action, fallback, feature, feedback, og_reason,

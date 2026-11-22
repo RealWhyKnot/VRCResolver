@@ -9,6 +9,7 @@ use vrcr_shared::console::{Component, Outcome, ResolveStatus, Ux};
 use vrcr_shared::first_party::FirstPartyPolicy;
 use vrcr_shared::log::Log;
 use vrcr_shared::logutil::{bare_host, sanitize_for_console};
+use vrcr_shared::native_fallback::NativeFallbackHosts;
 use vrcr_shared::profile;
 use vrcr_shared::source_url;
 use vrcr_shared::wire::{
@@ -134,6 +135,11 @@ impl<M: Mesh> IpcBuilder<M> {
         self
     }
 
+    pub fn native_fallback(mut self, hosts: Arc<RwLock<NativeFallbackHosts>>) -> Self {
+        self.ipc.native_fallback = hosts;
+        self
+    }
+
     pub fn build(self) -> Arc<Ipc<M>> {
         Arc::new(self.ipc)
     }
@@ -152,6 +158,7 @@ pub struct Ipc<M: Mesh> {
     local: Option<Arc<dyn Step>>,
     emitted: Option<Arc<EmittedUrls>>,
     first_party: Arc<RwLock<FirstPartyPolicy>>,
+    native_fallback: Arc<RwLock<NativeFallbackHosts>>,
 }
 
 enum Failure {
@@ -184,6 +191,7 @@ impl<M: Mesh> Ipc<M> {
                 local: None,
                 emitted: None,
                 first_party: Arc::new(RwLock::new(FirstPartyPolicy::default())),
+                native_fallback: Arc::new(RwLock::new(NativeFallbackHosts::default())),
             },
         }
     }
@@ -507,6 +515,8 @@ fn remaining_ms(deadline: Instant) -> i64 {
 }
 
 mod delivery;
+
+mod native_fallback;
 
 mod resolution;
 

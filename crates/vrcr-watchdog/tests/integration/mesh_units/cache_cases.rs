@@ -210,3 +210,25 @@ fn welcome_cache_keeps_the_welcome_hosts_fields() {
         owned(&["/api/proxy", "/api/stream"])
     );
 }
+
+#[test]
+fn welcome_cache_keeps_the_native_fallback_hosts_across_a_restart() {
+    let c = cache_dir();
+    let frame = WelcomeFrame {
+        native_fallback_hosts: owned(&["*.native.example.test", "ksync.arcanescripts.com"]),
+        ..welcome(Some("node1"))
+    };
+    cache(&c).store("us1.vrcresolver.com", &frame, "hash1");
+    let entry = cache(&c)
+        .get("us1.vrcresolver.com")
+        .unwrap_or_else(|| panic!("entry missing"));
+    assert_eq!(
+        entry.native_fallback_hosts,
+        owned(&["*.native.example.test", "ksync.arcanescripts.com"])
+    );
+    cache(&c).store("us1.vrcresolver.com", &welcome(Some("node1")), "hash2");
+    let cleared = cache(&c)
+        .get("us1.vrcresolver.com")
+        .unwrap_or_else(|| panic!("entry missing"));
+    assert_eq!(cleared.native_fallback_hosts, None);
+}

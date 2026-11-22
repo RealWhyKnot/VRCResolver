@@ -53,6 +53,14 @@ impl Inner {
         }
     }
 
+    pub(super) fn apply_native_fallback(&self, hosts: Option<&[String]>) {
+        let list = NativeFallbackHosts::new(hosts.unwrap_or_default());
+        *self
+            .native_fallback
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = list;
+    }
+
     pub(super) fn finish_resolve(
         &self,
         id: &str,
@@ -214,6 +222,7 @@ impl Inner {
                         s.protocol_version = 1;
                     }
                 }
+                self.apply_native_fallback(None);
                 Self::settle_welcome(link);
                 return;
             }
@@ -250,6 +259,7 @@ impl Inner {
             welcome.first_party_hosts.as_deref(),
             welcome.playback_proxy_paths.as_deref(),
         );
+        self.apply_native_fallback(welcome.native_fallback_hosts.as_deref());
         let features = match welcome.features.as_deref() {
             Some(f) if !f.is_empty() => format!("[{}]", f.join(",")),
             _ => "[]".to_owned(),
@@ -344,6 +354,7 @@ impl Inner {
             entry.first_party_hosts.as_deref(),
             entry.playback_proxy_paths.as_deref(),
         );
+        self.apply_native_fallback(entry.native_fallback_hosts.as_deref());
         self.log.line(&format!(
             "[mesh][v3] welcome_cached hit node={} v={negotiated} negotiated_format={negotiated_format} features={}",
             node.as_deref().unwrap_or("?"),

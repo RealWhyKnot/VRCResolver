@@ -57,6 +57,7 @@ pub mod fallback {
     pub const UNITY_UNSUPPORTED_FORMAT: &str = "unity_unsupported_format";
     pub const WARP_DOWN: &str = "warp_down";
     pub const PLAYBACK_FAILED: &str = "playback_failed";
+    pub const NATIVE_FALLBACK_HOST: &str = "native_fallback_host";
     pub const VALIDATION_FAILED_PREFIX: &str = "validation_failed_";
 }
 
@@ -76,6 +77,7 @@ pub mod feature {
     pub const WELCOME_HOSTS: &str = "welcome_hosts";
     pub const PLAYBACK_FEEDBACK: &str = "playback_feedback";
     pub const PLAYBACK_FEEDBACK_V2: &str = "playback_feedback_v2";
+    pub const WELCOME_NATIVE_FALLBACK: &str = "welcome_native_fallback";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -285,6 +287,8 @@ pub struct WelcomeFrame {
     pub first_party_hosts: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub playback_proxy_paths: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_fallback_hosts: Option<Vec<String>>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
