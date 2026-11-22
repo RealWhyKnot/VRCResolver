@@ -11,7 +11,11 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ## Unreleased
 
-_No notable changes since the last release._
+### Added
+- **fallback:** Skip the server for native fallback hosts (1b28571)
+
+### Fixed
+- **fallback:** Harden native fallback and exit watch (89dd9e2)
 
 ---
 
