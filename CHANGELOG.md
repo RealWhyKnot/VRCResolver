@@ -13,6 +13,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 
 ### Added
 - **fallback:** Skip the server for native fallback hosts (1b28571)
+- **relay:** Log cf-ray on hitches and failures (89767e6)
 
 ### Fixed
 - **fallback:** Harden native fallback and exit watch (89dd9e2)
