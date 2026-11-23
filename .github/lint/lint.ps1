@@ -18,6 +18,13 @@ function Invoke-Gate {
     if ($LASTEXITCODE -ne 0) { throw "$Name failed with exit code $LASTEXITCODE" }
 }
 
+if ($env:OS -eq 'Windows_NT' -and -not (Get-Command -Name awk -ErrorAction SilentlyContinue)) {
+    $gitUsrBin = 'C:\Program Files\Git\usr\bin'
+    if (Test-Path -LiteralPath (Join-Path -Path $gitUsrBin -ChildPath 'awk.exe')) {
+        $env:PATH = "$gitUsrBin;$env:PATH"
+    }
+}
+
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '../..')).Path
 Set-Location -LiteralPath $repoRoot
 
