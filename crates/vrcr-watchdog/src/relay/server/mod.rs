@@ -301,6 +301,7 @@ struct Exchange {
     req_id: String,
     stream_id: String,
     player_status: u16,
+    cf_ray: Option<String>,
 }
 
 impl Exchange {
@@ -325,6 +326,7 @@ impl Exchange {
             lazy_wait_ms: self.lazy_wait_ms,
             lazy_generator: self.lazy_generator.clone(),
             failure: failure.map(str::to_owned),
+            cf_ray: self.cf_ray.clone(),
         }
     }
 }
@@ -439,6 +441,7 @@ impl Inner {
             lazy_wait_ms: -1,
             lazy_generator: None,
             failure: Some(reason.to_owned()),
+            cf_ray: None,
         });
     }
 
@@ -470,6 +473,7 @@ impl Inner {
             lazy_wait_ms: -1,
             lazy_generator: None,
             failure: Some(reason.to_owned()),
+            cf_ray: None,
         });
         status_only(status)
     }

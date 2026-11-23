@@ -237,3 +237,48 @@ fn hitch_record_keeps_detail_in_files_with_either_dev_setting() {
         "[hitch] reasons=segment-http-502,segment-body_idle_timeout,slow-segment-total kind=segment stream=wk_abc segment=1 status=502 lazy=HIT lazy_wait_ms=5 lazy_generator=ffmpeg header_ms=10 total_ms=3000 bytes=100 failure=body_idle_timeout"
     ), "{}", out.logs());
 }
+
+#[test]
+fn hitch_record_names_the_cf_ray_only_when_the_origin_sent_one() {
+    let log = Log::disabled();
+    log.set_dev_console(true);
+    let mut slow = sample(
+        "GET",
+        "/play/a/seg.ts",
+        "https://us1.vrcresolver.com/api/proxy/hls/seg_000001.ts?playback_id=secret",
+        200,
+        10,
+        3000,
+    );
+    slow.cf_ray = Some("8f2c1b3a4d5e6f70-IAD".to_owned());
+    let (ux, out) = capture_ux();
+    HitchDetector::new().record(&slow, utc(1_790_769_600), &ux, &log);
+    assert!(
+        out.logs().contains(
+            "reasons=slow-segment-total kind=segment stream=- status=200 lazy=HIT header_ms=10 total_ms=3000 bytes=100 target=us1.vrcresolver.com req=fixture-request sent=200 cf_ray=8f2c1b3a4d5e6f70-IAD"
+        ),
+        "{}",
+        out.logs()
+    );
+    assert!(!out.logs().contains("secret"));
+
+    slow.cf_ray = None;
+    let (ux, out) = capture_ux();
+    HitchDetector::new().record(&slow, utc(1_790_769_600), &ux, &log);
+    assert!(
+        out.logs().contains("req=fixture-request sent=200"),
+        "{}",
+        out.logs()
+    );
+    assert!(!out.logs().contains("cf_ray="), "{}", out.logs());
+
+    slow.cf_ray = Some("bad ray?token=secret".to_owned());
+    let (ux, out) = capture_ux();
+    HitchDetector::new().record(&slow, utc(1_790_769_600), &ux, &log);
+    assert!(
+        out.logs().contains("sent=200 cf_ray=unknown"),
+        "{}",
+        out.logs()
+    );
+    assert!(!out.logs().contains("secret"));
+}

@@ -29,6 +29,7 @@ use vrcr_watchdog::relay::server::query_value;
 use vrcr_watchdog::relay::targets::{
     TargetKind, encode_target_param, is_play_path, local_prefix_for_path, resolve_relative_target,
 };
+use vrcr_watchdog::relay::upstream;
 use vrcr_watchdog::relay::{
     HitchDetector, RelayActivity, RelayBypass, RelayPortManager, TargetResolver, TimingSample,
     short_url,
@@ -177,6 +178,7 @@ fn sample(
         lazy_wait_ms: -1,
         lazy_generator: None,
         failure: None,
+        cf_ray: None,
     }
 }
 

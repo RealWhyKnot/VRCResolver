@@ -38,6 +38,7 @@ pub struct TimingSample {
     pub lazy_wait_ms: i64,
     pub lazy_generator: Option<String>,
     pub failure: Option<String>,
+    pub cf_ray: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,7 +149,7 @@ impl HitchDetector {
         }
         let lazy = safe(sample.lazy_state.as_deref().unwrap_or("unknown"), 32);
         let file_line = format!(
-            "[relay][hitch] reasons={} kind={} stream={}{}{} status={} lazy={lazy}{}{} header_ms={} total_ms={} bytes={}{}{} target={} req={} sent={}",
+            "[relay][hitch] reasons={} kind={} stream={}{}{} status={} lazy={lazy}{}{} header_ms={} total_ms={} bytes={}{}{} target={} req={} sent={}{}",
             d.reasons,
             d.kind,
             safe(&d.stream_id, 64),
@@ -165,6 +166,7 @@ impl HitchDetector {
             describe_url(&sample.target_url),
             sample.request_id,
             sample.player_status,
+            cf_ray_part(sample.cf_ray.as_deref()),
         );
         if log.dev_console() {
             ux.log_write(
@@ -500,6 +502,13 @@ fn generator_part(generator: Option<&str>) -> String {
 fn failure_part(failure: Option<&str>) -> String {
     match failure.filter(|f| !f.trim().is_empty()) {
         Some(f) => format!(" failure={}", safe(f, 64)),
+        None => String::new(),
+    }
+}
+
+pub(crate) fn cf_ray_part(cf_ray: Option<&str>) -> String {
+    match cf_ray.map(str::trim).filter(|ray| !ray.is_empty()) {
+        Some(ray) => format!(" cf_ray={}", safe(ray, 64)),
         None => String::new(),
     }
 }

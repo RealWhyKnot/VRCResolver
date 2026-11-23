@@ -155,3 +155,80 @@ async fn diagnostics_verbose_completion_is_one_file_line_without_a_url() {
     assert!(!text.contains("https://"));
     assert!(!output.logs().contains("[debug]"));
 }
+
+async fn failed_status_logs(mode: &str) -> (Reply, String) {
+    let harness = harness(None).await;
+    let mut connection = Conn::open(harness.server.port()).await;
+    let reply = connection
+        .get(&play("rayed", "seg.ts", &upstream_url(mode, "seg.ts")))
+        .await;
+    assert!(eventually(|| harness.server.in_flight() == 0, WITHIN).await);
+    harness.server.stop().await;
+    (reply, harness.out.logs())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn diagnostics_upstream_status_failures_name_the_cf_ray_only_when_sent() {
+    let (reply, text) = failed_status_logs("ray-500").await;
+    assert_eq!(reply.status, 500);
+    assert_eq!(reply.header("cf-ray"), None);
+    assert!(
+        text.contains(&format!(
+            "reason=upstream_status hitches=segment-http-500 body=complete cf_ray={RAY} count=1"
+        )),
+        "{text}"
+    );
+
+    let (reply, text) = failed_status_logs("status-500").await;
+    assert_eq!(reply.status, 500);
+    assert!(
+        text.contains("reason=upstream_status hitches=segment-http-500 body=complete count=1"),
+        "{text}"
+    );
+    assert!(!text.contains("cf_ray="), "{text}");
+}
+
+async fn disconnect_logs(mode: &str) -> String {
+    let harness = harness(None).await;
+    let mut connection = Conn::open(harness.server.port()).await;
+    connection
+        .send(
+            "GET",
+            &play("gone", "seg.ts", &upstream_url(mode, "seg.ts")),
+            &[],
+        )
+        .await;
+    let status = connection.line().await.expect("status line");
+    assert!(status.contains(" 200 "), "{status}");
+    drop(connection);
+    assert!(
+        eventually(
+            || harness.out.logs().contains("segment-client_disconnect"),
+            WITHIN
+        )
+        .await
+    );
+    assert!(eventually(|| harness.server.in_flight() == 0, WITHIN).await);
+    harness.server.stop().await;
+    harness.out.logs()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn diagnostics_client_disconnects_name_the_cf_ray_only_when_sent() {
+    let text = disconnect_logs("ray-endless").await;
+    assert!(
+        text.contains(&format!(
+            "reason=client_disconnect hitches=segment-client_disconnect body=aborted cf_ray={RAY} count=1"
+        )),
+        "{text}"
+    );
+
+    let text = disconnect_logs("endless").await;
+    assert!(
+        text.contains(
+            "reason=client_disconnect hitches=segment-client_disconnect body=aborted count=1"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("cf_ray="), "{text}");
+}

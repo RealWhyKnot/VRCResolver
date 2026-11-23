@@ -183,7 +183,7 @@ impl PlaybackLog {
                     play.retries += 1;
                 }
                 let line = format!(
-                    "request failed req={} playback={} stream={} kind={kind} host={} status={} elapsed_ms={} bytes={} retry={} sent={} reason={reason} hitches={} body={}",
+                    "request failed req={} playback={} stream={} kind={kind} host={} status={} elapsed_ms={} bytes={} retry={} sent={} reason={reason} hitches={} body={}{}",
                     sample.request_id,
                     play.id,
                     play.context.stream_id,
@@ -205,6 +205,7 @@ impl PlaybackLog {
                     } else {
                         "complete"
                     },
+                    crate::relay::hitch::cf_ray_part(sample.cf_ray.as_deref()),
                 );
                 let repeat = play.failures.entry(key).or_insert_with(|| Repeat {
                     count: 0,

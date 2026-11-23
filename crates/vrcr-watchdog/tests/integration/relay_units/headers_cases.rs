@@ -87,3 +87,36 @@ fn copied_response_headers_join_values_and_drop_rewritten_encoding() {
     assert!(!rewritten.headers.contains_key("content-encoding"));
     assert_eq!((rewritten.passed, rewritten.dropped), (1, 2));
 }
+
+#[test]
+fn cf_ray_is_read_for_logs_but_never_forwarded_to_the_player() {
+    let mut src = HeaderMap::new();
+    assert_eq!(upstream::cf_ray(&src), None);
+    for (raw, expected) in [
+        ("8f2c1b3a4d5e6f70-IAD", Some("8f2c1b3a4d5e6f70-IAD")),
+        ("  8f2c1b3a4d5e6f70-IAD  ", Some("8f2c1b3a4d5e6f70-IAD")),
+        ("", None),
+        ("   ", None),
+        ("ray?token=secret", None),
+    ] {
+        src.insert("cf-ray", HeaderValue::from_str(raw).expect("valid header"));
+        assert_eq!(upstream::cf_ray(&src).as_deref(), expected, "{raw:?}");
+    }
+    src.insert(
+        "cf-ray",
+        HeaderValue::from_str(&"a".repeat(65)).expect("valid header"),
+    );
+    assert_eq!(upstream::cf_ray(&src), None);
+    src.insert("cf-ray", HeaderValue::from_static("8f2c1b3a4d5e6f70-IAD"));
+    assert!(should_drop_response_header("cf-ray"));
+    assert!(
+        !copy_response_headers(&src, false)
+            .headers
+            .contains_key("cf-ray")
+    );
+    assert!(
+        !copy_response_headers(&src, true)
+            .headers
+            .contains_key("cf-ray")
+    );
+}

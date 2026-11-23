@@ -78,6 +78,7 @@ fn sample(status: u16) -> TimingSample {
         lazy_wait_ms: -1,
         lazy_generator: None,
         failure: None,
+        cf_ray: None,
     }
 }
 

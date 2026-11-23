@@ -97,6 +97,7 @@ pub(super) async fn handle(
                     lazy_wait_ms: -1,
                     lazy_generator: None,
                     failure: None,
+                    cf_ray: None,
                 });
                 local_manifest(body, method == Method::HEAD)
             }
@@ -163,6 +164,7 @@ pub(super) async fn handle(
         req_id,
         stream_id: crate::diagnostics::stream_id(&target.url),
         player_status: 0,
+        cf_ray: None,
     };
     inner.deps.stats.playback.begin_request(
         &ex.path,
@@ -343,6 +345,7 @@ pub(super) async fn handle(
     if let Some(id) = headers::first_header(&resp.headers, "x-stream-id") {
         ex.stream_id = crate::diagnostics::token(&id);
     }
+    ex.cf_ray = (!ex.suppressed).then(|| resp.cf_ray()).flatten();
     ex.lazy_state = headers::first_header(&resp.headers, "x-lazy-hls");
     ex.lazy_wait_ms = headers::long_header(&resp.headers, "x-lazy-hls-wait-ms");
     ex.lazy_generator = headers::first_header(&resp.headers, "x-lazy-hls-generator");

@@ -34,6 +34,7 @@ use crate::common::mesh::Capture;
 const WITHIN: Duration = Duration::from_secs(5);
 const MANIFEST: &str = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nhttps://us1.vrcresolver.com/api/proxy/hls/seg_000001.ts?playback_id=t\n#EXTINF:2,\nhttps://us1.vrcresolver.com/api/proxy/hls/seg_000002.ts?playback_id=t\n#EXTINF:2,\nseg_000003.ts\n#EXT-X-ENDLIST\n";
 const LIVE_MANIFEST: &str = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:7\n#EXTINF:2,\nseg_000007.ts\n#EXTINF:2,\nseg_000008.ts\n#EXTINF:2,\nseg_000009.ts\n";
+const RAY: &str = "8f2c1b3a4d5e6f70-IAD";
 static ZEROS: [u8; 65536] = [0; 65536];
 
 #[derive(Clone)]
@@ -243,6 +244,23 @@ impl Script {
                     Tail::End,
                 )
             }
+            "ray-500" => respond(
+                open,
+                500,
+                &[
+                    ("content-length", "4".to_owned()),
+                    ("cf-ray", RAY.to_owned()),
+                ],
+                vec![Ok(Bytes::from_static(b"nope"))],
+                Tail::End,
+            ),
+            "ray-endless" => respond(
+                open,
+                200,
+                &[ts(), ("cf-ray", RAY.to_owned())],
+                Vec::new(),
+                Tail::Endless,
+            ),
             "hls" if file.ends_with(".m3u8") => respond(
                 open,
                 200,

@@ -34,6 +34,22 @@ pub struct UpstreamResponse {
     pub body: BodyStream,
 }
 
+impl UpstreamResponse {
+    pub fn cf_ray(&self) -> Option<String> {
+        cf_ray(&self.headers)
+    }
+}
+
+pub fn cf_ray(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get("cf-ray")?.to_str().ok()?.trim();
+    (!value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'))
+    .then(|| value.to_owned())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpstreamError {
     pub kind: &'static str,
