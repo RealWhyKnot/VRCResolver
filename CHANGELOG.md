@@ -16,6 +16,9 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **relay:** Log cf-ray on hitches and failures (89767e6)
 - **update:** Add native update prompt dialog (2c65d44)
 
+### Changed
+- **deps:** Bump the minor-and-patch group with 3 updates (#86) (0f4d330)
+
 ### Fixed
 - **fallback:** Harden native fallback and exit watch (89dd9e2)
 - **hooks:** Run pre-push from wsl (c22d613)
