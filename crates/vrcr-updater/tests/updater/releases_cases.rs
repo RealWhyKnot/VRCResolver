@@ -146,6 +146,16 @@ fn prerelease_setting_is_read_from_settings_json() {
 }
 
 #[test]
+fn prerelease_setting_ignores_a_skipped_version() {
+    assert!(include_prereleases(Some(
+        r#"{"schema_version":1,"maintenance":{"include_prereleases":true,"skipped_version":"2026.11.24.0"}}"#
+    )));
+    assert!(!include_prereleases(Some(
+        r#"{"schema_version":1,"maintenance":{"include_prereleases":false,"skipped_version":"2026.11.24.0"}}"#
+    )));
+}
+
+#[test]
 fn tags_become_safe_file_names() {
     assert_eq!(safe_file_token("v2026.10.1.0-AB12"), "v2026.10.1.0-AB12");
     assert_eq!(safe_file_token("../x/y:z"), ".._x_y_z");

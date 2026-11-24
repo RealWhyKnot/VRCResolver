@@ -279,10 +279,11 @@ impl App {
             );
         }
 
+        let update_gate = update::UpdateGate::default();
+        let prompter = self.update_prompter(&settings, &update_gate);
         drop(update::start_background_check(
             include_prereleases,
-            &self.build.version,
-            self.ux.clone(),
+            prompter,
         ));
         codecs.refresh();
         drop(codec::start_background_check(
@@ -314,6 +315,7 @@ impl App {
             mesh.clone(),
             &state_root,
             repair,
+            update_gate,
         );
         phases.mark("terminal");
 

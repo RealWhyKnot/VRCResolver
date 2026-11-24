@@ -17,7 +17,7 @@ use vrcr_watchdog::maintenance::codec::{
     WingetResult,
 };
 use vrcr_watchdog::maintenance::shutdown::{ShutdownCoordinator, ShutdownStep, cancel_all};
-use vrcr_watchdog::maintenance::update::{self, Release, UpdateStart, Version};
+use vrcr_watchdog::maintenance::update::{self, Release, UpdateGate, UpdateStart, Version};
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -159,3 +159,7 @@ mod contracts_cases;
 mod shutdown_cases;
 
 mod updates_cases;
+
+mod update_dialog_cases;
+
+mod update_prompt_cases;

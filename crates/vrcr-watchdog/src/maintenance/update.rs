@@ -3,6 +3,8 @@ use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -10,6 +12,8 @@ use serde_json::Value;
 use vrcr_shared::console::{Component, Ux};
 use vrcr_shared::log::Log;
 use vrcr_shared::release::pick_highest_entry;
+
+pub use super::update_prompt::{Prompt, Prompter, check_and_offer, normalize_version};
 
 pub use vrcr_shared::release::{ANY_RELEASES_URL, REPO, STABLE_LATEST_URL, Version};
 
@@ -78,7 +82,7 @@ impl Release {
             vrcr_shared::console::Color::White,
             &format!(
                 "Version {} is available. Type update to install it.",
-                self.tag
+                normalize_version(&self.tag)
             ),
         );
     }
@@ -135,19 +139,11 @@ async fn github_get(url: &'static str, local: String) -> Option<String> {
 
 pub fn start_background_check(
     include_prereleases: bool,
-    local: &str,
-    ux: Ux,
+    prompter: Prompter,
 ) -> tokio::task::JoinHandle<()> {
-    let local = local.to_owned();
     tokio::spawn(async move {
-        let fetch_version = local.clone();
-        if let Some(release) = check(include_prereleases, &local, |url| {
-            github_get(url, fetch_version)
-        })
-        .await
-        {
-            release.announce(&ux);
-        }
+        let local = prompter.current.clone();
+        check_and_offer(include_prereleases, prompter, |url| github_get(url, local)).await;
     })
 }
 
@@ -160,26 +156,65 @@ pub fn updater_command(install_dir: &Path) -> Command {
 #[derive(Debug, PartialEq, Eq)]
 pub enum UpdateStart {
     UpdaterMissing,
+    AlreadyRunning,
     Failed,
     Started,
 }
 
-pub fn start_update(
-    install_dir: &Path,
-    spawn: impl FnOnce(Command) -> io::Result<()>,
-) -> UpdateStart {
-    let updater = install_dir.join(UPDATER_EXE);
-    if !updater.is_file() {
-        return UpdateStart::UpdaterMissing;
-    }
-    match spawn(updater_command(install_dir)) {
-        Ok(()) => UpdateStart::Started,
-        Err(_) => UpdateStart::Failed,
+pub type Spawn = fn(Command, UpdateTicket) -> io::Result<()>;
+
+#[derive(Clone, Default)]
+pub struct UpdateGate {
+    running: Arc<AtomicBool>,
+}
+
+pub struct UpdateTicket {
+    running: Arc<AtomicBool>,
+}
+
+impl Drop for UpdateTicket {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Release);
     }
 }
 
-pub fn spawn_detached(mut cmd: Command) -> io::Result<()> {
-    cmd.spawn().map(drop)
+impl UpdateGate {
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Acquire)
+    }
+
+    pub fn start(
+        &self,
+        install_dir: &Path,
+        spawn: impl FnOnce(Command, UpdateTicket) -> io::Result<()>,
+    ) -> UpdateStart {
+        if !install_dir.join(UPDATER_EXE).is_file() {
+            return UpdateStart::UpdaterMissing;
+        }
+        if self.running.swap(true, Ordering::AcqRel) {
+            return UpdateStart::AlreadyRunning;
+        }
+        let ticket = UpdateTicket {
+            running: Arc::clone(&self.running),
+        };
+        match spawn(updater_command(install_dir), ticket) {
+            Ok(()) => UpdateStart::Started,
+            Err(_) => UpdateStart::Failed,
+        }
+    }
+}
+
+pub fn spawn_detached(mut cmd: Command, ticket: UpdateTicket) -> io::Result<()> {
+    let mut child = cmd.spawn()?;
+    drop(
+        thread::Builder::new()
+            .name("updater-wait".to_owned())
+            .spawn(move || {
+                drop(child.wait());
+                drop(ticket);
+            }),
+    );
+    Ok(())
 }
 
 fn move_with_retry(src: &Path, dst: &Path) -> io::Result<()> {

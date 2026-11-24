@@ -86,3 +86,66 @@ fn failed_channel_write_preserves_the_previous_choice() {
     let (reopened, _) = store(&dir);
     assert!(reopened.include_prereleases());
 }
+
+#[test]
+fn skipped_version_round_trips_with_the_channel() {
+    let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
+    let (preferences, _) = store(&dir);
+    assert_eq!(preferences.skipped_version(), None);
+    preferences
+        .set_include_prereleases(true)
+        .unwrap_or_else(|e| panic!("{e}"));
+    preferences
+        .set_skipped_version(Some("  2026.11.24.0 \n"))
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("settings.json")).unwrap_or_default(),
+        r#"{"schema_version":1,"maintenance":{"include_prereleases":true,"skipped_version":"2026.11.24.0"}}"#
+    );
+    let (reopened, warnings) = store(&dir);
+    assert!(reopened.include_prereleases());
+    assert_eq!(reopened.skipped_version().as_deref(), Some("2026.11.24.0"));
+    assert_eq!(warnings.lock().unwrap_or_else(|e| e.into_inner()).len(), 0);
+}
+
+#[test]
+fn blank_skipped_version_clears_it() {
+    let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
+    let (preferences, _) = store(&dir);
+    preferences
+        .set_skipped_version(Some("2026.11.24.0"))
+        .unwrap_or_else(|e| panic!("{e}"));
+    preferences
+        .set_skipped_version(Some("   "))
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(preferences.skipped_version(), None);
+    assert_eq!(
+        fs::read_to_string(dir.path().join("settings.json")).unwrap_or_default(),
+        r#"{"schema_version":1,"maintenance":{"include_prereleases":false}}"#
+    );
+}
+
+#[test]
+fn switching_channels_clears_the_skip_but_resaving_keeps_it() {
+    let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
+    fs::write(
+        dir.path().join("settings.json"),
+        r#"{"schema_version":1,"maintenance":{"include_prereleases":false,"skipped_version":"2026.11.24.0"}}"#,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let (preferences, _) = store(&dir);
+    preferences
+        .set_include_prereleases(false)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        preferences.skipped_version().as_deref(),
+        Some("2026.11.24.0")
+    );
+    preferences
+        .set_include_prereleases(true)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(preferences.skipped_version(), None);
+    let (reopened, _) = store(&dir);
+    assert!(reopened.include_prereleases());
+    assert_eq!(reopened.skipped_version(), None);
+}

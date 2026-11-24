@@ -32,7 +32,7 @@ use crate::local::{self, Local, Origin, Step};
 use crate::maintenance::codec::{self, CodecCapabilities};
 use crate::maintenance::patch::{self, PatchConfig, PatchManager};
 use crate::maintenance::shutdown::{ShutdownCoordinator, ShutdownStep, cancel_all, panic_text};
-use crate::maintenance::{describe_parent_process, update};
+use crate::maintenance::{describe_parent_process, update, update_dialog};
 use crate::mesh::reporting::Reporter;
 use crate::mesh::{Config, MeshClient, connect};
 use crate::monitoring::heartbeat::{self, Heartbeat};
@@ -452,9 +452,9 @@ impl App {
         mesh: MeshClient,
         state_root: &Path,
         repair: Action,
+        update_gate: update::UpdateGate,
     ) {
         let stdin_tty = io::stdin().is_terminal();
-        let stdout_tty = io::stdout().is_terminal();
         let services = Services {
             ux: self.ux.clone(),
             stats,
@@ -463,6 +463,7 @@ impl App {
             repair,
             install_dir: self.install_dir.clone(),
             spawn_updater: update::spawn_detached,
+            update_gate,
             width: win::console_width,
             animations_available: animations_allowed(
                 crate::terminal::interactive::OutputSupport {
@@ -476,17 +477,41 @@ impl App {
         let history = HistoryStore::new(&state_root.join("terminal"));
         let terminal = Arc::new(Terminal::new(services, history));
         put(&self.parts.terminal, std::sync::Arc::clone(&terminal));
-        let allowed = interactive_allowed(
-            crate::terminal::interactive::OutputSupport {
-                input_is_terminal: stdin_tty,
-                output_supported: stdout_tty,
-            },
-            legacy::env_with_fallback("NO_INTERACTIVE_TERMINAL").as_deref(),
-        );
-        if allowed {
+        if terminal_interactive() {
             terminal.start();
         }
     }
+
+    fn update_prompter(
+        &self,
+        settings: &Arc<Store>,
+        gate: &update::UpdateGate,
+    ) -> update::Prompter {
+        let ux = self.ux.clone();
+        update::Prompter {
+            settings: Arc::clone(settings),
+            gate: gate.clone(),
+            install_dir: self.install_dir.clone(),
+            spawn: update::spawn_detached,
+            current: self.build.version.clone(),
+            interactive: terminal_interactive(),
+            closing: self.life.closing.clone(),
+            ux: self.ux.clone(),
+            prompt: Arc::new(move |version, current, closing| {
+                update_dialog::ask(version, current, closing, &ux)
+            }),
+        }
+    }
+}
+
+fn terminal_interactive() -> bool {
+    interactive_allowed(
+        crate::terminal::interactive::OutputSupport {
+            input_is_terminal: io::stdin().is_terminal(),
+            output_supported: io::stdout().is_terminal(),
+        },
+        legacy::env_with_fallback("NO_INTERACTIVE_TERMINAL").as_deref(),
+    )
 }
 
 mod lifecycle;

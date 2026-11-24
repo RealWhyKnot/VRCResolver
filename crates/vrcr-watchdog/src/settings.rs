@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::SystemTime;
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -8,10 +8,12 @@ use vrcr_shared::logutil::UtcStamp;
 
 const MAX_SETTINGS_BYTES: u64 = 128 * 1024;
 
-#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 struct Maintenance {
     include_prereleases: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skipped_version: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -41,7 +43,7 @@ where
 
 pub struct Store {
     path: PathBuf,
-    cached: Mutex<Option<bool>>,
+    cached: Mutex<Option<Maintenance>>,
     warn: Box<dyn Fn(&str) + Send + Sync>,
 }
 
@@ -55,48 +57,79 @@ impl Store {
     }
 
     pub fn include_prereleases(&self) -> bool {
-        let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
-        *cached.get_or_insert_with(|| self.load())
+        self.loaded()
+            .get_or_insert_with(|| self.load())
+            .include_prereleases
+    }
+
+    pub fn skipped_version(&self) -> Option<String> {
+        self.loaded()
+            .get_or_insert_with(|| self.load())
+            .skipped_version
+            .clone()
     }
 
     pub fn set_include_prereleases(&self, include_prereleases: bool) -> std::io::Result<()> {
-        let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
-        self.save(include_prereleases)?;
-        *cached = Some(include_prereleases);
+        self.update(|maintenance| {
+            if maintenance.include_prereleases != include_prereleases {
+                maintenance.skipped_version = None;
+            }
+            maintenance.include_prereleases = include_prereleases;
+        })
+    }
+
+    pub fn set_skipped_version(&self, version: Option<&str>) -> std::io::Result<()> {
+        let version = version
+            .map(str::trim)
+            .filter(|version| !version.is_empty())
+            .map(str::to_owned);
+        self.update(|maintenance| maintenance.skipped_version = version)
+    }
+
+    fn loaded(&self) -> MutexGuard<'_, Option<Maintenance>> {
+        self.cached
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    fn update(&self, change: impl FnOnce(&mut Maintenance)) -> std::io::Result<()> {
+        let mut cached = self.loaded();
+        let mut next = cached.get_or_insert_with(|| self.load()).clone();
+        change(&mut next);
+        self.save(&next)?;
+        *cached = Some(next);
         drop(cached);
         Ok(())
     }
 
-    fn load(&self) -> bool {
+    fn load(&self) -> Maintenance {
         let Ok(meta) = fs::metadata(&self.path) else {
-            return false;
+            return Maintenance::default();
         };
         if meta.len() > MAX_SETTINGS_BYTES {
             self.quarantine("too-large");
-            return false;
+            return Maintenance::default();
         }
         match fs::read(&self.path)
             .ok()
             .and_then(|b| serde_json::from_slice::<Option<Preferences>>(&b).ok())
         {
-            Some(s) => s.unwrap_or_default().maintenance.include_prereleases,
+            Some(s) => s.unwrap_or_default().maintenance,
             None => {
                 self.quarantine("invalid");
-                false
+                Maintenance::default()
             }
         }
     }
 
-    fn save(&self, include_prereleases: bool) -> std::io::Result<()> {
+    fn save(&self, maintenance: &Maintenance) -> std::io::Result<()> {
         if let Some(dir) = self.path.parent().filter(|d| !d.as_os_str().is_empty()) {
             fs::create_dir_all(dir)?;
         }
         let mut tmp = self.path.as_os_str().to_owned();
         tmp.push(".new");
         let preferences = Preferences {
-            maintenance: Maintenance {
-                include_prereleases,
-            },
+            maintenance: maintenance.clone(),
             ..Preferences::default()
         };
         fs::write(

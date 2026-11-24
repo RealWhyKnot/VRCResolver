@@ -321,6 +321,9 @@ fn update_command(ctx: &Context<'_>, args: &str) {
         update::UpdateStart::UpdaterMissing => ctx.renderer.error(&format!(
             "Couldn't check for {channel} updates because the updater is missing."
         )),
+        update::UpdateStart::AlreadyRunning => {
+            ctx.renderer.info("An update is already running.");
+        }
         update::UpdateStart::Failed => ctx
             .renderer
             .warn(&format!("Couldn't start the check for {channel} updates.")),

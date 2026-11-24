@@ -153,7 +153,7 @@ fn update_announcement_uses_the_release_tag_and_keeps_the_log_detail() {
     release.announce(&ux);
     assert_eq!(
         out.text(),
-        "  Version v2.0-rc is available. Type update to install it.\n"
+        "  Version 2.0-rc is available. Type update to install it.\n"
     );
     assert!(out.logs().contains(
         "[update] version v2.0-rc (prerelease) is available; type update to install (example.test"
@@ -182,17 +182,19 @@ fn updater_command_carries_the_request_env() {
 #[test]
 fn start_update_reports_missing_failed_and_started() {
     let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
-    let missing = update::start_update(dir.path(), |_| panic!("must not spawn"));
+    let gate = UpdateGate::default();
+    let missing = gate.start(dir.path(), |_, _| panic!("must not spawn"));
     assert_eq!(missing, UpdateStart::UpdaterMissing);
     fs::write(dir.path().join(update::UPDATER_EXE), b"x").unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
-        update::start_update(dir.path(), |_| Err(std::io::Error::other("nope"))),
+        gate.start(dir.path(), |_, _| Err(std::io::Error::other("nope"))),
         UpdateStart::Failed
     );
+    assert!(!gate.is_running());
     let spawned = Arc::new(Mutex::new(None));
     let slot = std::sync::Arc::clone(&spawned);
     assert_eq!(
-        update::start_update(dir.path(), move |cmd| {
+        gate.start(dir.path(), move |cmd, _| {
             *lock(&slot) = Some(cmd.get_program().to_owned());
             Ok(())
         }),
@@ -202,6 +204,31 @@ fn start_update_reports_missing_failed_and_started() {
         lock(&spawned).clone().map(std::path::PathBuf::from),
         Some(dir.path().join(update::UPDATER_EXE))
     );
+}
+
+#[test]
+fn update_gate_allows_one_updater_until_it_exits() {
+    let dir = TempDir::new().unwrap_or_else(|e| panic!("{e}"));
+    fs::write(dir.path().join(update::UPDATER_EXE), b"x").unwrap_or_else(|e| panic!("{e}"));
+    let gate = UpdateGate::default();
+    let held = Arc::new(Mutex::new(None));
+    let slot = std::sync::Arc::clone(&held);
+    assert_eq!(
+        gate.start(dir.path(), move |_, ticket| {
+            *lock(&slot) = Some(ticket);
+            Ok(())
+        }),
+        UpdateStart::Started
+    );
+    let console_gate = gate.clone();
+    assert!(console_gate.is_running());
+    assert_eq!(
+        console_gate.start(dir.path(), |_, _| panic!("must not spawn twice")),
+        UpdateStart::AlreadyRunning
+    );
+    drop(lock(&held).take());
+    assert!(!console_gate.is_running());
+    assert_eq!(gate.start(dir.path(), |_, _| Ok(())), UpdateStart::Started);
 }
 
 #[test]

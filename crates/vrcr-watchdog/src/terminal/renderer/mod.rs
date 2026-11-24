@@ -2,7 +2,6 @@ mod replies;
 
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::Command as Process;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::SystemTime;
@@ -34,7 +33,8 @@ pub struct Services {
     pub mesh_connected: Flag,
     pub repair: Action,
     pub install_dir: PathBuf,
-    pub spawn_updater: fn(Process) -> io::Result<()>,
+    pub spawn_updater: update::Spawn,
+    pub update_gate: update::UpdateGate,
     pub width: fn() -> Option<usize>,
     pub animations_available: bool,
     pub now: fn() -> SystemTime,
@@ -89,7 +89,7 @@ impl Renderer {
 
     pub fn start_update(&self) -> UpdateStart {
         let s = &self.inner.services;
-        update::start_update(&s.install_dir, s.spawn_updater)
+        s.update_gate.start(&s.install_dir, s.spawn_updater)
     }
 
     pub fn attach(&self) -> OverlayGuard {

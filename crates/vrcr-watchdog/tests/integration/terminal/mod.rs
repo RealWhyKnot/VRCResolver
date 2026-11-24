@@ -99,7 +99,8 @@ fn harness_styled(width: Option<usize>, style: vrcr_shared::console::Style) -> H
             repair_counter.fetch_add(1, Ordering::SeqCst);
         }),
         install_dir: dir.path().join("install"),
-        spawn_updater: |_| Ok(()),
+        spawn_updater: |_, _| Ok(()),
+        update_gate: vrcr_watchdog::maintenance::update::UpdateGate::default(),
         width: width_fn,
         animations_available: false,
         now: fixed_now,

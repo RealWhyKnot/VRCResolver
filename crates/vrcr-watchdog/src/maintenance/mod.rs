@@ -2,6 +2,8 @@ pub mod codec;
 pub mod patch;
 pub mod shutdown;
 pub mod update;
+pub mod update_dialog;
+pub mod update_prompt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SetupError {
