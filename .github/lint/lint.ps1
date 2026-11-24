@@ -18,11 +18,25 @@ function Invoke-Gate {
     if ($LASTEXITCODE -ne 0) { throw "$Name failed with exit code $LASTEXITCODE" }
 }
 
-if ($env:OS -eq 'Windows_NT' -and -not (Get-Command -Name awk -ErrorAction SilentlyContinue)) {
-    $gitUsrBin = 'C:\Program Files\Git\usr\bin'
-    if (Test-Path -LiteralPath (Join-Path -Path $gitUsrBin -ChildPath 'awk.exe')) {
-        $env:PATH = "$gitUsrBin;$env:PATH"
+function Resolve-GitRoot {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $git = Get-Command -Name git -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($git) {
+        $directory = Split-Path -Parent $git.Source
+        while ($directory) {
+            if (Test-Path -LiteralPath (Join-Path -Path $directory -ChildPath 'bin\bash.exe')) { return $directory }
+            $directory = Split-Path -Parent $directory
+        }
     }
+    ''
+}
+
+$gitRoot = if ($env:OS -eq 'Windows_NT') { Resolve-GitRoot } else { '' }
+if ($gitRoot -and -not (Get-Command -Name awk -ErrorAction SilentlyContinue)) {
+    $env:PATH = "$(Join-Path -Path $gitRoot -ChildPath 'usr\bin');$env:PATH"
 }
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '../..')).Path
@@ -52,9 +66,21 @@ $shellToolsMissing = -not ($hasShellcheck -and $hasShfmt)
 if ($env:CI -and $shellToolsMissing) {
     throw 'Shell checks need shellcheck and shfmt on PATH.'
 }
-if ($env:OS -eq 'Windows_NT' -and $shellToolsMissing) {
+if ($env:OS -eq 'Windows_NT' -and $gitRoot -and -not $shellToolsMissing) {
+    $gitBash = Join-Path -Path $gitRoot -ChildPath 'bin\bash.exe'
+    $savedPath = $env:PATH
+    $env:PATH = "$(Join-Path -Path $gitRoot -ChildPath 'usr\bin');$env:PATH"
+    try {
+        Invoke-Gate -Name 'Shell checks' -Command { & $gitBash .github/lint/check-shell }
+    } finally {
+        $env:PATH = $savedPath
+    }
+} elseif ($env:OS -eq 'Windows_NT') {
+    if (-not $env:LINT_WSL_DISTRO) {
+        throw 'Shell checks need shellcheck, shfmt and Git for Windows, or LINT_WSL_DISTRO set to a WSL distro.'
+    }
     Invoke-Gate -Name 'Shell checks' -Command {
-        wsl -d agent --cd $repoRoot -- bash .github/lint/check-shell
+        wsl -d $env:LINT_WSL_DISTRO --cd $repoRoot -- bash .github/lint/check-shell
     }
 } else {
     Invoke-Gate -Name 'Shell checks' -Command { bash .github/lint/check-shell }
