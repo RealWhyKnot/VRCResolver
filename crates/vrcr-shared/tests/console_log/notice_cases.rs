@@ -248,3 +248,108 @@ event_case!(
     Gray,
     "VRChat's sound devices are back."
 );
+
+const MISSING_UPDATER: &str =
+    "Version 2026.11.24.0 is available, but the updater is missing. Download the new version from";
+const RELEASE_LINK: &str = "https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.11.24.0";
+
+#[test]
+fn notice_with_link_keeps_the_whole_link_on_one_line_without_a_width() {
+    let (ux, output) = ux(Style::plain());
+    ux.notice_with_link(Color::Yellow, MISSING_UPDATER, RELEASE_LINK);
+    assert_eq!(
+        output.text(),
+        format!("12:34:56  {MISSING_UPDATER} {RELEASE_LINK}\n")
+    );
+}
+
+#[test]
+fn notice_with_link_colors_the_link_like_the_sentence() {
+    let (ux, output) = ux(Style {
+        color: true,
+        unicode: false,
+    });
+    ux.notice_with_link(Color::Yellow, MISSING_UPDATER, RELEASE_LINK);
+    assert_eq!(
+        output.text(),
+        format!(
+            "{}12:34:56  {}{MISSING_UPDATER} {RELEASE_LINK}\x1b[0m\n",
+            Color::DarkGray.sgr(),
+            Color::Yellow.sgr()
+        )
+    );
+}
+
+#[test]
+fn notice_with_link_never_splits_or_redacts_the_link_at_any_width() {
+    thread_local! { static WIDTH: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) }; }
+    let link_len = RELEASE_LINK.len();
+    for width in (12..=200).map(Some).chain([None]) {
+        WIDTH.set(width);
+        let (ux, output) = ux(Style::plain());
+        ux.with_width(|| WIDTH.get()).notice_with_link(
+            Color::Yellow,
+            MISSING_UPDATER,
+            RELEASE_LINK,
+        );
+        let text = output.text();
+        let lines: Vec<&str> = text.lines().collect();
+        let holding: Vec<&&str> = lines
+            .iter()
+            .filter(|line| line.contains(RELEASE_LINK))
+            .collect();
+        assert_eq!(holding.len(), 1, "{width:?}: {text}");
+        let link_line = holding[0];
+        assert!(link_line.ends_with(RELEASE_LINK), "{width:?}: {text}");
+        assert_eq!(lines.last(), Some(link_line), "{width:?}: {text}");
+        if let Some(width) = width {
+            let room = width - 1;
+            for line in &lines {
+                if line != link_line {
+                    assert!(line.len() <= room, "{width}: {text}");
+                }
+            }
+            if link_len + 10 <= room {
+                assert!(link_line.len() <= room, "{width}: {text}");
+            } else {
+                assert_eq!(*link_line, RELEASE_LINK, "{width}: {text}");
+            }
+        }
+        let words: Vec<&str> = text.split_whitespace().skip(1).collect();
+        let mut expected: Vec<&str> = MISSING_UPDATER.split_whitespace().collect();
+        expected.push(RELEASE_LINK);
+        if width.is_none_or(|width| width > 30) {
+            assert_eq!(words, expected, "{width:?}: {text}");
+        }
+    }
+}
+
+#[test]
+fn notice_with_link_wraps_the_link_under_the_sentence_column_at_80_columns() {
+    thread_local! { static WIDTH: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) }; }
+    let short_link = "https://github.com/RealWhyKnot/VRCResolver/releases";
+    WIDTH.set(Some(80));
+    let (ux, output) = ux(Style::plain());
+    ux.with_width(|| WIDTH.get())
+        .notice_with_link(Color::Yellow, MISSING_UPDATER, short_link);
+    let text = output.text();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines.last(),
+        Some(&format!("{}{short_link}", sp(10)).as_str())
+    );
+}
+
+#[test]
+fn notice_with_link_drops_control_characters_from_the_link() {
+    let (ux, output) = ux(Style::plain());
+    ux.notice_with_link(
+        Color::Yellow,
+        "Download it from",
+        "https://example.com/\x1b]8;;evil\x07a b",
+    );
+    assert_eq!(
+        output.text(),
+        "12:34:56  Download it from https://example.com/]8;;evilab\n"
+    );
+}

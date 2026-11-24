@@ -158,6 +158,8 @@ mod codecs_cases;
 
 mod contracts_cases;
 
+mod dialog_owner_cases;
+
 mod shutdown_cases;
 
 mod updates_cases;

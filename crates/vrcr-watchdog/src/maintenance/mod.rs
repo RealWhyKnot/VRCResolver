@@ -1,4 +1,5 @@
 pub mod codec;
+pub mod dialog_owner;
 pub mod patch;
 pub mod shutdown;
 pub mod update;

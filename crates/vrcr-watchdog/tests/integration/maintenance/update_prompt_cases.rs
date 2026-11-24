@@ -11,6 +11,7 @@ use vrcr_watchdog::settings::Store;
 use super::*;
 
 const CURRENT: &str = "v2026.11.20.0";
+const MISSING_UPDATER_LINE: &str = "Version 2026.11.24.0 is available, but the updater is missing. Download the new version from https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.11.24.0";
 
 thread_local! {
     static LAUNCHES: RefCell<Vec<(Command, UpdateTicket)>> = const { RefCell::new(Vec::new()) };
@@ -209,8 +210,62 @@ fn missing_updater_announces_without_a_prompt() {
     assert_eq!(run.prompter.offer(&release("v2026.11.24.0")), None);
     assert!(lock(&run.calls).is_empty());
     assert_eq!(launch_count(), 0);
-    let text = run.out.text();
-    assert!(text.contains("Version 2026.11.24.0 is available. Type update to install it."));
+    assert_eq!(run.out.text(), format!("  {MISSING_UPDATER_LINE}\n"));
+    assert!(run.out.logs().contains(
+        "[warn] Version 2026.11.24.0 is available, but the updater is missing. Download the new version from github.com"
+    ));
+}
+
+#[test]
+fn missing_updater_links_the_release_page_from_the_release() {
+    let run = setup(UpdateDecision::UpdateNow, true);
+    fs::remove_file(run.dir.path().join(update::UPDATER_EXE))
+        .unwrap_or_else(|error| panic!("{error}"));
+    let mut listed = release("v2026.11.24.0");
+    listed.html_url =
+        "https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.11.24.0-beta".to_owned();
+    assert_eq!(run.prompter.offer(&listed), None);
+    assert_eq!(
+        run.out.text(),
+        "  Version 2026.11.24.0 is available, but the updater is missing. Download the new version from https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.11.24.0-beta\n"
+    );
+    let run = setup(UpdateDecision::UpdateNow, true);
+    fs::remove_file(run.dir.path().join(update::UPDATER_EXE))
+        .unwrap_or_else(|error| panic!("{error}"));
+    listed.html_url = "https://example.com/elsewhere".to_owned();
+    assert_eq!(run.prompter.offer(&listed), None);
+    assert_eq!(run.out.text(), format!("  {MISSING_UPDATER_LINE}\n"));
+}
+
+#[test]
+fn skipped_version_stays_quiet_about_a_missing_updater() {
+    let run = setup(UpdateDecision::UpdateNow, true);
+    fs::remove_file(run.dir.path().join(update::UPDATER_EXE))
+        .unwrap_or_else(|error| panic!("{error}"));
+    run.prompter
+        .settings
+        .set_skipped_version(Some("2026.11.24.0"))
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(run.prompter.offer(&release("v2026.11.24.0")), None);
+    assert_eq!(
+        run.out.text(),
+        "  Version 2026.11.24.0 is available, but you skipped it. Type update to review it.\n"
+    );
+}
+
+#[test]
+fn background_check_explains_a_missing_updater() {
+    let run = setup(UpdateDecision::UpdateNow, true);
+    fs::remove_file(run.dir.path().join(update::UPDATER_EXE))
+        .unwrap_or_else(|error| panic!("{error}"));
+    block_on(check_and_offer(
+        false,
+        run.prompter.clone(),
+        fetch_of(Some(newer())),
+    ));
+    assert!(lock(&run.calls).is_empty());
+    assert_eq!(launch_count(), 0);
+    assert_eq!(run.out.text(), format!("  {MISSING_UPDATER_LINE}\n"));
 }
 
 #[test]
@@ -439,9 +494,7 @@ fn manual_check_explains_a_missing_updater() {
     manual(&run, Some(newer()));
     assert!(lock(&run.calls).is_empty());
     assert_eq!(launch_count(), 0);
-    let text = run.out.text();
-    assert!(text.contains("Version 2026.11.24.0 is available, but the updater is missing."));
-    assert!(!text.contains("Type update to install it."));
+    assert_eq!(run.out.text(), format!("  {MISSING_UPDATER_LINE}\n"));
 }
 
 #[test]

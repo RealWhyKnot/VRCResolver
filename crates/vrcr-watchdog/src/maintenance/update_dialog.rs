@@ -8,13 +8,14 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, S_OK, WPARAM};
 use windows_sys::Win32::UI::Controls::{
     TASKDIALOG_BUTTON, TASKDIALOG_FLAGS, TASKDIALOGCONFIG, TASKDIALOGCONFIG_0, TD_INFORMATION_ICON,
     TDF_ALLOW_DIALOG_CANCELLATION, TDF_CALLBACK_TIMER, TDF_ENABLE_HYPERLINKS,
-    TDF_EXPANDED_BY_DEFAULT, TDF_USE_COMMAND_LINKS, TDM_CLICK_BUTTON, TDN_HYPERLINK_CLICKED,
-    TDN_TIMER, TaskDialogIndirect,
+    TDF_EXPANDED_BY_DEFAULT, TDF_USE_COMMAND_LINKS, TDM_CLICK_BUTTON, TDN_BUTTON_CLICKED,
+    TDN_CREATED, TDN_HYPERLINK_CLICKED, TDN_TIMER, TaskDialogIndirect,
 };
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{SW_SHOWNORMAL, SendMessageW};
 use windows_sys::core::HRESULT;
 
+use super::dialog_owner::{attach_to_console, detach};
 use super::update::{REPO, Release};
 use super::update_prompt::normalize_version;
 
@@ -420,11 +421,19 @@ unsafe extern "system" fn dialog_callback(
         &*ptr::with_exposed_provenance::<CallbackContext<'_>>(callback_data.cast_unsigned())
     };
     match notification.cast_signed() {
+        TDN_CREATED => {
+            let owner = attach_to_console(window);
+            context.ux.log_write(
+                Component::Update,
+                &format!("update dialog owner: {owner:?}"),
+            );
+        }
         TDN_TIMER if context.closing.is_cancelled() => {
             let later = WPARAM::try_from(LATER_BUTTON).expect("button ID fits WPARAM");
             // SAFETY: The timer supplies a live task dialog and TDM_CLICK_BUTTON takes a scalar button ID.
             unsafe { SendMessageW(window, TDM_CLICK_BUTTON.cast_unsigned(), later, 0) };
         }
+        TDN_BUTTON_CLICKED => detach(window),
         TDN_HYPERLINK_CLICKED => open_link(
             window,
             ptr::with_exposed_provenance::<u16>(lparam.cast_unsigned()),

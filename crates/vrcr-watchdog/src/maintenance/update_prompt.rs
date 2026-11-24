@@ -225,12 +225,7 @@ impl Prompter {
                 Component::Update,
                 "updater binary is missing; skipping the update prompt",
             );
-            match trigger {
-                Trigger::Startup => release.announce(&self.ux),
-                Trigger::Manual => self.warn(&format!(
-                    "Version {version} is available, but the updater is missing."
-                )),
-            }
+            self.warn_missing_updater(release);
             return None;
         }
         if !self.interactive {
@@ -300,5 +295,16 @@ impl Prompter {
     fn warn(&self, sentence: &str) {
         self.ux.log_warn(Component::Update, sentence);
         self.ux.notice(Color::Yellow, sentence);
+    }
+
+    fn warn_missing_updater(&self, release: &Release) {
+        let sentence = format!(
+            "Version {} is available, but the updater is missing. Download the new version from",
+            normalize_version(&release.tag)
+        );
+        let link = release.notes_url();
+        self.ux
+            .log_warn(Component::Update, &format!("{sentence} {link}"));
+        self.ux.notice_with_link(Color::Yellow, &sentence, &link);
     }
 }

@@ -1,5 +1,7 @@
 use super::*;
 
+type Line = Vec<(Color, char)>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VideoStatus {
     Playing,
@@ -110,6 +112,23 @@ impl Ux {
         );
     }
 
+    pub fn notice_with_link(&self, color: Color, sentence: &str, link: &str) {
+        let mut lines = self.layout(
+            &[(Color::DarkGray, format!("{}  ", (self.clock)()))],
+            color,
+            sentence,
+            10,
+        );
+        let link: String = link
+            .chars()
+            .filter(|character| character.is_ascii_graphic())
+            .collect();
+        if !link.is_empty() {
+            self.append_link(&mut lines, color, &link, 10);
+        }
+        self.write_lines(lines);
+    }
+
     pub fn video(&self, status: VideoStatus, host: &str, sentence: &str) {
         let host = crate::logutil::bare_host(&if host.contains("://") {
             host.to_owned()
@@ -194,10 +213,44 @@ impl Ux {
     }
 
     fn present(&self, prefix: &[(Color, String)], color: Color, sentence: &str, column: usize) {
+        let lines = self.layout(prefix, color, sentence, column);
+        self.write_lines(lines);
+    }
+
+    fn append_link(&self, lines: &mut Vec<Line>, color: Color, link: &str, column: usize) {
+        let width = (self.width)().map(|w| w.saturating_sub(1).max(1));
+        let indent = width.map_or(column, |w| column.min(w.saturating_sub(1)));
+        let link_len = link.chars().count();
+        let line = lines
+            .last_mut()
+            .expect("layout always returns at least one line");
+        if width.is_none_or(|w| line.len() + 1 + link_len <= w) {
+            if !line.is_empty() {
+                line.push((color, ' '));
+            }
+            line.extend(link.chars().map(|ch| (color, ch)));
+            return;
+        }
+        let mut next = if width.is_some_and(|w| indent + link_len <= w) {
+            vec![(color, ' '); indent]
+        } else {
+            Vec::new()
+        };
+        next.extend(link.chars().map(|ch| (color, ch)));
+        lines.push(next);
+    }
+
+    fn layout(
+        &self,
+        prefix: &[(Color, String)],
+        color: Color,
+        sentence: &str,
+        column: usize,
+    ) -> Vec<Line> {
         let sentence = crate::logutil::console_sentence(sentence);
         let width = (self.width)().map(|w| w.saturating_sub(1).max(1));
         let indent = width.map_or(column, |w| column.min(w.saturating_sub(1)));
-        let mut lines: Vec<Vec<(Color, char)>> = vec![Vec::new()];
+        let mut lines: Vec<Line> = vec![Vec::new()];
         for (color, text) in prefix {
             for ch in text.chars() {
                 if ch == '\n' {
@@ -251,6 +304,10 @@ impl Ux {
                     .push((color, ch));
             }
         }
+        lines
+    }
+
+    fn write_lines(&self, lines: Vec<Line>) {
         let mut st = self.state();
         clear_overlay(&mut st);
         for line in lines {
