@@ -15,6 +15,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 - **fallback:** Skip the server for native fallback hosts (1b28571)
 - **relay:** Log cf-ray on hitches and failures (89767e6)
 - **update:** Add native update prompt dialog (2c65d44)
+- **update:** Add release notes and manual check (9e2e386)
 
 ### Changed
 - **deps:** Bump the minor-and-patch group with 3 updates (#86) (0f4d330)
