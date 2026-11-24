@@ -23,6 +23,7 @@ Release entries are listed newest first. This changelog starts with the first pu
 ### Fixed
 - **fallback:** Harden native fallback and exit watch (89dd9e2)
 - **hooks:** Run pre-push from wsl (c22d613)
+- **update:** Keep dialog above console (6dea369)
 
 ---
 
