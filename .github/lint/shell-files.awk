@@ -5,7 +5,9 @@ FNR == NR {
   if (entry == "") {
     next
   }
-  if (entry ~ /^\//) {
+  if (entry ~ /^\/.*[^\/]$/) {
+    files[substr(entry, 2)] = 1
+  } else if (entry ~ /^\//) {
     sub(/^\/+/, "", entry)
     sub(/\/+$/, "", entry)
     prefixes[++prefix_count] = entry "/"
@@ -18,6 +20,9 @@ FNR == NR {
 }
 
 function is_vendored(path, parts, count, position) {
+  if (path in files) {
+    return 1
+  }
   for (position = 1; position <= prefix_count; position++) {
     if (substr(path, 1, length(prefixes[position])) == prefixes[position]) {
       return 1

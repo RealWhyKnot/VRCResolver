@@ -60,31 +60,7 @@ $existingRustFiles = @(
     }
 )
 Invoke-Gate -Name 'Rust style' -Command { awk -f .github/lint/rust-style.awk @existingRustFiles }
-$hasShellcheck = [bool](Get-Command -Name shellcheck -ErrorAction SilentlyContinue)
-$hasShfmt = [bool](Get-Command -Name shfmt -ErrorAction SilentlyContinue)
-$shellToolsMissing = -not ($hasShellcheck -and $hasShfmt)
-if ($env:CI -and $shellToolsMissing) {
-    throw 'Shell checks need shellcheck and shfmt on PATH.'
-}
-if ($env:OS -eq 'Windows_NT' -and $gitRoot -and -not $shellToolsMissing) {
-    $gitBash = Join-Path -Path $gitRoot -ChildPath 'bin\bash.exe'
-    $savedPath = $env:PATH
-    $env:PATH = "$(Join-Path -Path $gitRoot -ChildPath 'usr\bin');$env:PATH"
-    try {
-        Invoke-Gate -Name 'Shell checks' -Command { & $gitBash .github/lint/check-shell }
-    } finally {
-        $env:PATH = $savedPath
-    }
-} elseif ($env:OS -eq 'Windows_NT') {
-    if (-not $env:LINT_WSL_DISTRO) {
-        throw 'Shell checks need shellcheck, shfmt and Git for Windows, or LINT_WSL_DISTRO set to a WSL distro.'
-    }
-    Invoke-Gate -Name 'Shell checks' -Command {
-        wsl -d $env:LINT_WSL_DISTRO --cd $repoRoot -- bash .github/lint/check-shell
-    }
-} else {
-    Invoke-Gate -Name 'Shell checks' -Command { bash .github/lint/check-shell }
-}
+Invoke-Gate -Name 'Shell checks' -Command { & (Join-Path $PSScriptRoot 'Invoke-ShellChecks.ps1') -RepoRoot $repoRoot }
 Invoke-Gate -Name 'Python format' -Command { ruff format --check . }
 Invoke-Gate -Name 'Python lint' -Command { ruff check --ignore-noqa . }
 

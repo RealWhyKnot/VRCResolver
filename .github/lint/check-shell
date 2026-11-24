@@ -1,12 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 shopt -s inherit_errexit
+
+root=$(git rev-parse --show-toplevel)
+cd "${root}"
+for tool in shellcheck shfmt awk; do
+  if ! command -v "${tool}" >/dev/null; then
+    printf '%s is missing. Install it and add it to PATH.\n' "${tool}" >&2
+    exit 1
+  fi
+done
 found=$(git -c core.quotepath=off ls-files | awk -f .github/lint/shell-files.awk .github/lint/vendored-paths.txt -)
 mapfile -t all <<<"${found}"
 files=()
 for file in "${all[@]}"; do
   [[ -z ${file} ]] || files+=("${file}")
 done
+if ((${#files[@]} == 0)); then
+  exit 0
+fi
 modes=$(git ls-files -s -- "${files[@]}")
 eols=$(git ls-files --eol -- "${files[@]}")
 shellcheck -f gcc "${files[@]}"

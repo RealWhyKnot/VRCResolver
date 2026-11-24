@@ -6,35 +6,6 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [[ -n ${repo_root} ]] || exit 0
 cd "${repo_root}"
 
-is_wsl() {
-  [[ -n ${WSL_DISTRO_NAME:-} ]] || { [[ -r /proc/version ]] && grep -qi microsoft /proc/version; }
-}
-
-if is_wsl; then
-  pwsh_win="$(command -v pwsh.exe 2>/dev/null || true)"
-  if [[ -z ${pwsh_win} && -x "/mnt/c/Program Files/PowerShell/7/pwsh.exe" ]]; then
-    pwsh_win="/mnt/c/Program Files/PowerShell/7/pwsh.exe"
-  fi
-  if [[ -z ${pwsh_win} ]]; then
-    for candidate in /mnt/c/Users/*/AppData/Local/Microsoft/WindowsApps/pwsh.exe; do
-      if [[ -x ${candidate} ]]; then
-        pwsh_win="${candidate}"
-        break
-      fi
-    done
-  fi
-  if [[ -z ${pwsh_win} ]]; then
-    echo "pre-push: pwsh.exe wasn't found from WSL. Install PowerShell 7.4 or later on Windows." >&2
-    exit 1
-  fi
-  if ! command -v wslpath >/dev/null 2>&1; then
-    echo "pre-push: wslpath isn't available, so the checks can't run." >&2
-    exit 1
-  fi
-  script_win="$(wslpath -w "${repo_root}/.github/lint/lint.ps1")"
-  exec "${pwsh_win}" -NoProfile -NonInteractive -File "${script_win}"
-fi
-
 if ! command -v pwsh >/dev/null 2>&1; then
   echo "pre-push: pwsh isn't installed, so the checks can't run. Install PowerShell 7.4 or later." >&2
   exit 1
