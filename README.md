@@ -14,61 +14,81 @@
 <p align="center">
   <a href="https://github.com/RealWhyKnot/VRCResolver/releases/latest">Download</a> ·
   <a href="https://vrcresolver.com">Website</a> ·
-  <a href="https://github.com/RealWhyKnot/VRCResolver/issues/new">Report a bug</a> ·
+  <a href="https://github.com/RealWhyKnot/VRCResolver/issues/new/choose">Report a bug</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href=".github/SECURITY.md">Security</a>
 </p>
 
-VRChat plays videos through yt-dlp. Stock yt-dlp is slow, breaks whenever YouTube changes something, and returns URLs that AVPro blocks in public worlds. VRCResolver replaces VRChat's `Tools/yt-dlp.exe` with a patched build that resolves videos through vrcresolver.com and serves them from a local address AVPro trusts. If the server can't resolve a YouTube link, the client asks YouTube itself, and if that fails too it falls back to VRChat's original yt-dlp. Playback is never worse than stock.
+VRCResolver makes videos in VRChat load faster and fail less. It replaces VRChat's slow, flaky video resolver with one backed by [vrcresolver.com](https://vrcresolver.com), and if that can't resolve a link it falls back to resolving YouTube links on your PC, then to VRChat's original `yt-dlp`.
 
-Formerly WKVRCProxy.
+It is alpha software and runs on 64-bit Windows 10 and 11. It was called WKVRCProxy before.
 
-## What you get
+## What it does
 
-Streams come from `localhost.youtube.com:{port}`, which is on AVPro's trust list, and that's what makes them play in public worlds. Videos are resolved on the server instead of your PC. Regional blocks and rate limits on your connection don't apply, and the server updates its yt-dlp nightly. A new URL takes 2-3 seconds and a repeat about 20 ms. You get 1080p HLS instead of 360p mp4. When the server can't resolve a YouTube link, the client resolves it on your PC. In our test that took about half a second, where VRChat's yt-dlp took about three. Any failure after that hands the URL to VRChat's original yt-dlp.
-
-It doesn't bypass DRM, host any content or log in to YouTube.
-
-## Install
-
-1. Launch VRChat once. The patcher needs `Tools/yt-dlp.exe` to exist so it can back it up.
-2. Download the latest `vrcresolver-*.zip` release and extract it anywhere except `Program Files`.
-3. Run `vrcresolver.exe` and accept the one-time UAC prompt. It adds `127.0.0.1 localhost.youtube.com` to your hosts file, which public-world playback needs.
-4. Launch VRChat. When the console says `Ready.`, paste a video URL into any in-world player.
-
-The console tells you when a new version is out. Type `update` to install it.
-
-To uninstall, run `vrcresolver.Uninstaller.exe`. It restores the original `yt-dlp.exe`, removes the hosts entry and deletes `%LOCALAPPDATA%Low\vrcresolver\`. It doesn't ask for confirmation.
-
-Needs 64-bit Windows 10 or 11.
-
-## Troubleshooting
-
-If you missed or declined a Windows permission prompt, type `repair` in the VRCResolver console.
-
-The console prints one line per video. `Playing` (green) means it worked. `Skipped` (yellow) means VRChat's own yt-dlp got the video instead, and the line says why. `Failed` (red) means that didn't work either. Full logs are in `%LOCALAPPDATA%Low\vrcresolver\logs\`. When you file a bug, include the log lines for the failed video.
+- Resolves the links you paste into in-world video players on a server instead of your PC.
+- Gets higher quality streams where VRChat's stock resolver often returns a low-quality one.
+- Serves streams from an address VRChat's video player (AVPro) trusts, so they play in public worlds.
+- Falls back if something breaks. If `vrcresolver.com` can't resolve a link or can't be reached, it resolves locally, and after that it hands the link to VRChat's stock `yt-dlp`.
+- Doesn't bypass DRM, host any content, or log in to YouTube.
 
 ## How it works
 
-```
-VRChat (AVPro)
-   v  paste URL
-Tools/yt-dlp.exe        patched shim
-   v  named pipe
-vrcresolver.exe         watchdog
-   v  WebSocket
-vrcresolver.com         remote resolver
-```
+VRChat plays videos by running a small program called `yt-dlp.exe` that turns a page link into a stream URL. VRCResolver sits in that spot:
 
-The resolved stream comes back through the watchdog's local listener at `http://localhost.youtube.com:{port}/play/<session>/manifest.<ext>?target=...`. If any link in that chain breaks, the shim runs the backed-up `yt-dlp-og.exe` instead.
+1. VRChat runs `Tools/yt-dlp.exe`, which is now a small wrapper. The original is backed up next to it as `yt-dlp-og.exe`.
+2. The wrapper passes the link to the `vrcresolver.exe` app running on your PC.
+3. `vrcresolver.exe` asks `vrcresolver.com` for the stream URL, then serves the video to VRChat from `localhost.youtube.com`. That name points at your own PC and is one AVPro trusts.
+4. If the server can't resolve the link, `vrcresolver.exe` tries YouTube from your PC. If that fails too, the wrapper runs `yt-dlp-og.exe`, so VRChat behaves the way it did before.
+
+`vrcresolver.com` is a hosted service run by WhyKnot. Its server code is private, so it can't be self-hosted.
+
+## Install
+
+1. Launch VRChat once. The installer needs `Tools/yt-dlp.exe` to exist so it can back it up.
+2. Download the latest `vrcresolver-*.zip` from the [releases page](https://github.com/RealWhyKnot/VRCResolver/releases/latest) and extract it anywhere except `Program Files`.
+3. Run `vrcresolver.exe`. Windows asks for admin permission (UAC) once, because VRCResolver adds `127.0.0.1 localhost.youtube.com` to your hosts file. Public-world playback needs that entry.
+4. Launch VRChat. When the console says `Ready.`, paste a video link into any in-world player.
+
+Keep `vrcresolver.exe` running while you play. When it tells you a new version is out, type `update` in its console to install it.
+
+## Uninstall
+
+`vrcresolver.Uninstaller.exe` does not ask for confirmation. When you run it, it restores the original `yt-dlp.exe` from `yt-dlp-og.exe`, removes the hosts entry, and deletes `%USERPROFILE%\AppData\LocalLow\vrcresolver\`.
+
+## Troubleshooting
+
+The console prints one line per video:
+
+- `Playing` (green): VRCResolver handled it.
+- `Skipped` (yellow): VRChat's own `yt-dlp` handled it instead. The line says why.
+- `Failed` (red): neither worked.
+
+If nothing plays in VRChat:
+
+1. Check that `vrcresolver.exe` is running and its console said `Ready.`.
+2. If you missed or declined the UAC prompt, type `repair` in the console. Without the hosts entry, public worlds won't play.
+3. Read the reason on any `Skipped` or `Failed` line.
+4. For a clean reinstall, run `vrcresolver.Uninstaller.exe`, launch VRChat once, then extract a fresh release and run `vrcresolver.exe` again.
+
+Logs are in `%USERPROFILE%\AppData\LocalLow\vrcresolver\logs\`. When you report a bug, include the lines for the video that failed.
 
 ## Building from source
 
-[CONTRIBUTING.md](CONTRIBUTING.md) covers setup, the build script and the checks a pull request has to pass.
+You need Windows 10 or 11 x64, the stable Rust toolchain with the Visual Studio C++ build tools, PowerShell 5.1 or newer, and Git.
 
-## Terms and privacy
+```powershell
+git clone https://github.com/RealWhyKnot/VRCResolver.git
+cd VRCResolver
+powershell -ExecutionPolicy Bypass -File build.ps1
+```
 
-The app resolves the links you paste through vrcresolver.com, so the site's [terms of service](TERMS.md) and [privacy policy](PRIVACY.md) apply. The copies in this repo update automatically when the site's versions change.
+The build puts its output in `dist\`. [CONTRIBUTING.md](CONTRIBUTING.md) covers the checks and how to propose changes.
+
+## Privacy, terms, and support
+
+The links you paste are sent to `vrcresolver.com` along with the player type and a maximum video height. The server also sees your IP address and ordinary request details, and keeps its logs encrypted for 30 days. There are no accounts, cookies, or analytics. If the server can't resolve a YouTube link, your PC asks YouTube directly, and YouTube sees your IP address. Your client logs stay on your PC. The details are in [PRIVACY.md](PRIVACY.md) and [TERMS.md](TERMS.md), which update automatically when the site's versions change.
+
+For bugs, [open an issue](https://github.com/RealWhyKnot/VRCResolver/issues/new/choose). Report security problems privately as described in [SECURITY.md](.github/SECURITY.md). Please follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
