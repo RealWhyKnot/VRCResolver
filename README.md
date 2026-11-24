@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://github.com/RealWhyKnot/VRCResolver/releases/latest">Download</a> ·
   <a href="https://vrcresolver.com">Website</a> ·
-  <a href="https://github.com/RealWhyKnot/VRCResolver/issues/new/choose">Report a bug</a> ·
+  <a href="https://github.com/RealWhyKnot/VRCResolver/issues/new">Report a bug</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href=".github/SECURITY.md">Security</a>
 </p>
@@ -88,7 +88,7 @@ The build puts its output in `dist\`. [CONTRIBUTING.md](CONTRIBUTING.md) covers 
 
 The links you paste are sent to `vrcresolver.com` along with the player type and a maximum video height. The server also sees your IP address and ordinary request details, and keeps its logs encrypted for 30 days. There are no accounts, cookies, or analytics. If the server can't resolve a YouTube link, your PC asks YouTube directly, and YouTube sees your IP address. Your client logs stay on your PC. The details are in [PRIVACY.md](PRIVACY.md) and [TERMS.md](TERMS.md), which update automatically when the site's versions change.
 
-For bugs, [open an issue](https://github.com/RealWhyKnot/VRCResolver/issues/new/choose). Report security problems privately as described in [SECURITY.md](.github/SECURITY.md). Please follow the [code of conduct](CODE_OF_CONDUCT.md).
+For bugs, [open an issue](https://github.com/RealWhyKnot/VRCResolver/issues/new). Report security problems privately as described in [SECURITY.md](.github/SECURITY.md). Please follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

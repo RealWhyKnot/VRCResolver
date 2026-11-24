@@ -10,7 +10,6 @@ on:
       - '.gitignore'
       - '.gitattributes'
       - '.editorconfig'
-      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
     branches: [main]
     paths-ignore:
@@ -20,7 +19,6 @@ on:
       - '.gitignore'
       - '.gitattributes'
       - '.editorconfig'
-      - '.github/ISSUE_TEMPLATE/**'
   workflow_dispatch:
 
 concurrency:

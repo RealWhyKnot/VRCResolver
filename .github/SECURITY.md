@@ -22,7 +22,7 @@ I try to acknowledge new reports within **7 days** and give a first assessment w
 
 - VRChat client behaviour, AVPro behaviour, or the trusted-host allowlist itself.
 - Issues that need an attacker to already have admin access on the user's machine.
-- "Loading failed" and other playback failures. Those are functional bugs. Use the bug-report issue template.
+- "Loading failed" and other playback failures. Those are functional bugs. Open a normal issue.
 
 ## Disclosure
 
