@@ -1,12 +1,13 @@
 use std::fs;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::common::mesh::Capture;
 use tempfile::TempDir;
 use vrcr_shared::console::Color;
 use vrcr_shared::win::KeyEvent;
+use vrcr_watchdog::maintenance::update::CheckStart;
 use vrcr_watchdog::settings::Store;
 use vrcr_watchdog::stats::{Activity, Bandwidth, Stats};
 use vrcr_watchdog::terminal::blocks::{self, Item};
@@ -67,6 +68,8 @@ struct Harness {
     settings: Arc<Store>,
     stats: Arc<Stats>,
     repairs: Arc<AtomicUsize>,
+    update_checks: Arc<AtomicUsize>,
+    update_start: Arc<Mutex<CheckStart>>,
 }
 
 fn harness_with(width: Option<usize>) -> Harness {
@@ -84,6 +87,10 @@ fn harness_styled(width: Option<usize>, style: vrcr_shared::console::Style) -> H
     let stats = Arc::new(Stats::new(t0()));
     let repairs = Arc::new(AtomicUsize::new(0));
     let repair_counter = Arc::clone(&repairs);
+    let update_checks = Arc::new(AtomicUsize::new(0));
+    let check_counter = Arc::clone(&update_checks);
+    let update_start = Arc::new(Mutex::new(CheckStart::Started));
+    let check_result = Arc::clone(&update_start);
     let history = HistoryStore::new(&dir.path().join("terminal"));
     let width_fn: fn() -> Option<usize> = if width.is_some() {
         || Some(100)
@@ -98,9 +105,10 @@ fn harness_styled(width: Option<usize>, style: vrcr_shared::console::Style) -> H
         repair: Arc::new(move || {
             repair_counter.fetch_add(1, Ordering::SeqCst);
         }),
-        install_dir: dir.path().join("install"),
-        spawn_updater: |_, _| Ok(()),
-        update_gate: vrcr_watchdog::maintenance::update::UpdateGate::default(),
+        update_check: Arc::new(move || {
+            check_counter.fetch_add(1, Ordering::SeqCst);
+            *check_result.lock().unwrap_or_else(|e| e.into_inner())
+        }),
         width: width_fn,
         animations_available: false,
         now: fixed_now,
@@ -113,6 +121,8 @@ fn harness_styled(width: Option<usize>, style: vrcr_shared::console::Style) -> H
         settings,
         stats,
         repairs,
+        update_checks,
+        update_start,
     }
 }
 

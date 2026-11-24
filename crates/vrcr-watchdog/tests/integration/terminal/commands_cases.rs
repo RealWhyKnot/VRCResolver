@@ -93,9 +93,9 @@ fn help_for_one_command_and_unknown_commands() {
     h.run("help update");
     let out = h.out.text();
     assert!(out.contains("update beta"));
-    assert!(out.contains("Check for updates and include beta releases."));
+    assert!(out.contains("Switch to beta releases and check now."));
     assert!(out.contains("update stable"));
-    assert!(out.contains("Check for stable updates only."));
+    assert!(out.contains("Switch to stable releases and check now."));
     h.run("help repair");
     assert!(
         h.out
@@ -216,9 +216,6 @@ fn update_completes_beta_and_stable() {
 #[test]
 fn update_switches_channel_and_checks_the_saved_choice() {
     let h = harness();
-    let install = h._dir.path().join("install");
-    fs::create_dir_all(&install).unwrap_or_else(|e| panic!("{e}"));
-    fs::write(install.join("vrcresolver.Updater.exe"), []).unwrap_or_else(|e| panic!("{e}"));
     let load =
         || Store::new(h._dir.path().join("settings.json"), Box::new(|_| {})).include_prereleases();
     h.run("update beta");
@@ -233,6 +230,7 @@ fn update_switches_channel_and_checks_the_saved_choice() {
     assert!(h.out.text().ends_with("  Checking for stable updates.\n"));
     h.run("update");
     assert!(h.out.text().ends_with("  Checking for stable updates.\n"));
+    assert_eq!(h.update_checks.load(Ordering::SeqCst), 4);
     h.run("update nightly");
     assert!(
         h.out
@@ -240,4 +238,53 @@ fn update_switches_channel_and_checks_the_saved_choice() {
             .ends_with("  Type update, update beta or update stable.\n")
     );
     assert!(!load());
+    assert_eq!(h.update_checks.load(Ordering::SeqCst), 4);
+}
+
+fn set_check_start(h: &Harness, start: CheckStart) {
+    *h.update_start.lock().unwrap_or_else(|e| e.into_inner()) = start;
+}
+
+#[test]
+fn update_reports_a_busy_check_an_open_window_or_a_running_install() {
+    let h = harness();
+    for (start, reply) in [
+        (CheckStart::Checking, "  Already checking for updates.\n"),
+        (
+            CheckStart::Prompting,
+            "  The update window is already open.\n",
+        ),
+        (CheckStart::Installing, "  An update is already running.\n"),
+    ] {
+        set_check_start(&h, start);
+        h.run("update");
+        assert!(h.out.text().ends_with(reply), "{start:?}");
+        h.run("update stable");
+        assert!(h.out.text().ends_with(reply), "{start:?}");
+    }
+    assert_eq!(h.update_checks.load(Ordering::SeqCst), 6);
+}
+
+#[test]
+fn switching_channel_while_busy_says_the_choice_was_saved() {
+    let h = harness();
+    set_check_start(&h, CheckStart::Checking);
+    h.run("update beta");
+    assert!(h.settings.include_prereleases());
+    assert!(h.out.text().ends_with(
+        "  Switched to beta releases. Type update again when the current check finishes.\n"
+    ));
+    set_check_start(&h, CheckStart::Prompting);
+    h.run("update stable");
+    assert!(!h.settings.include_prereleases());
+    assert!(h.out.text().ends_with(
+        "  Switched to stable releases. Close the update window, then type update again.\n"
+    ));
+    set_check_start(&h, CheckStart::Installing);
+    h.run("update beta");
+    assert!(
+        h.out
+            .text()
+            .ends_with("  Switched to beta releases. An update is already running.\n")
+    );
 }

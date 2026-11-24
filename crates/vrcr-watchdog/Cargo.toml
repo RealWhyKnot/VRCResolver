@@ -45,7 +45,7 @@ vrcr-shared.workspace = true
 x509-parser.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
+windows-sys = { workspace = true, features = ["Win32_UI_Shell"] }
 
 [build-dependencies]
 vrcr-build.workspace = true

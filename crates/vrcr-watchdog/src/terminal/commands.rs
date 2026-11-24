@@ -1,7 +1,7 @@
 use super::blocks::Item;
 use super::renderer::Renderer;
 use super::text::normalize_verb;
-use crate::maintenance::update;
+use crate::maintenance::update::CheckStart;
 
 pub const MAX_SUGGESTION_SCORE: usize = 3;
 
@@ -76,7 +76,11 @@ impl Registry {
             "Ask Windows again for permission to play videos in public worlds.",
             |ctx, _| ctx.renderer.repair(),
         );
-        r.add("update", "Check for and install updates.", update_command);
+        r.add(
+            "update",
+            "Check for updates and choose whether to install.",
+            update_command,
+        );
         r.add("clear", "Clear the console.", |ctx, _| {
             ctx.renderer.clear_screen()
         });
@@ -290,8 +294,8 @@ fn complete_help(registry: &Registry, input: CompletionInput<'_>) -> Completion 
 }
 
 const UPDATE_OPTIONS: [(&str, &str); 2] = [
-    ("beta", "Check for updates and include beta releases."),
-    ("stable", "Check for stable updates only."),
+    ("beta", "Switch to beta releases and check now."),
+    ("stable", "Switch to stable releases and check now."),
 ];
 
 fn update_command(ctx: &Context<'_>, args: &str) {
@@ -306,6 +310,7 @@ fn update_command(ctx: &Context<'_>, args: &str) {
         }
     };
     let store = ctx.renderer.settings();
+    let switched = requested.is_some_and(|include| include != store.include_prereleases());
     if let Some(include) = requested
         && store.set_include_prereleases(include).is_err()
     {
@@ -317,19 +322,23 @@ fn update_command(ctx: &Context<'_>, args: &str) {
     } else {
         "stable"
     };
-    match ctx.renderer.start_update() {
-        update::UpdateStart::UpdaterMissing => ctx.renderer.error(&format!(
-            "Couldn't check for {channel} updates because the updater is missing."
-        )),
-        update::UpdateStart::AlreadyRunning => {
-            ctx.renderer.info("An update is already running.");
+    let reply = match ctx.renderer.start_update_check() {
+        CheckStart::Started => {
+            ctx.renderer
+                .info(&format!("Checking for {channel} updates."));
+            return;
         }
-        update::UpdateStart::Failed => ctx
-            .renderer
-            .warn(&format!("Couldn't start the check for {channel} updates.")),
-        update::UpdateStart::Started => ctx
-            .renderer
-            .info(&format!("Checking for {channel} updates.")),
+        CheckStart::Checking if switched => "Type update again when the current check finishes.",
+        CheckStart::Checking => "Already checking for updates.",
+        CheckStart::Prompting if switched => "Close the update window, then type update again.",
+        CheckStart::Prompting => "The update window is already open.",
+        CheckStart::Installing => "An update is already running.",
+    };
+    if switched {
+        ctx.renderer
+            .info(&format!("Switched to {channel} releases. {reply}"));
+    } else {
+        ctx.renderer.info(reply);
     }
 }
 

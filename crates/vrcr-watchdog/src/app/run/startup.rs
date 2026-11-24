@@ -281,6 +281,10 @@ impl App {
 
         let update_gate = update::UpdateGate::default();
         let prompter = self.update_prompter(&settings, &update_gate);
+        let manual_prompter = prompter.clone();
+        let update_runtime = runtime.handle().clone();
+        let update_check: UpdateCheck =
+            Arc::new(move || update::start_manual_check(&manual_prompter, &update_runtime));
         drop(update::start_background_check(
             include_prereleases,
             prompter,
@@ -315,7 +319,7 @@ impl App {
             mesh.clone(),
             &state_root,
             repair,
-            update_gate,
+            update_check,
         );
         phases.mark("terminal");
 

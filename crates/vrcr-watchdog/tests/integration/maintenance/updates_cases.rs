@@ -121,33 +121,98 @@ fn check_asks_the_channel_endpoint() {
     let asked = Arc::new(Mutex::new(Vec::new()));
     for pre in [false, true] {
         let seen = std::sync::Arc::clone(&asked);
-        let msg = block_on(update::check(pre, "1.0", move |url| {
+        let outcome = block_on(update::check(pre, "1.0", move |url| {
             lock(&seen).push(url);
             async { Some(r#"[{"tag_name":"v2.0"}]"#.to_owned()) }
         }));
-        assert_eq!(msg.is_some(), pre);
+        assert_eq!(matches!(outcome, CheckOutcome::UpdateAvailable(_)), pre);
     }
     assert_eq!(
         *lock(&asked),
         vec![update::STABLE_LATEST_URL, update::ANY_RELEASES_URL]
     );
-    assert_eq!(
+}
+
+#[test]
+fn check_tells_failures_apart_from_up_to_date() {
+    assert!(matches!(
         block_on(update::check(false, "1.0", |_| async { None })),
-        None
-    );
-    assert_eq!(
+        CheckOutcome::Failed(_)
+    ));
+    assert!(matches!(
         block_on(update::check(false, "1.0", |_| async {
             Some("<html>".to_owned())
         })),
-        None
+        CheckOutcome::Failed(_)
+    ));
+    assert_eq!(
+        block_on(update::check(false, "1.0", |_| async {
+            Some(r#"{"tag_name":"v1.0"}"#.to_owned())
+        })),
+        CheckOutcome::UpToDate
+    );
+}
+
+#[test]
+fn release_body_is_trimmed_and_blank_becomes_none() {
+    let body = |text: &str| {
+        update::pick_single(&json!({"tag_name": "v2.0", "body": text}))
+            .unwrap_or_else(|| panic!("release"))
+            .body
+    };
+    assert_eq!(
+        body("  Faster resolves.\n\n"),
+        Some("Faster resolves.".to_owned())
+    );
+    assert_eq!(body(" \r\n\t "), None);
+    assert_eq!(body(""), None);
+    let missing =
+        update::pick_single(&json!({"tag_name": "v2.0"})).unwrap_or_else(|| panic!("release"));
+    assert_eq!(missing.body, None);
+    let null = update::pick_single(&json!({"tag_name": "v2.0", "body": null}))
+        .unwrap_or_else(|| panic!("release"));
+    assert_eq!(null.body, None);
+}
+
+#[test]
+fn notes_url_prefers_a_github_link_and_falls_back_to_the_tag_page() {
+    let release = |url: &str| Release {
+        tag: "v2026.11.24.0".to_owned(),
+        html_url: url.to_owned(),
+        body: None,
+        prerelease: false,
+    };
+    let github = "https://github.com/RealWhyKnot/VRCResolver/releases/tag/v2026.11.24.0";
+    assert_eq!(release(github).notes_url(), github);
+    for bad in [
+        "",
+        "http://github.com/x/y",
+        "https://example.test/releases/v1",
+        "https://github.com/",
+        "https://github.com/a b",
+        "https://github.com/a\nb",
+    ] {
+        assert_eq!(release(bad).notes_url(), github, "{bad}");
+    }
+    let odd_tag = Release {
+        tag: "v1\"><a href=\"x".to_owned(),
+        html_url: String::new(),
+        body: None,
+        prerelease: false,
+    };
+    assert_eq!(
+        odd_tag.notes_url(),
+        "https://github.com/RealWhyKnot/VRCResolver/releases"
     );
 }
 
 #[test]
 fn update_announcement_uses_the_release_tag_and_keeps_the_log_detail() {
-    let release = block_on(update::check(true, "1.0", |_| async {
+    let CheckOutcome::UpdateAvailable(release) = block_on(update::check(true, "1.0", |_| async {
         Some(r#"[{"tag_name":"v2.0-rc","html_url":"https://example.test/releases/v2.0-rc","prerelease":true}]"#.to_owned())
-    })).expect("newer release");
+    })) else {
+        panic!("newer release");
+    };
     assert_eq!(release.tag, "v2.0-rc");
     let (ux, out) = capture_ux();
     release.announce(&ux);

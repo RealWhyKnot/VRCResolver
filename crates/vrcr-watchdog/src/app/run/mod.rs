@@ -49,7 +49,7 @@ use crate::relay::{
 use crate::resolve_cache::ResolveCache;
 use crate::settings::Store;
 use crate::stats::Stats;
-use crate::terminal::renderer::Action;
+use crate::terminal::renderer::{Action, UpdateCheck};
 use crate::terminal::{HistoryStore, Services, Terminal, animations_allowed, interactive_allowed};
 use lifecycle::Lifecycle;
 
@@ -452,7 +452,7 @@ impl App {
         mesh: MeshClient,
         state_root: &Path,
         repair: Action,
-        update_gate: update::UpdateGate,
+        update_check: UpdateCheck,
     ) {
         let stdin_tty = io::stdin().is_terminal();
         let services = Services {
@@ -461,9 +461,7 @@ impl App {
             settings,
             mesh_connected: Arc::new(move || mesh.is_connected()),
             repair,
-            install_dir: self.install_dir.clone(),
-            spawn_updater: update::spawn_detached,
-            update_gate,
+            update_check,
             width: win::console_width,
             animations_available: animations_allowed(
                 crate::terminal::interactive::OutputSupport {
@@ -491,14 +489,15 @@ impl App {
         update::Prompter {
             settings: Arc::clone(settings),
             gate: gate.clone(),
+            flight: update::CheckFlight::default(),
             install_dir: self.install_dir.clone(),
             spawn: update::spawn_detached,
             current: self.build.version.clone(),
             interactive: terminal_interactive(),
             closing: self.life.closing.clone(),
             ux: self.ux.clone(),
-            prompt: Arc::new(move |version, current, closing| {
-                update_dialog::ask(version, current, closing, &ux)
+            prompt: Arc::new(move |release, current, closing| {
+                update_dialog::ask(release, current, closing, &ux)
             }),
         }
     }

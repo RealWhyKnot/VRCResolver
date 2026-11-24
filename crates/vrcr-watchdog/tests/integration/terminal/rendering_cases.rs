@@ -146,11 +146,8 @@ fn status_and_update_render() {
     assert!(out.contains("serving VRChat"));
     assert!(out.contains("4.0 KB served"));
     h.run("update");
-    assert!(
-        h.out
-            .text()
-            .contains("  Couldn't check for stable updates because the updater is missing.")
-    );
+    assert!(h.out.text().ends_with("  Checking for stable updates.\n"));
+    assert_eq!(h.update_checks.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 #[test]

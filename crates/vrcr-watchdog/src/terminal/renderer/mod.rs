@@ -1,7 +1,6 @@
 mod replies;
 
 use std::io::{self, Write};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::SystemTime;
@@ -15,7 +14,7 @@ use super::overlay::{OverlayLine, park_caret, write_frame_line};
 use super::status::{FrameGate, LineInput, PROMPT};
 use super::text::{Frame, Glyphs, Run, fast_refresh, glyphs, sparkline};
 use crate::display::{format_bytes, format_bytes_per_second};
-use crate::maintenance::update::{self, UpdateStart};
+use crate::maintenance::update::CheckStart;
 use crate::settings::Store;
 use crate::stats::{Bandwidth, Stats};
 
@@ -24,6 +23,7 @@ pub const DEFAULT_WIDTH: usize = 119;
 
 pub type Flag = Arc<dyn Fn() -> bool + Send + Sync>;
 pub type Action = Arc<dyn Fn() + Send + Sync>;
+pub type UpdateCheck = Arc<dyn Fn() -> CheckStart + Send + Sync>;
 
 #[derive(Clone)]
 pub struct Services {
@@ -32,9 +32,7 @@ pub struct Services {
     pub settings: Arc<Store>,
     pub mesh_connected: Flag,
     pub repair: Action,
-    pub install_dir: PathBuf,
-    pub spawn_updater: update::Spawn,
-    pub update_gate: update::UpdateGate,
+    pub update_check: UpdateCheck,
     pub width: fn() -> Option<usize>,
     pub animations_available: bool,
     pub now: fn() -> SystemTime,
@@ -87,9 +85,8 @@ impl Renderer {
         (self.inner.services.repair)();
     }
 
-    pub fn start_update(&self) -> UpdateStart {
-        let s = &self.inner.services;
-        s.update_gate.start(&s.install_dir, s.spawn_updater)
+    pub fn start_update_check(&self) -> CheckStart {
+        (self.inner.services.update_check)()
     }
 
     pub fn attach(&self) -> OverlayGuard {

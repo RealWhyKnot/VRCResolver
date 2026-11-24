@@ -13,7 +13,12 @@ use vrcr_shared::console::{Component, Ux};
 use vrcr_shared::log::Log;
 use vrcr_shared::release::pick_highest_entry;
 
-pub use super::update_prompt::{Prompt, Prompter, check_and_offer, normalize_version};
+use super::update_dialog::{is_allowed_release_url, release_tag_url, releases_page_url};
+
+pub use super::update_prompt::{
+    CheckFlight, CheckStart, CheckTicket, Prompt, Prompter, check_and_offer,
+    check_and_offer_manual, normalize_version,
+};
 
 pub use vrcr_shared::release::{ANY_RELEASES_URL, REPO, STABLE_LATEST_URL, Version};
 
@@ -28,7 +33,15 @@ const MOVE_RETRY_DELAY: Duration = Duration::from_millis(200);
 pub struct Release {
     pub tag: String,
     pub html_url: String,
+    pub body: Option<String>,
     pub prerelease: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckOutcome {
+    UpdateAvailable(Release),
+    UpToDate,
+    Failed(String),
 }
 
 fn release_of(entry: &Value) -> Option<Release> {
@@ -39,9 +52,11 @@ fn release_of(entry: &Value) -> Option<Release> {
             .unwrap_or_default()
             .to_owned()
     };
+    let body = text("body").trim().to_owned();
     Some(Release {
         tag: text("tag_name"),
         html_url: text("html_url"),
+        body: (!body.is_empty()).then_some(body),
         prerelease: obj.get("prerelease") == Some(&Value::Bool(true)),
     })
 }
@@ -76,6 +91,13 @@ pub fn available_message(doc: &Value, include_prereleases: bool, local: &str) ->
 }
 
 impl Release {
+    pub fn notes_url(&self) -> String {
+        if is_allowed_release_url(&self.html_url) {
+            return self.html_url.clone();
+        }
+        release_tag_url(&self.tag).unwrap_or_else(releases_page_url)
+    }
+
     pub fn announce(&self, ux: &Ux) {
         ux.log_success(Component::Update, &self.log_message());
         ux.notice(
@@ -102,7 +124,7 @@ impl Release {
     }
 }
 
-pub async fn check<F, Fut>(include_prereleases: bool, local: &str, fetch: F) -> Option<Release>
+pub async fn check<F, Fut>(include_prereleases: bool, local: &str, fetch: F) -> CheckOutcome
 where
     F: FnOnce(&'static str) -> Fut,
     Fut: Future<Output = Option<String>>,
@@ -112,9 +134,16 @@ where
     } else {
         STABLE_LATEST_URL
     };
-    let body = fetch(url).await?;
-    let doc: Value = serde_json::from_str(&body).ok()?;
-    available_release(&doc, include_prereleases, local)
+    let Some(body) = fetch(url).await else {
+        return CheckOutcome::Failed("GitHub could not be reached".to_owned());
+    };
+    let Ok(doc) = serde_json::from_str::<Value>(&body) else {
+        return CheckOutcome::Failed("GitHub sent an unreadable reply".to_owned());
+    };
+    match available_release(&doc, include_prereleases, local) {
+        Some(release) => CheckOutcome::UpdateAvailable(release),
+        None => CheckOutcome::UpToDate,
+    }
 }
 
 async fn github_get(url: &'static str, local: String) -> Option<String> {
@@ -145,6 +174,25 @@ pub fn start_background_check(
         let local = prompter.current.clone();
         check_and_offer(include_prereleases, prompter, |url| github_get(url, local)).await;
     })
+}
+
+pub fn start_manual_check(prompter: &Prompter, runtime: &tokio::runtime::Handle) -> CheckStart {
+    if prompter.gate.is_running() {
+        return CheckStart::Installing;
+    }
+    let Some(ticket) = prompter.flight.try_enter() else {
+        return prompter.flight.busy_reason();
+    };
+    let prompter = prompter.clone();
+    let include_prereleases = prompter.settings.include_prereleases();
+    drop(runtime.spawn(async move {
+        let local = prompter.current.clone();
+        check_and_offer_manual(include_prereleases, prompter, ticket, |url| {
+            github_get(url, local)
+        })
+        .await;
+    }));
+    CheckStart::Started
 }
 
 pub fn updater_command(install_dir: &Path) -> Command {

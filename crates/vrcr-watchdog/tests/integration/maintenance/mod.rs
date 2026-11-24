@@ -17,7 +17,9 @@ use vrcr_watchdog::maintenance::codec::{
     WingetResult,
 };
 use vrcr_watchdog::maintenance::shutdown::{ShutdownCoordinator, ShutdownStep, cancel_all};
-use vrcr_watchdog::maintenance::update::{self, Release, UpdateGate, UpdateStart, Version};
+use vrcr_watchdog::maintenance::update::{
+    self, CheckOutcome, Release, UpdateGate, UpdateStart, Version,
+};
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
