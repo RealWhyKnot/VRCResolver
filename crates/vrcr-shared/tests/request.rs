@@ -245,3 +245,40 @@ fn retry_delays_follow_the_ladder_and_the_server_hint() {
         Some(2250)
     );
 }
+
+#[test]
+fn route_as_unity_swaps_the_player_profile_and_keeps_the_rest() {
+    let format = "(mp4/best)[height<=?360][height>=?64][width>=?64]";
+    let mut request = profile::wrapper_request(
+        "id-1".to_owned(),
+        "https://youtu.be/abc",
+        Player::AvPro,
+        Some(format),
+        false,
+    );
+    assert!(profile::route_as_unity(&mut request));
+    let unity = profile::wrapper_request(
+        "id-1".to_owned(),
+        "https://youtu.be/abc",
+        Player::Unity,
+        Some(format),
+        false,
+    );
+    assert_eq!(request, unity);
+    assert!(!profile::route_as_unity(&mut request));
+    assert_eq!(request, unity);
+
+    let mut bare = ResolveRequest {
+        id: "id-2".to_owned(),
+        url: "https://youtu.be/abc".to_owned(),
+        player: Some(Player::AvPro),
+        max_height: Some(360),
+        ..Default::default()
+    };
+    assert!(profile::route_as_unity(&mut bare));
+    assert_eq!(bare.player, Some(Player::Unity));
+    assert_eq!(bare.accept_protocols, None);
+    assert_eq!(bare.accept_codecs, None);
+    assert_eq!(bare.max_audio_channels, None);
+    assert_eq!(bare.max_height, Some(360));
+}

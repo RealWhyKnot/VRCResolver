@@ -30,6 +30,7 @@ enum TickOutcome {
     InitialStaged,
     Waiting,
     UnknownTarget,
+    Settling,
     BackupLost,
     WrapperMissing,
 }

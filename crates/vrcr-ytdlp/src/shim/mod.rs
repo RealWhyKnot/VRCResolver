@@ -310,10 +310,15 @@ impl Shim {
         if !allowed {
             self.log(&format!("FALLBACK og result is final reason={reason}"));
         }
+        let outcome = if reason == og_reason::SERVER_FALLBACK_NATIVE {
+            "server-fallback-og"
+        } else {
+            "pipe-failed-og-fallback"
+        };
         (
             self.exec_fallback(args, Some(url), allowed.then_some(&re_ask), true)
                 .await,
-            "pipe-failed-og-fallback",
+            outcome,
         )
     }
 

@@ -60,6 +60,43 @@ fn unknown_target_is_never_mutated() {
 }
 
 #[test]
+fn partial_vrchat_update_waits_quietly_then_reapplies() {
+    let r = Rig::new();
+    r.write_wrapper();
+    let vrc = vrc_bundled();
+    write(&r.backup, &vrc);
+    write(&r.target, &wrapper_bytes());
+    let m = r.manager();
+    m.tick_once();
+    write(&r.target, &vrc[..1024 * 1024]);
+    m.tick_once();
+    write(&r.target, &vrc);
+    m.tick_once();
+    m.tick_once();
+    assert_eq!(read(&r.target), wrapper_bytes());
+    assert_eq!(read(&r.backup), vrc);
+    let logs = r.out.logs();
+    assert_eq!(logs.matches("neither our wrapper").count(), 0);
+    assert_eq!(logs.matches("wrapper re-applied").count(), 1);
+    assert_eq!(r.log_text().matches("still being written").count(), 1);
+}
+
+#[test]
+fn settled_foreign_target_is_reported_once() {
+    let r = Rig::new();
+    r.write_wrapper();
+    write(&r.backup, &vrc_bundled());
+    let foreign = non_pe(4096);
+    write(&r.target, &foreign);
+    let m = r.manager();
+    for _ in 0..4 {
+        m.tick_once();
+    }
+    assert_eq!(read(&r.target), foreign);
+    assert_eq!(r.out.logs().matches("neither our wrapper").count(), 1);
+}
+
+#[test]
 fn target_in_use_is_false_when_idle_or_missing() {
     let r = Rig::new();
     write(&r.target, b"stub");

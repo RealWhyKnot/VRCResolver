@@ -83,6 +83,24 @@ pub fn new_request_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
+pub fn route_as_unity(request: &mut ResolveRequest) -> bool {
+    if request.player == Some(Player::Unity) {
+        return false;
+    }
+    let unity = ResolveRequest::for_player(String::new(), String::new(), Player::Unity);
+    request.player = unity.player;
+    if request.accept_protocols.is_some() {
+        request.accept_protocols = unity.accept_protocols;
+    }
+    if request.accept_codecs.is_some() {
+        request.accept_codecs = unity.accept_codecs;
+    }
+    if request.max_audio_channels.is_some() {
+        request.max_audio_channels = unity.max_audio_channels;
+    }
+    true
+}
+
 pub fn apply_default_quality_cap(request: &mut ResolveRequest) -> bool {
     if request.player != Some(Player::AvPro) {
         return false;

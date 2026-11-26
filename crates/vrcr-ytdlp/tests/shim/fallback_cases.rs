@@ -52,6 +52,9 @@ async fn og_success_after_a_server_fallback_is_passed_through() {
         "{}",
         rig.stdout.text()
     );
+    let log = rig.log();
+    assert!(log.contains("outcome=server-fallback-og"), "{log}");
+    assert!(!log.contains("pipe-failed"), "{log}");
 }
 
 #[tokio::test]
@@ -70,6 +73,7 @@ async fn a_local_pipe_failure_still_lets_the_wrapper_re_ask_after_og_fails() {
     assert_eq!(resolves.len(), 2, "{lines:?}");
     assert_eq!(resolves[1]["skip_native_hint"], true);
     assert!(!rig.log().contains("og result is final"));
+    assert!(rig.log().contains("outcome=pipe-failed-og-fallback"));
 }
 
 #[tokio::test]

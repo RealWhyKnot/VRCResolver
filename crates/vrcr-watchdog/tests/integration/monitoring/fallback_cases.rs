@@ -318,3 +318,80 @@ fn a_confirmed_relay_play_clears_the_failure_hint_and_its_strikes() {
     assert_eq!(hint(&r).strikes(SOURCE), 0);
     assert!(r.file_log().contains("failure hint cleared"));
 }
+
+const UNITY_SOURCE: &str = "https://youtu.be/cNqBfNFZGKQ?si=abc";
+
+fn unity_error(url: &str) -> String {
+    format!("2026.11.24 19:04:06 Warning    -  [ACO_Bgm] error PlayerError {url}\n")
+}
+
+fn requested(r: &Rig, url: &str) -> (VrcLogMonitor, Arc<Stats>) {
+    let stats = Arc::new(Stats::new(r.now()));
+    stats.playback.record_resolve_request(url, r.now());
+    let mut deps = r.deps(AudioCheck::new(AudioState::Ok, Some("Speakers")));
+    deps.stats = Some(Arc::clone(&stats));
+    (r.monitor_with(deps), stats)
+}
+
+#[test]
+fn a_unity_player_error_routes_the_next_resolve_to_unity_then_native() {
+    let r = Rig::new().with_cache();
+    let (mut m, stats) = requested(&r, UNITY_SOURCE);
+    r.feed(&mut m, &unity_error(UNITY_SOURCE));
+    let failed = failures(&r);
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].detail.as_deref(), Some("world_player_error"));
+    assert_eq!(failed[0].source_url.as_deref(), Some(UNITY_SOURCE));
+    assert!(hint(&r).prefers_unity(UNITY_SOURCE));
+    assert!(!hint(&r).should_prefer_og(UNITY_SOURCE));
+    assert!(r.out.logs().contains("player=non_avpro"));
+    assert!(r.out.logs().contains("next=unity"));
+
+    hint(&r).unity_served(UNITY_SOURCE);
+    r.clock.advance(secs(20));
+    stats.playback.record_resolve_request(UNITY_SOURCE, r.now());
+    r.feed(&mut m, &unity_error(UNITY_SOURCE));
+    assert!(hint(&r).should_prefer_og(UNITY_SOURCE));
+    assert!(r.out.logs().contains("next=native og_hint="));
+}
+
+#[test]
+fn a_player_error_for_a_video_we_never_resolved_does_not_blame_the_open_one() {
+    let r = Rig::new().with_cache();
+    let (mut m, _) = requested(&r, UNITY_SOURCE);
+    r.feed(&mut m, &format!("[AVProVideo] Opening {PLAYBACK}\n"));
+    r.feed(&mut m, &unity_error(OTHER));
+    assert_eq!(failures(&r).len(), 0);
+    assert!(m.stall_armed());
+    assert!(!hint(&r).prefers_unity(OTHER));
+    assert!(
+        r.file_log()
+            .contains("world player error for another video")
+    );
+}
+
+#[test]
+fn a_player_error_naming_the_open_avpro_video_still_counts() {
+    let r = Rig::new().with_cache();
+    let (mut m, _) = requested(&r, PLAYBACK);
+    r.feed(&mut m, &format!("[AVProVideo] Opening {PLAYBACK}\n"));
+    r.feed(&mut m, &unity_error(PLAYBACK));
+    let failed = failures(&r);
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].detail.as_deref(), Some("world_player_error"));
+    assert!(!hint(&r).prefers_unity(PLAYBACK));
+}
+
+#[test]
+fn a_generic_player_error_without_a_url_does_not_blame_the_open_video() {
+    let r = Rig::new().with_cache();
+    let (mut m, _) = with_emitted(&r);
+    r.feed(&mut m, &format!("[AVProVideo] Opening {PLAYBACK}\n"));
+    r.feed(
+        &mut m,
+        "2026.11.24 19:04:06 Warning    -  [ACO_Bgm] error PlayerError\n",
+    );
+    assert_eq!(failures(&r).len(), 0);
+    assert!(m.stall_armed());
+    assert!(!hint(&r).should_prefer_og(SOURCE));
+}

@@ -20,6 +20,7 @@ const CAPACITY: usize = 256;
 const IDLE: Duration = Duration::from_secs(300);
 const REPEAT: Duration = Duration::from_secs(60);
 const RESOLVE_REQUEST_WINDOW: Duration = Duration::from_secs(60);
+pub const MASTER_ONLY_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 pub struct PlaybackLog {
@@ -54,6 +55,9 @@ struct Play {
     failures: BTreeMap<String, Repeat>,
     console_errors: HashSet<(String, PlaybackError)>,
     playlists: HashSet<String>,
+    master_at: Option<SystemTime>,
+    followed_master: bool,
+    master_judged: bool,
     context: FailureContext,
 }
 
@@ -255,6 +259,9 @@ impl Play {
             failures: BTreeMap::new(),
             console_errors: HashSet::new(),
             playlists: HashSet::new(),
+            master_at: None,
+            followed_master: false,
+            master_judged: false,
         }
     }
 
@@ -310,6 +317,29 @@ impl PlaybackLog {
             .unwrap_or_else(|e| e.into_inner())
             .get(&resolve_request_key(url))
             .is_some_and(|at| request_is_recent(now, *at))
+    }
+
+    pub fn take_master_only(&self, url: &str, current_id: &str, now: SystemTime) -> bool {
+        let source = resolve_request_key(url);
+        let current = token(current_id);
+        let mut found = false;
+        for (id, play) in self.lock().iter_mut() {
+            let stale_master = play.master_at.is_some_and(|at| {
+                now.duration_since(at)
+                    .is_ok_and(|age| age >= MASTER_ONLY_GRACE)
+            });
+            if *id != current
+                && stale_master
+                && !play.followed_master
+                && !play.master_judged
+                && play.segments == 0
+                && resolve_request_key(&play.source_url) == source
+            {
+                play.master_judged = true;
+                found = true;
+            }
+        }
+        found
     }
 
     fn lock(&self) -> MutexGuard<'_, HashMap<String, Play>> {

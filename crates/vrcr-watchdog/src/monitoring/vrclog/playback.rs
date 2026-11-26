@@ -1,3 +1,4 @@
+use super::non_avpro::GENERIC_PLAYER_ERROR;
 use super::*;
 
 impl VrcLogMonitor {
@@ -39,6 +40,13 @@ impl VrcLogMonitor {
             return;
         }
         if let Some(kind) = world_player_error(line) {
+            if let Some(url) = line_url(line) {
+                if self.on_non_avpro_error(url, kind, now) {
+                    return;
+                }
+            } else if kind == GENERIC_PLAYER_ERROR {
+                return;
+            }
             if self.player_error.is_none() {
                 self.player_error = Some(kind.to_owned());
             }
@@ -111,7 +119,18 @@ impl VrcLogMonitor {
         self.audio_missing = missing;
     }
 
+    pub(super) fn source_of(&self, url: &str) -> Option<String> {
+        if local::is_play_url(url) {
+            return self.deps.local.as_ref().and_then(|plays| plays.source(url));
+        }
+        self.origin(&self.canonical(url))
+            .or_else(|| self.origin(url))
+            .map(|origin| origin.source_url)
+            .or_else(|| self.relay_source(url))
+    }
+
     pub(super) fn on_opening(&mut self, opened: String, now: SystemTime) {
+        self.remember_avpro_source(&opened, now);
         let canonical = self.canonical(&opened);
         if let Some(stats) = &self.deps.stats {
             stats.playback.reset_video_failure(&canonical);
@@ -234,7 +253,7 @@ impl VrcLogMonitor {
         );
     }
 
-    fn first_failure_report(&mut self, url: &str, now: SystemTime) -> bool {
+    pub(super) fn first_failure_report(&mut self, url: &str, now: SystemTime) -> bool {
         self.reported_failures.retain(|_, at| {
             now.duration_since(*at)
                 .is_ok_and(|age| age < REPEAT_FAILURE_QUIET)
@@ -528,9 +547,25 @@ pub(super) fn world_player_error(line: &str) -> Option<&'static str> {
         && (lower.contains("video error") || lower.contains("video failed"))
     {
         Some("usharpvideo_error")
+    } else if line
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|word| word == "PlayerError")
+    {
+        Some(GENERIC_PLAYER_ERROR)
     } else {
         None
     }
+}
+
+pub(super) fn line_url(line: &str) -> Option<&str> {
+    line.split_whitespace()
+        .map(|token| token.trim_matches(|c: char| matches!(c, '\'' | '"' | '(' | ')' | ',')))
+        .find(|token| log_is_http(token))
+}
+
+fn log_is_http(token: &str) -> bool {
+    let lower = token.get(..8).unwrap_or(token).to_ascii_lowercase();
+    lower.starts_with("https://") || lower.starts_with("http://")
 }
 
 fn external_video_url(url: &str) -> bool {

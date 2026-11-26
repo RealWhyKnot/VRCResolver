@@ -146,14 +146,18 @@ where
     }
 }
 
-async fn github_get(url: &'static str, local: String) -> Option<String> {
-    let tls = crate::mesh::connect::platform_tls().ok()?;
-    let client = reqwest::Client::builder()
-        .tls_backend_preconfigured(tls)
+pub fn github_client(local: &str) -> Result<reqwest::Client, String> {
+    let tls = crate::mesh::connect::platform_tls()?;
+    reqwest::Client::builder()
+        .tls_backend_preconfigured(Arc::unwrap_or_clone(tls))
         .timeout(REQUEST_TIMEOUT)
         .user_agent(format!("VRCResolver-Watchdog/{local}"))
         .build()
-        .ok()?;
+        .map_err(|e| format!("configure update check HTTP client: {e}"))
+}
+
+async fn github_get(url: &'static str, local: String) -> Option<String> {
+    let client = github_client(&local).ok()?;
     let resp = client
         .get(url)
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")

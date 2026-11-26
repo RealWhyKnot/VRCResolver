@@ -14,6 +14,7 @@ pub const LEASES: [Duration; 3] = [
 pub const STRIKE_DEBOUNCE: Duration = Duration::from_secs(60);
 pub const STRIKE_MEMORY: Duration = Duration::from_secs(2 * 60 * 60);
 pub const OG_BLOCKED_TTL: Duration = Duration::from_secs(30 * 60);
+pub const UNITY_ROUTE_TTL: Duration = Duration::from_secs(30 * 60);
 pub const MAX_ENTRIES: usize = 512;
 
 pub struct OgFallbackHint {
@@ -28,10 +29,24 @@ struct Entry {
     last_strike: SystemTime,
 }
 
+#[derive(Clone, Copy)]
+struct UnityRoute {
+    until: SystemTime,
+    rejected: bool,
+    served: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rejection {
+    TryUnity,
+    Native(Option<Duration>),
+}
+
 #[derive(Default)]
 struct State {
     entries: HashMap<String, Entry>,
     blocked_until: HashMap<String, SystemTime>,
+    unity: HashMap<String, UnityRoute>,
 }
 
 impl Default for OgFallbackHint {
@@ -140,6 +155,60 @@ impl OgFallbackHint {
         }
     }
 
+    pub fn record_non_avpro_rejection(&self, source_url: &str) -> Rejection {
+        let Some(key) = key(source_url) else {
+            return Rejection::Native(None);
+        };
+        let now = (self.now)();
+        let mut st = self.state();
+        let route = st.unity.get(&key).copied().filter(|r| r.until > now);
+        if route.is_some_and(|r| r.served) {
+            drop(st);
+            return Rejection::Native(self.record_load_failure(source_url));
+        }
+        if route.is_none_or(|r| !r.rejected) {
+            st.unity.insert(
+                key,
+                UnityRoute {
+                    until: now + UNITY_ROUTE_TTL,
+                    rejected: true,
+                    served: false,
+                },
+            );
+            prune(&mut st, now);
+        }
+        drop(st);
+        Rejection::TryUnity
+    }
+
+    pub fn prefers_unity(&self, source_url: &str) -> bool {
+        let Some(key) = key(source_url) else {
+            return false;
+        };
+        let now = (self.now)();
+        self.state()
+            .unity
+            .get(&key)
+            .is_some_and(|route| route.until > now && route.rejected)
+    }
+
+    pub fn unity_served(&self, source_url: &str) {
+        let Some(key) = key(source_url) else {
+            return;
+        };
+        let now = (self.now)();
+        let mut st = self.state();
+        let route = st.unity.entry(key).or_insert(UnityRoute {
+            until: now,
+            rejected: false,
+            served: false,
+        });
+        route.served = true;
+        route.until = route.until.max(now + UNITY_ROUTE_TTL);
+        prune(&mut st, now);
+        drop(st);
+    }
+
     pub fn live_entry_count(&self) -> usize {
         let now = (self.now)();
         self.state()
@@ -160,6 +229,18 @@ fn elapsed(since: SystemTime, now: SystemTime) -> Duration {
 
 fn prune(st: &mut State, now: SystemTime) {
     st.blocked_until.retain(|_, until| *until > now);
+    st.unity.retain(|_, route| route.until > now);
+    while st.unity.len() > MAX_ENTRIES {
+        let Some(oldest) = st
+            .unity
+            .iter()
+            .min_by_key(|(_, route)| route.until)
+            .map(|(k, _)| k.clone())
+        else {
+            break;
+        };
+        st.unity.remove(&oldest);
+    }
     if st.entries.len() <= MAX_ENTRIES {
         return;
     }

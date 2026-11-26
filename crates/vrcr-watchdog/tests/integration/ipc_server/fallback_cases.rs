@@ -212,3 +212,132 @@ async fn cdn4_live_playlist_after_a_load_failure_goes_to_the_fallback_without_th
     assert_eq!(mesh.resolves().len(), 1);
     assert!(hint.should_prefer_og(cdn4));
 }
+
+const MASTER_TARGET: &str = "https://proxy.example/api/proxy/lazy-hls/wk_x/master.m3u8";
+
+fn master_served(ipc: &Ipc<FakeMesh>, ux: &Ux, ago: Duration) {
+    let at = SystemTime::now() - ago;
+    let request = ResolveRequest {
+        id: "old-play".to_owned(),
+        url: URL.to_owned(),
+        player: Some(Player::AvPro),
+        ..ResolveRequest::default()
+    };
+    let playback = &ipc.stats().playback;
+    playback.resolving(&request, at, ux);
+    playback.resolved(
+        &request,
+        &ResolveResponse {
+            action: action::RESOLVED.to_owned(),
+            id: request.id.clone(),
+            url: Some(MASTER_TARGET.to_owned()),
+            ..ResolveResponse::default()
+        },
+        vrcr_watchdog::diagnostics::ResolveDelivery {
+            cached: false,
+            retried: false,
+            bytes: 0,
+        },
+        at,
+        ux,
+    );
+    let sample = vrcr_watchdog::relay::hitch::TimingSample {
+        suppressed: false,
+        recovery: false,
+        retry_reason: None,
+        request_id: "relay-old".to_owned(),
+        stream_id: "wk_x".to_owned(),
+        player_status: 200,
+        playlist_shape: Some("kind=master variants=1 bytes_in=400 bytes_out=408".to_owned()),
+        method: "GET".to_owned(),
+        local_path: "/play/old-play/manifest.m3u8".to_owned(),
+        target_url: MASTER_TARGET.to_owned(),
+        status: 200,
+        header_ms: 10,
+        total_ms: 20,
+        bytes_out: 408,
+        media: None,
+        lazy_state: None,
+        lazy_wait_ms: -1,
+        lazy_generator: None,
+        failure: None,
+        cf_ray: None,
+    };
+    playback.request(&sample, "", at, ux);
+}
+
+#[tokio::test]
+async fn a_source_whose_player_rejected_hls_is_requested_as_unity() {
+    let hint = Arc::new(OgFallbackHint::default());
+    assert_eq!(
+        hint.record_non_avpro_rejection(URL),
+        vrcr_watchdog::og_hint::Rejection::TryUnity
+    );
+    let capture = crate::common::mesh::Capture::default();
+    let mesh = FakeMesh::connected(vec![resolved_step()]);
+    let ipc = Ipc::builder(std::sync::Arc::clone(&mesh), capture.ux(), Log::disabled())
+        .og_hint(Arc::clone(&hint))
+        .build();
+    let v = ask(&ipc, &req("avpro", ",\"maxHeight\":360")).await;
+    assert_eq!(v["url"], MESH_MEDIA);
+    let sent = mesh.resolves();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].player, Some(Player::Unity));
+    assert_eq!(sent[0].max_height, Some(360));
+    assert!(capture.logs().contains("reason=player_rejected_hls"));
+    assert_eq!(
+        hint.record_non_avpro_rejection(URL),
+        vrcr_watchdog::og_hint::Rejection::Native(Some(Duration::from_secs(300)))
+    );
+}
+
+#[tokio::test]
+async fn a_re_resolve_after_an_unfollowed_master_playlist_asks_for_unity() {
+    let hint = Arc::new(OgFallbackHint::default());
+    let capture = crate::common::mesh::Capture::default();
+    let mesh = FakeMesh::connected(vec![resolved_step(), resolved_step()]);
+    let ipc = Ipc::builder(std::sync::Arc::clone(&mesh), capture.ux(), Log::disabled())
+        .og_hint(Arc::clone(&hint))
+        .build();
+    master_served(&ipc, &capture.ux(), Duration::from_secs(20));
+    ask(&ipc, &req("avpro", ",\"maxHeight\":360")).await;
+    let sent = mesh.resolves();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].player, Some(Player::Unity));
+    let logs = capture.logs();
+    assert!(logs.contains("player never asked past the HLS master playlist id=x1"));
+    assert!(logs.contains("next=unity"));
+    assert!(hint.prefers_unity(URL));
+}
+
+#[tokio::test]
+async fn a_fresh_master_playlist_does_not_change_the_player() {
+    let hint = Arc::new(OgFallbackHint::default());
+    let capture = crate::common::mesh::Capture::default();
+    let mesh = FakeMesh::connected(vec![resolved_step()]);
+    let ipc = Ipc::builder(std::sync::Arc::clone(&mesh), capture.ux(), Log::disabled())
+        .og_hint(Arc::clone(&hint))
+        .build();
+    master_served(&ipc, &capture.ux(), Duration::from_secs(1));
+    ask(&ipc, &req("avpro", "")).await;
+    assert_eq!(mesh.resolves()[0].player, Some(Player::AvPro));
+    assert!(!hint.prefers_unity(URL));
+}
+
+#[tokio::test]
+async fn a_prior_load_failure_fallback_is_logged_as_a_fallback() {
+    let hint = Arc::new(OgFallbackHint::default());
+    hint.record_load_failure(URL);
+    let capture = crate::common::mesh::Capture::default();
+    let mesh = FakeMesh::connected(vec![resolved_step()]);
+    let ipc = Ipc::builder(std::sync::Arc::clone(&mesh), capture.ux(), Log::disabled())
+        .og_hint(hint)
+        .build();
+    let v = ask(&ipc, &req("avpro", "")).await;
+    assert_eq!(reason(&v), og_reason::PRIOR_LOAD_FAILURE);
+    let logs = capture.logs();
+    assert!(logs.contains(
+        "resolve fallback req=x1 kind=resolve host=example.com decision=fallback_native reason=prior_load_failure"
+    ));
+    assert!(!logs.contains("resolve failed"));
+}

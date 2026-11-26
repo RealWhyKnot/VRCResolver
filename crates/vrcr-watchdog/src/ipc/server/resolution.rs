@@ -60,6 +60,8 @@ impl<M: Mesh> Ipc<M> {
             ));
         }
 
+        self.route_by_player_history(&mut req);
+
         if req.player == Some(Player::AvPro) && req.accept_codecs.is_some() {
             let verified = (self.verified_codecs)();
             req.accept_codecs = Some(
@@ -112,9 +114,8 @@ impl<M: Mesh> Ipc<M> {
 
         if hint.is_some_and(|h| h.should_prefer_og(&req.url)) {
             self.ux.skipped(&host, "prior_load_failure", None);
-            trace.reason = "prior_load_failure";
-            trace.sent = "fallback_native";
             framing::write_fallback(pipe, &id, og_reason::PRIOR_LOAD_FAILURE).await;
+            trace.fallback("prior_load_failure");
             self.ux.log_write(
                 Component::Ipc,
                 &format!(
@@ -171,9 +172,8 @@ impl<M: Mesh> Ipc<M> {
                     return;
                 }
                 self.ux.skipped(&host, "resolver_paused", None);
-                trace.reason = "resolver_paused";
-                trace.sent = "fallback_native";
                 framing::write_fallback(pipe, &id, og_reason::RESOLVER_UNHEALTHY).await;
+                trace.fallback("resolver_paused");
                 self.ux.log_write(
                     Component::Ipc,
                     &format!(

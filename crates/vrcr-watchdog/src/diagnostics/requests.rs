@@ -143,6 +143,17 @@ impl PlaybackLog {
                 "unknown"
             }
             .to_owned();
+        let is_master = sample
+            .playlist_shape
+            .as_deref()
+            .is_some_and(|shape| shape.starts_with("kind=master"));
+        if is_master {
+            if matches!(sample.status, 200 | 206) && sample.failure.is_none() {
+                play.master_at.get_or_insert(now);
+            }
+        } else if play.master_at.is_some() || kind == "segment" {
+            play.followed_master = true;
+        }
         if let Some(shape) = &sample.playlist_shape {
             let identity = crate::relay::live::history::identity(&sample.target_url);
             if play.playlists.len() < 16 && play.playlists.insert(identity) {

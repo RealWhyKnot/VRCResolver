@@ -541,3 +541,58 @@ fn default_gate_constants_match_the_old_client() {
     assert_eq!(health::DEFAULT_COOLDOWN, SECS(30));
     assert_eq!(health::DEFAULT_VERDICT_TIMEOUT, SECS(25));
 }
+
+#[test]
+fn a_non_avpro_rejection_tries_unity_before_native() {
+    let clock = ManualClock::utc(T_2026_05_22);
+    let h = hint(&clock);
+    assert!(!h.prefers_unity(ABC));
+    assert_eq!(
+        h.record_non_avpro_rejection(ABC),
+        og_hint::Rejection::TryUnity
+    );
+    assert!(h.prefers_unity(ABC));
+    assert!(!h.should_prefer_og(ABC));
+    assert_eq!(
+        h.record_non_avpro_rejection(ABC),
+        og_hint::Rejection::TryUnity
+    );
+    assert!(!h.prefers_unity(DEF));
+    h.unity_served(ABC);
+    assert_eq!(
+        h.record_non_avpro_rejection(ABC),
+        og_hint::Rejection::Native(Some(MINS(5)))
+    );
+    assert!(h.should_prefer_og(ABC));
+    assert_eq!(h.strikes(ABC), 1);
+}
+
+#[test]
+fn the_unity_route_expires() {
+    let clock = ManualClock::utc(T_2026_05_22);
+    let h = hint(&clock);
+    assert_eq!(
+        h.record_non_avpro_rejection(ABC),
+        og_hint::Rejection::TryUnity
+    );
+    clock.advance(og_hint::UNITY_ROUTE_TTL - SECS(1));
+    assert!(h.prefers_unity(ABC));
+    clock.advance(SECS(2));
+    assert!(!h.prefers_unity(ABC));
+    assert_eq!(
+        h.record_non_avpro_rejection(" "),
+        og_hint::Rejection::Native(None)
+    );
+}
+
+#[test]
+fn a_rejection_for_a_unity_served_source_goes_native_without_a_detour() {
+    let clock = ManualClock::utc(T_2026_05_22);
+    let h = hint(&clock);
+    h.unity_served(DEF);
+    assert!(!h.prefers_unity(DEF));
+    assert_eq!(
+        h.record_non_avpro_rejection(DEF),
+        og_hint::Rejection::Native(Some(MINS(5)))
+    );
+}

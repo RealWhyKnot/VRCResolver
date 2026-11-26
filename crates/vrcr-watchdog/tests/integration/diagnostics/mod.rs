@@ -471,3 +471,69 @@ fn diagnostics_feedback_rejects_paths_and_unrecognised_failure_sources() {
     }
     assert!(!payload.contains("private"));
 }
+
+#[test]
+fn diagnostics_deliberate_native_fallback_is_not_logged_as_a_failure() {
+    let playback = PlaybackLog::default();
+    let (ux, capture) = output();
+    let request = ResolveRequest {
+        id: "fallback-one".to_owned(),
+        url: SOURCE.to_owned(),
+        ..Default::default()
+    };
+    {
+        let mut trace =
+            vrcr_watchdog::diagnostics::resolve::ResolveTrace::new(&request, &playback, &ux);
+        trace.fallback("prior_load_failure");
+    }
+    let text = capture.logs();
+    assert!(text.contains(
+        "resolve fallback req=fallback-one kind=resolve host=source.example decision=fallback_native reason=prior_load_failure elapsed_ms="
+    ));
+    assert!(!text.contains("resolve failed"));
+    assert!(!text.contains("status=unknown"));
+    assert_eq!(text.matches("session playback=fallback-one").count(), 1);
+    assert!(text.contains("ended=resolve_fallback"));
+    private_text_is_absent(&text);
+}
+
+fn master_sample() -> TimingSample {
+    let mut master = sample(200);
+    master.playlist_shape = Some("kind=master variants=1 bytes_in=400 bytes_out=408".to_owned());
+    master
+}
+
+#[test]
+fn diagnostics_a_master_playlist_nobody_followed_is_reported_once_after_the_grace() {
+    let playback = PlaybackLog::default();
+    let (ux, _) = output();
+    resolve(&playback, &ux);
+    playback.request(&master_sample(), "", now(3), &ux);
+    assert!(!playback.take_master_only(SOURCE, "resolve-two", now(7)));
+    assert!(!playback.take_master_only(SOURCE, "resolve-one", now(9)));
+    assert!(!playback.take_master_only("https://other.example/x", "resolve-two", now(9)));
+    assert!(playback.take_master_only(SOURCE, "resolve-two", now(9)));
+    assert!(!playback.take_master_only(SOURCE, "resolve-three", now(20)));
+}
+
+#[test]
+fn diagnostics_a_followed_master_playlist_is_not_master_only() {
+    for follow in ["media", "segment", "failed"] {
+        let playback = PlaybackLog::default();
+        let (ux, _) = output();
+        resolve(&playback, &ux);
+        playback.request(&master_sample(), "", now(3), &ux);
+        let mut next = sample(if follow == "failed" { 502 } else { 200 });
+        if follow == "media" {
+            next.playlist_shape = Some("kind=media mode=vod segments=4".to_owned());
+        } else if follow == "segment" {
+            next.local_path = "/play/player-one/seg_000001.ts".to_owned();
+            next.target_url = TARGET.replace("index.m3u8", "seg_000001.ts");
+        }
+        playback.request(&next, "", now(4), &ux);
+        assert!(
+            !playback.take_master_only(SOURCE, "resolve-two", now(20)),
+            "{follow}"
+        );
+    }
+}

@@ -152,9 +152,9 @@ impl PatchManager {
                     return;
                 }
                 WrapperKind::Unknown => {
-                    self.emit(
+                    self.report_unknown(
                         st,
-                        TickOutcome::UnknownTarget,
+                        settled,
                         "[patch] tick: Tools/yt-dlp.exe is not classified as ours or VRChat-bundled -- not mutating",
                     );
                     return;
@@ -249,10 +249,22 @@ impl PatchManager {
             return;
         }
 
-        self.emit(
+        self.report_unknown(
             st,
-            TickOutcome::UnknownTarget,
+            settled,
             "[patch] tick: target is neither our wrapper nor VRChat-bundled -- not mutating",
         );
+    }
+
+    fn report_unknown(&self, st: &mut TickState, settled: bool, message: &str) {
+        if settled {
+            self.emit(st, TickOutcome::UnknownTarget, message);
+        } else {
+            self.emit_file_only(
+                st,
+                TickOutcome::Settling,
+                "[patch] tick: yt-dlp.exe is still being written -- waiting for it to settle",
+            );
+        }
     }
 }

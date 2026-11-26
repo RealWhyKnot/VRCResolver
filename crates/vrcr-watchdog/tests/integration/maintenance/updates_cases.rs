@@ -395,3 +395,9 @@ fn staged_updater_keeps_the_old_one_when_the_stage_cannot_move_in() {
         .count();
     assert_eq!(leftovers, 0);
 }
+
+#[test]
+fn the_update_check_client_builds_with_the_platform_tls_config() {
+    let client = vrcr_watchdog::maintenance::update::github_client("v2026.11.25.0");
+    assert!(client.is_ok(), "{:?}", client.err());
+}

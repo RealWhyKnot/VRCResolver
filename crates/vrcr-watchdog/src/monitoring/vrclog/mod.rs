@@ -25,7 +25,7 @@ use crate::ipc::{Feedback, Mesh};
 use crate::local;
 use crate::local::store::Manifests;
 use crate::monitoring::audio::{self, AudioCheck, NO_SOUND_FIX};
-use crate::og_hint::OgFallbackHint;
+use crate::og_hint::{OgFallbackHint, Rejection};
 use crate::relay::RelayActivity;
 use crate::resolve_cache::ResolveCache;
 
@@ -252,6 +252,7 @@ pub struct VrcLogMonitor {
     playing: Option<Playing>,
     delivered: HashMap<String, (i32, SystemTime)>,
     reported_failures: HashMap<String, SystemTime>,
+    avpro_sources: HashMap<String, SystemTime>,
     audio_missing: bool,
     player_error: Option<String>,
     active_playback_id: Option<String>,
@@ -274,6 +275,7 @@ impl VrcLogMonitor {
             playing: None,
             delivered: HashMap::new(),
             reported_failures: HashMap::new(),
+            avpro_sources: HashMap::new(),
             audio_missing: false,
             player_error: None,
             active_playback_id: None,
@@ -375,12 +377,7 @@ impl VrcLogMonitor {
     }
 
     fn stall_matches(&self, stall: &Stall, line_url: &str) -> bool {
-        let canonical = self.canonical(&stall.url);
-        source_url::same_source(line_url, &stall.url)
-            || source_url::same_source(line_url, &canonical)
-            || self
-                .origin(&canonical)
-                .is_some_and(|o| source_url::same_source(line_url, &o.source_url))
+        self.opened_matches(&stall.url, line_url)
     }
 
     fn confirm_playback(&self, url: &str) {
@@ -591,5 +588,7 @@ fn read_from(path: &Path, offset: u64) -> Option<Vec<u8>> {
     f.read_to_end(&mut buf).ok()?;
     Some(buf)
 }
+
+mod non_avpro;
 
 mod playback;

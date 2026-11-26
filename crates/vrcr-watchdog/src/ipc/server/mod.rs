@@ -518,6 +518,8 @@ mod delivery;
 
 mod native_fallback;
 
+mod player_route;
+
 mod resolution;
 
 #[cfg(windows)]

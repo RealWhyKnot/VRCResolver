@@ -31,6 +31,29 @@ impl<'a> ResolveTrace<'a> {
         }
     }
 
+    pub fn fallback(&mut self, reason: &'static str) {
+        self.reason = reason;
+        self.sent = "fallback_native";
+        self.finished = true;
+        self.ux.log_write(
+            Component::Ipc,
+            &format!(
+                "resolve fallback req={} kind=resolve host={} decision=fallback_native reason={} elapsed_ms={} retry={}",
+                token(&self.request.id),
+                host(&self.request.url),
+                self.reason,
+                self.started.elapsed().as_millis(),
+                self.retried,
+            ),
+        );
+        self.playback.close(
+            &self.request.id,
+            "resolve_fallback",
+            SystemTime::now(),
+            self.ux,
+        );
+    }
+
     pub fn reply(&mut self, frame: &[u8], cached: bool) {
         match serde_json::from_slice::<ResolveResponse>(frame) {
             Ok(response) => {
