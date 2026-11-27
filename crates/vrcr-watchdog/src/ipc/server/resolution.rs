@@ -1,4 +1,5 @@
 use super::*;
+use crate::mesh::frames::i32_field;
 
 impl<M: Mesh> Ipc<M> {
     pub(super) async fn resolve<S: AsyncWrite + Unpin>(
@@ -223,6 +224,7 @@ impl<M: Mesh> Ipc<M> {
             }
             outcome = hit.action;
             server_reason = hit.reason;
+            public_message = hit.public_message;
             via_cache = true;
             self.stats.record_cache_hit();
             self.log.line(&format!(
@@ -258,24 +260,31 @@ impl<M: Mesh> Ipc<M> {
                         .await;
                     return;
                 }
-                Ok(mut result) => {
-                    let local = if result.action == action::FALLBACK_NATIVE {
-                        if let Ok(mut response) =
-                            serde_json::from_slice::<ResolveResponse>(&result.frame)
-                            && let Some(message) = response.public_message.take()
-                            && let Ok(frame) = serde_json::to_vec(&response)
-                        {
+                Ok(result) => {
+                    let mut response =
+                        serde_json::from_slice::<serde_json::Value>(&result.frame).ok();
+                    let shim_frame = response.as_mut().and_then(|response| {
+                        let message = response.as_object_mut()?.remove("public_message")?;
+                        if let serde_json::Value::String(message) = message {
                             public_message = Some(message);
-                            result.frame = frame;
                         }
+                        serde_json::to_vec(response).ok()
+                    });
+                    let local = if result.action == action::FALLBACK_NATIVE {
                         self.local_frame(&req, &id, deadline).await
                     } else {
                         None
                     };
                     via_local = local.is_some();
-                    let frame = local.as_deref().unwrap_or(&result.frame);
+                    let frame = local
+                        .as_deref()
+                        .or(shim_frame.as_deref())
+                        .unwrap_or(&result.frame);
                     trace.retried = req.id != trace.request.id;
-                    height = response_height(frame);
+                    height = local.as_deref().map_or_else(
+                        || i32_field(response.as_ref()?, "resolved_height"),
+                        response_height,
+                    );
                     self.remember_frame(&req, frame, cid.as_deref());
                     trace.reply(frame, false);
                     if framing::write_frame(pipe, frame).await.is_err() {

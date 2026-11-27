@@ -18,6 +18,7 @@ use vrcr_shared::source_url;
 use vrcr_shared::trust_gateway::{GATEWAY_HOST, extract_target, is_local_gateway_host};
 use vrcr_shared::wire::feedback;
 
+use self::untrusted_url::UntrustedUrlState;
 use crate::clock::Now;
 use crate::emitted::{EmittedUrls, Origin};
 use crate::health::{self, HealthGate, Transition};
@@ -164,6 +165,7 @@ impl Recovery {
 struct Tail {
     offset: u64,
     partial: Vec<u8>,
+    untrusted_urls: UntrustedUrlState,
 }
 
 struct Stall {
@@ -258,6 +260,7 @@ pub struct VrcLogMonitor {
     active_playback_id: Option<String>,
     setup_hint: SetupHint,
     wrapper_hint_shown: bool,
+    untrusted_urls: UntrustedUrlState,
 }
 
 impl VrcLogMonitor {
@@ -281,6 +284,7 @@ impl VrcLogMonitor {
             active_playback_id: None,
             setup_hint: SetupHint::default(),
             wrapper_hint_shown: false,
+            untrusted_urls: UntrustedUrlState::default(),
         }
     }
 
@@ -454,9 +458,10 @@ impl VrcLogMonitor {
             }
         } else if len < offset {
             if let Some(t) = self.tails.get_mut(&path) {
-                t.offset = 0;
+                *t = Tail::default();
             }
             self.partial.clear();
+            self.untrusted_urls = UntrustedUrlState::default();
         }
     }
 
@@ -466,13 +471,15 @@ impl VrcLogMonitor {
             && let Some(t) = self.tails.get_mut(&old)
         {
             t.partial = std::mem::take(&mut self.partial);
+            t.untrusted_urls = self.untrusted_urls;
         }
         let seen_before = self.tails.contains_key(&path);
-        let tail = self.tails.entry(path.clone()).or_insert_with(|| Tail {
-            offset: initial_read_offset_for_new_file(len, first_file),
-            partial: Vec::new(),
+        let tail = self.tails.entry(path.clone()).or_insert_with(|| {
+            let offset = initial_read_offset_for_new_file(len, first_file);
+            Tail::from_log(&path, offset)
         });
         self.partial = std::mem::take(&mut tail.partial);
+        self.untrusted_urls = tail.untrusted_urls;
         self.current = Some(path);
         self.audio_missing = false;
         if !seen_before
@@ -576,11 +583,6 @@ impl VrcLogMonitor {
     }
 }
 
-fn expired(at: SystemTime, now: SystemTime) -> bool {
-    now.duration_since(at)
-        .is_ok_and(|d| d > DELIVERED_HEIGHT_TTL)
-}
-
 fn read_from(path: &Path, offset: u64) -> Option<Vec<u8>> {
     let mut f = File::open(path).ok()?;
     f.seek(SeekFrom::Start(offset)).ok()?;
@@ -590,5 +592,5 @@ fn read_from(path: &Path, offset: u64) -> Option<Vec<u8>> {
 }
 
 mod non_avpro;
-
 mod playback;
+mod untrusted_url;

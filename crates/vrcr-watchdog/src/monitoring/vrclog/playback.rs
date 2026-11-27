@@ -1,4 +1,4 @@
-use super::non_avpro::GENERIC_PLAYER_ERROR;
+use super::non_avpro::{GENERIC_PLAYER_ERROR, player_error_url};
 use super::*;
 
 impl VrcLogMonitor {
@@ -32,6 +32,8 @@ impl VrcLogMonitor {
             self.send(&url, feedback::PLAYING, elapsed_ms(at, now), Some(height));
             return;
         }
+        let lower = line.to_ascii_lowercase();
+        self.observe_untrusted_urls(line, &lower);
         if line.contains("[AVProVideo] Error:") {
             self.player_error = Some(crate::diagnostics::player_error(line));
             if line.contains("Loading failed") {
@@ -39,8 +41,13 @@ impl VrcLogMonitor {
             }
             return;
         }
-        if let Some(kind) = world_player_error(line) {
-            if let Some(url) = line_url(line) {
+        if let Some(kind) = world_player_error(line, &lower) {
+            if let Some((url, parsed)) = player_error_url(line) {
+                if parsed.host_str().is_some_and(source_url::is_spotify_host)
+                    && self.on_unrequested_spotify_error(url, &lower, now)
+                {
+                    return;
+                }
                 if self.on_non_avpro_error(url, kind, now) {
                     return;
                 }
@@ -465,7 +472,8 @@ impl VrcLogMonitor {
             return;
         }
         self.delivered.insert(url.to_owned(), (height, now));
-        self.delivered.retain(|_, (_, at)| !expired(*at, now));
+        self.delivered
+            .retain(|_, (_, at)| !delivered_height_expired(*at, now));
         while self.delivered.len() > MAX_DELIVERED_HEIGHT_ENTRIES {
             let Some(oldest) = self
                 .delivered
@@ -484,7 +492,7 @@ impl VrcLogMonitor {
             return None;
         }
         let (height, at) = *self.delivered.get(url)?;
-        if expired(at, now) {
+        if delivered_height_expired(at, now) {
             self.delivered.remove(url);
             return None;
         }
@@ -519,6 +527,11 @@ impl VrcLogMonitor {
 
 const ANNOUNCE_MARKERS: [&str; 2] = ["Load Url:", "Now Playing:"];
 
+fn delivered_height_expired(at: SystemTime, now: SystemTime) -> bool {
+    now.duration_since(at)
+        .is_ok_and(|age| age > DELIVERED_HEIGHT_TTL)
+}
+
 fn announced_url(line: &str) -> Option<Option<&str>> {
     let rest = ANNOUNCE_MARKERS
         .iter()
@@ -530,8 +543,7 @@ fn announced_url(line: &str) -> Option<Option<&str>> {
     )
 }
 
-pub(super) fn world_player_error(line: &str) -> Option<&'static str> {
-    let lower = line.to_ascii_lowercase();
+fn world_player_error(line: &str, lower: &str) -> Option<&'static str> {
     if lower.contains("ratelimited") || lower.contains("rate limited") {
         return None;
     }
@@ -555,17 +567,6 @@ pub(super) fn world_player_error(line: &str) -> Option<&'static str> {
     } else {
         None
     }
-}
-
-pub(super) fn line_url(line: &str) -> Option<&str> {
-    line.split_whitespace()
-        .map(|token| token.trim_matches(|c: char| matches!(c, '\'' | '"' | '(' | ')' | ',')))
-        .find(|token| log_is_http(token))
-}
-
-fn log_is_http(token: &str) -> bool {
-    let lower = token.get(..8).unwrap_or(token).to_ascii_lowercase();
-    lower.starts_with("https://") || lower.starts_with("http://")
 }
 
 fn external_video_url(url: &str) -> bool {

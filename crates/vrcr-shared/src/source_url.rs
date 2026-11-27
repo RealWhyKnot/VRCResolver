@@ -15,6 +15,12 @@ const YOUTUBE_SHORT_HOST: &str = "youtu.be";
 const TRACKING_PARAMS: [&str; 5] = ["si", "pp", "feature", "fbclid", "igshid"];
 const TRACKING_PREFIX: &str = "utm_";
 
+pub fn is_spotify_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    matches!(host.as_str(), "spotify.com" | "spotify.link" | "spoti.fi")
+        || host.ends_with(".spotify.com")
+}
+
 pub fn normalize(url: &str) -> String {
     let trimmed = url.trim();
     if let Some(id) = youtube_video_id(trimmed) {

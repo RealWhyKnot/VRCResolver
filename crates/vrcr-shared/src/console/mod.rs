@@ -266,15 +266,10 @@ impl Ux {
         self.log_stamped(&line);
         match o.status {
             ResolveStatus::Resolved | ResolveStatus::Local => {
-                let quality = o
-                    .height
-                    .filter(|h| *h > 0)
-                    .map(|h| format!("{h}p, "))
-                    .unwrap_or_default();
                 self.video(
                     VideoStatus::Playing,
                     o.host,
-                    &format!("{quality}ready in {:.1}s", o.elapsed.as_secs_f64()),
+                    &presentation::playing_sentence(o),
                 );
             }
             _ => self.skipped(o.host, o.reason.unwrap_or_default(), o.public_message),

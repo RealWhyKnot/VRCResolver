@@ -35,7 +35,6 @@ serde_json = { version = "1.0.154", features = ["preserve_order"] }
 sha1 = "0.11.0"
 sha2 = "0.11.1"
 tempfile = "3.27.0"
-thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["rt", "net", "time", "io-util", "process", "macros", "sync"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }

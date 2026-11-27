@@ -23,6 +23,7 @@ pub struct CachedResolve {
     pub frame: Vec<u8>,
     pub action: String,
     pub reason: Option<String>,
+    pub public_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,6 +165,7 @@ impl ResolveCache {
         let mut copy = entry.response.clone()?;
         drop(g);
         copy.id = request_id.to_owned();
+        let public_message = copy.public_message.take();
         let frame = serde_json::to_vec(&copy).ok()?;
         let action = if copy.action.is_empty() {
             action::RESOLVED.to_owned()
@@ -174,6 +176,7 @@ impl ResolveCache {
             frame,
             action,
             reason: copy.reason,
+            public_message,
         })
     }
 

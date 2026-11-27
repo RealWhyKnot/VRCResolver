@@ -26,6 +26,13 @@ macro_rules! event_case {
 }
 
 event_case!(
+    untrusted_url_blocked,
+    UntrustedUrlBlocked,
+    Yellow,
+    "A video link may be blocked. Enable Allow Untrusted URLs in VRChat Settings > Comfort & Safety."
+);
+
+event_case!(
     hosts_add_failed,
     HostsAddFailed,
     Red,

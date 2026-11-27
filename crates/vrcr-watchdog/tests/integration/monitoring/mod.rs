@@ -268,3 +268,4 @@ mod performance_cases;
 
 mod playback_cases;
 mod setup_hint_cases;
+mod untrusted_url_cases;

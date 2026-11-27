@@ -49,6 +49,22 @@ fn msgpack_resolved_decodes_every_field() {
 }
 
 #[test]
+fn msgpack_resolved_reads_the_optional_seventeenth_field() {
+    let mut items = vec![s("resolved"), s("id1"), s("https://example.com")];
+    items.extend(std::iter::repeat_n(Mp::Nil, 12));
+    items.push(Mp::Boolean(true));
+    let old = resolved(&encode(items.clone()));
+    assert_eq!(old.validated, Some(true));
+    assert_eq!(old.public_message, None);
+
+    let message = "Matched on YouTube: girlhouse - worth it";
+    items.push(s(message));
+    let extended = resolved(&encode(items));
+    assert_eq!(extended.validated, old.validated);
+    assert_eq!(extended.public_message.as_deref(), Some(message));
+}
+
+#[test]
 fn msgpack_resolved_with_trailing_nils_decodes() {
     let bytes = [
         0x9D, 0xA1, b'R', 0xA1, b'I', 0xA1, b'U', 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0,
@@ -72,8 +88,8 @@ fn msgpack_resolved_tolerates_extra_trailing_fields() {
     let mut items = vec![s("resolved"), s("id1"), s("https://example.com")];
     items.extend(std::iter::repeat_n(Mp::Nil, 10));
     items.extend([Mp::Boolean(true), s("proxy"), Mp::Boolean(false)]);
-    items.push(s(""));
-    items.push(Mp::Nil);
+    items.push(s("Matched on YouTube"));
+    items.push(Mp::Map(vec![(s("future"), Mp::Boolean(true))]));
     let r = resolved(&encode(items));
     assert_eq!(r.id, "id1");
     assert_eq!(r.url.as_deref(), Some("https://example.com"));
@@ -81,6 +97,7 @@ fn msgpack_resolved_tolerates_extra_trailing_fields() {
         (r.live, r.delivery.as_deref(), r.validated),
         (Some(true), Some("proxy"), Some(false))
     );
+    assert_eq!(r.public_message.as_deref(), Some("Matched on YouTube"));
 }
 
 #[test]
@@ -199,6 +216,9 @@ fn contract_client_fallback_reasons_exist_on_the_server() {
     for reason in [
         fallback::ALL_CONFIGS_FAILED,
         fallback::EXTRACTOR_UNSUPPORTED,
+        fallback::SPOTIFY_UNSUPPORTED_URL,
+        fallback::SPOTIFY_TRACK_NO_MATCH,
+        fallback::SPOTIFY_LOOKUP_TIMEOUT,
         fallback::INTERNAL_ERROR,
         fallback::DISCOVERY_IN_PROGRESS,
         fallback::UNITY_UNSUPPORTED_FORMAT,

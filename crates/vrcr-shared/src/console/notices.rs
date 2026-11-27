@@ -10,6 +10,7 @@ pub enum Notice {
     HostsSetupIncomplete,
     PublicVideoSetupMissing,
     VideoWrapperMissing,
+    UntrustedUrlBlocked,
     SecurePlaybackRetry,
     ReportRejected,
     ReportSendFailed,
@@ -87,6 +88,10 @@ impl Ux {
             Notice::VideoWrapperMissing => (
                 Color::Yellow,
                 "Type repair to reconnect VRCResolver to VRChat's video player.",
+            ),
+            Notice::UntrustedUrlBlocked => (
+                Color::Yellow,
+                "A video link may be blocked. Enable Allow Untrusted URLs in VRChat Settings > Comfort & Safety.",
             ),
             Notice::SecurePlaybackRetry => (
                 Color::Yellow,

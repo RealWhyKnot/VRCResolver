@@ -1,6 +1,31 @@
-use vrcr_shared::source_url::{is_direct_media, normalize, same_source, youtube_video_id};
+use vrcr_shared::source_url::{
+    is_direct_media, is_spotify_host, normalize, same_source, youtube_video_id,
+};
 
 const WATCH: &str = "https://www.youtube.com/watch?v=abcdefghijk";
+
+#[test]
+fn spotify_hosts_match_the_resolver_host_rules() {
+    for host in [
+        "open.spotify.com",
+        "play.spotify.com",
+        "spotify.link",
+        "SPOTI.FI.",
+        "www.spotify.com",
+        "spotify.com",
+        "artist.spotify.com",
+    ] {
+        assert!(is_spotify_host(host), "{host}");
+    }
+    for host in [
+        "notspotify.com",
+        "www.spoti.fi",
+        "www.spotify.link",
+        "spotify.com.example.test",
+    ] {
+        assert!(!is_spotify_host(host), "{host}");
+    }
+}
 
 #[test]
 fn youtube_links_normalize_to_one_watch_url() {

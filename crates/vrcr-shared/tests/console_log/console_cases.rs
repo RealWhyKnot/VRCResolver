@@ -1,6 +1,150 @@
 use super::*;
 
 #[test]
+fn spotify_playing_uses_the_sanitized_match_and_keeps_quality_and_time() {
+    let message = "\x1b[32mMatched\x1b[0m on YouTube: girlhouse - worth it\u{2603}";
+    for (host, public_message, height, expected) in [
+        (
+            "open.spotify.com",
+            Some(message),
+            Some(720),
+            "Matched on YouTube: girlhouse - worth it (720p, 2.6s)",
+        ),
+        (
+            "open.spotify.com",
+            Some(message),
+            None,
+            "Matched on YouTube: girlhouse - worth it (2.6s)",
+        ),
+        (
+            "play.spotify.com",
+            None,
+            Some(720),
+            "Matched Spotify track on YouTube (720p, 2.6s)",
+        ),
+        (
+            "open.spotify.com",
+            Some(" \x1b[32m\u{2603} "),
+            None,
+            "Matched Spotify track on YouTube (2.6s)",
+        ),
+        (
+            "open.spotify.com",
+            Some("Matched Spotify track on YouTube."),
+            Some(720),
+            "Matched Spotify track on YouTube (720p, 2.6s)",
+        ),
+        (
+            "open.spotify.com",
+            Some("Matched this track on YouTube."),
+            None,
+            "Matched this track on YouTube (2.6s)",
+        ),
+        (
+            "open.spotify.com",
+            Some("..."),
+            Some(720),
+            "Matched Spotify track on YouTube (720p, 2.6s)",
+        ),
+        (
+            "open.spotify.com",
+            Some("\x1b[32m---\x1b[0m"),
+            None,
+            "Matched Spotify track on YouTube (2.6s)",
+        ),
+        ("example.com", Some("---"), None, "ready in 2.6s"),
+    ] {
+        let sample = Outcome {
+            host,
+            public_message,
+            height,
+            elapsed: Duration::from_millis(2600),
+            ..outcome(ResolveStatus::Resolved)
+        };
+        let (wide, wide_output) = ux(Style::plain());
+        wide.resolve_outcome(&sample);
+        assert_eq!(
+            wide_output.text(),
+            format!("12:34:56  Playing    {host:<28}{expected}\n")
+        );
+
+        let (narrow, narrow_output) = ux(Style::plain());
+        narrow.with_width(|| Some(37)).resolve_outcome(&sample);
+        let text = narrow_output.text();
+        assert!(text.lines().all(|line| line.len() < 37), "{text}");
+        let body = text.lines().skip(1).map(str::trim).collect::<Vec<_>>();
+        assert_eq!(body.join(" "), expected);
+    }
+}
+
+#[test]
+fn spotify_skips_never_offer_native_playback() {
+    for (host, reason, message, expected) in [
+        (
+            "open.spotify.com",
+            "spotify_unsupported_url",
+            None,
+            "Only Spotify track links work.",
+        ),
+        (
+            "play.spotify.com",
+            "spotify_track_no_match",
+            None,
+            "Couldn't find this track on YouTube Music.",
+        ),
+        (
+            "spotify.link",
+            "spotify_lookup_timeout",
+            None,
+            "Couldn't look up this Spotify track. Try again.",
+        ),
+        (
+            "open.spotify.com",
+            "extractor_unsupported",
+            Some("The server rejected this Spotify link.\u{2603}"),
+            "The server rejected this Spotify link.",
+        ),
+        (
+            "example.com",
+            "spotify_track_no_match",
+            Some("No match for this track."),
+            "No match for this track.",
+        ),
+        (
+            "open.spotify.com",
+            "native_fallback_host",
+            None,
+            "The server couldn't get this video.",
+        ),
+        (
+            "spoti.fi",
+            "server_unreachable",
+            None,
+            "Couldn't reach the server.",
+        ),
+        (
+            "www.spotify.com",
+            "internal_error",
+            None,
+            "VRCResolver ran into a problem getting this video.",
+        ),
+    ] {
+        let (console, output) = ux(Style::plain());
+        console.resolve_outcome(&Outcome {
+            host,
+            reason: Some(reason),
+            public_message: message,
+            ..outcome(ResolveStatus::Fallback)
+        });
+        let displayed_host = host.strip_prefix("www.").unwrap_or(host);
+        assert_eq!(
+            output.text(),
+            format!("12:34:56  Skipped    {displayed_host:<28}{expected}\n")
+        );
+    }
+}
+
+#[test]
 fn unknown_playback_reason_is_a_bounded_ascii_token() {
     assert_eq!(
         console::PlaybackError::proxy("invalid_range!")

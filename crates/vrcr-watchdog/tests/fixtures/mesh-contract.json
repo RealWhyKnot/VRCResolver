@@ -48,6 +48,9 @@
     "playback_failed",
     "resolve_cost_exceeds_deadline",
     "source_bound_to_viewer",
+    "spotify_lookup_timeout",
+    "spotify_track_no_match",
+    "spotify_unsupported_url",
     "unity_unsupported_format",
     "validation_recently_failed",
     "warp_down"

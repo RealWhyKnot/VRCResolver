@@ -1,4 +1,6 @@
 use super::*;
+use crate::source_url::is_spotify_host;
+use crate::wire::fallback;
 
 type Line = Vec<(Color, char)>;
 
@@ -49,8 +51,32 @@ pub fn fallback_sentence(reason: &str) -> &'static str {
         "content_not_found" => "The video was removed or doesn't exist.",
         "validation_recently_failed" => "The server couldn't get this video a moment ago.",
         "resolve_cost_exceeds_deadline" => "The server couldn't get this video in time.",
+        fallback::SPOTIFY_UNSUPPORTED_URL => "Only Spotify track links work.",
+        fallback::SPOTIFY_TRACK_NO_MATCH => "Couldn't find this track on YouTube Music.",
+        fallback::SPOTIFY_LOOKUP_TIMEOUT => "Couldn't look up this Spotify track. Try again.",
         _ => "The server couldn't get this video.",
     }
+}
+
+pub(super) fn playing_sentence(outcome: &Outcome<'_>) -> String {
+    let quality = outcome
+        .height
+        .filter(|height| *height > 0)
+        .map(|height| format!("{height}p, "))
+        .unwrap_or_default();
+    let seconds = outcome.elapsed.as_secs_f64();
+    if outcome.status == ResolveStatus::Resolved {
+        let clean = crate::logutil::public_message(outcome.public_message.unwrap_or_default());
+        let message = if clean.bytes().any(|byte| byte.is_ascii_alphanumeric()) {
+            Some(clean.trim_end_matches(['.', ' ']))
+        } else {
+            is_spotify_host(outcome.host).then_some("Matched Spotify track on YouTube")
+        };
+        if let Some(message) = message {
+            return format!("{message} ({quality}{seconds:.1}s)");
+        }
+    }
+    format!("{quality}ready in {seconds:.1}s")
 }
 
 pub fn connection_duration(duration: Duration) -> String {
@@ -187,7 +213,14 @@ impl Ux {
     }
 
     pub fn skipped(&self, host: &str, reason: &str, message: Option<&str>) {
-        if reason == crate::wire::fallback::NATIVE_FALLBACK_HOST {
+        let spotify = is_spotify_host(host)
+            || matches!(
+                reason,
+                fallback::SPOTIFY_UNSUPPORTED_URL
+                    | fallback::SPOTIFY_TRACK_NO_MATCH
+                    | fallback::SPOTIFY_LOOKUP_TIMEOUT
+            );
+        if !spotify && reason == fallback::NATIVE_FALLBACK_HOST {
             self.video(VideoStatus::Skipped, host, NATIVE_FALLBACK_SENTENCE);
             return;
         }
@@ -197,11 +230,15 @@ impl Ux {
         } else {
             &clean
         };
-        self.video(
-            VideoStatus::Skipped,
-            host,
-            &format!("{why} VRChat will try it on its own."),
-        );
+        if spotify {
+            self.video(VideoStatus::Skipped, host, why);
+        } else {
+            self.video(
+                VideoStatus::Skipped,
+                host,
+                &format!("{why} VRChat will try it on its own."),
+            );
+        }
     }
 
     pub fn resolver_paused(&self) {

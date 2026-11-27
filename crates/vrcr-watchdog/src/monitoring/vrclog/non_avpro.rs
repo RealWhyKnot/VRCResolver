@@ -4,6 +4,43 @@ const AVPRO_SOURCE_TTL: Duration = Duration::from_secs(10 * 60);
 const MAX_AVPRO_SOURCES: usize = 64;
 pub(super) const GENERIC_PLAYER_ERROR: &str = "world_player_error";
 
+static VIDEO_URL_SCHEME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)https?://").unwrap_or_else(|error| panic!("{error}")));
+
+pub(super) fn player_error_url(line: &str) -> Option<(&str, url::Url)> {
+    line.split_whitespace().find_map(|token| {
+        let scheme = VIDEO_URL_SCHEME.find(token)?;
+        let (prefix, candidate) = token.split_at(scheme.start());
+        let url = prefix
+            .chars()
+            .next_back()
+            .filter(|quote| matches!(quote, '\'' | '"'))
+            .and_then(|quote| candidate.split_once(quote))
+            .map_or_else(|| unquoted_url(candidate), |(quoted, _)| quoted);
+        url::Url::parse(url).ok().map(|parsed| (url, parsed))
+    })
+}
+
+fn unquoted_url(candidate: &str) -> &str {
+    let mut parentheses = 0;
+    let mut brackets = 0;
+    let mut end = candidate.len();
+    for (index, character) in candidate.char_indices() {
+        match character {
+            '(' => parentheses += 1,
+            '[' => brackets += 1,
+            ')' if parentheses > 0 => parentheses -= 1,
+            ']' if brackets > 0 => brackets -= 1,
+            ')' | ']' | '<' | '>' => {
+                end = index;
+                break;
+            }
+            _ => {}
+        }
+    }
+    candidate[..end].trim_end_matches(['\'', '"', ',', '.', ';'])
+}
+
 impl VrcLogMonitor {
     pub(super) fn opened_matches(&self, opened: &str, line_url: &str) -> bool {
         let canonical = self.canonical(opened);
@@ -17,7 +54,7 @@ impl VrcLogMonitor {
                 .is_some_and(|source| source_url::same_source(line_url, &source))
     }
 
-    fn matches_open_video(&self, line_url: &str) -> bool {
+    pub(super) fn matches_open_video(&self, line_url: &str) -> bool {
         [
             self.last_opening.as_ref().map(|(url, _)| url.as_str()),
             self.stall.as_ref().map(|stall| stall.url.as_str()),

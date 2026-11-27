@@ -263,6 +263,7 @@ pub fn decode_binary(payload: &[u8]) -> Result<BinaryFrame, String> {
                 live: f.boolean(13)?,
                 delivery: f.text(14)?,
                 validated: f.boolean(15)?,
+                public_message: f.text(16)?,
                 ..Default::default()
             }))
         }

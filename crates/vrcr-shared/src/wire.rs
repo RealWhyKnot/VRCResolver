@@ -48,6 +48,9 @@ pub mod og_reason {
 pub mod fallback {
     pub const ALL_CONFIGS_FAILED: &str = "all_configs_failed";
     pub const EXTRACTOR_UNSUPPORTED: &str = "extractor_unsupported";
+    pub const SPOTIFY_UNSUPPORTED_URL: &str = "spotify_unsupported_url";
+    pub const SPOTIFY_TRACK_NO_MATCH: &str = "spotify_track_no_match";
+    pub const SPOTIFY_LOOKUP_TIMEOUT: &str = "spotify_lookup_timeout";
     pub const INTERNAL_ERROR: &str = "internal_error";
     pub const DISCOVERY_IN_PROGRESS: &str = "discovery_in_progress";
     pub const SERVER_UNREACHABLE: &str = "server_unreachable";

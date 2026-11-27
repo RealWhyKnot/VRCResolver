@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime};
 use serde::Serialize;
 use url::Url;
 use vrcr_shared::console::{Component, PlaybackError, Ux};
+use vrcr_shared::source_url;
 use vrcr_shared::wire::{ResolveRequest, ResolveResponse};
 
 use crate::relay::hitch::{TimingSample, relay_kind};
@@ -177,7 +178,13 @@ fn resolve_request_key(url: &str) -> String {
             "https://www.youtube.com/watch?v={video_id}"
         ));
     }
-    url_key(url)
+    let Ok(parsed) = Url::parse(url) else {
+        return crate::relay::manifest::target_namespace(url);
+    };
+    if parsed.host_str().is_some_and(source_url::is_spotify_host) {
+        return crate::relay::manifest::target_namespace(&source_url::normalize(url));
+    }
+    crate::relay::manifest::target_namespace(parsed.as_str())
 }
 
 fn request_is_recent(now: SystemTime, at: SystemTime) -> bool {

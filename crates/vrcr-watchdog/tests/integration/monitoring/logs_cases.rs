@@ -104,6 +104,30 @@ fn half_written_line_stays_with_its_own_log() {
 }
 
 #[test]
+fn initial_tail_processes_a_completed_setting_without_replaying_history() {
+    let r = Rig::new();
+    let mut logs = LogDir::new(r.dir.path());
+    let mut monitor = r.monitor();
+    let log = logs.write(
+        "output_log_a.txt",
+        &format!("{}\r\nAllow untrusted URLs: Tr", opening(PLAYBACK)),
+    );
+    monitor.poll_once(r.now());
+    assert_eq!(monitor.last_opened_url(), None);
+
+    let blocked = "[Video Playback] Error: AccessDenied\r\n";
+    let hint = "Enable Allow Untrusted URLs in VRChat Settings > Comfort & Safety.";
+    logs.append(&log, &format!("ue\r\n{blocked}"));
+    monitor.poll_once(r.now());
+    assert!(!r.out.text().contains(hint));
+    assert_eq!(monitor.last_opened_url(), None);
+
+    logs.append(&log, &format!("Allow untrusted URLs: False\r\n{blocked}"));
+    monitor.poll_once(r.now());
+    assert_eq!(r.out.text().matches(hint).count(), 1);
+}
+
+#[test]
 fn missing_directory_and_non_log_files_are_ignored() {
     let r = Rig::new();
     let mut m = r.monitor();

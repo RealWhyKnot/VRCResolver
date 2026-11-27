@@ -137,6 +137,8 @@ fn done(rx: &mut oneshot::Receiver<MeshResult>) -> Option<MeshResult> {
     rx.try_recv().ok()
 }
 
+mod console_outcomes;
+
 mod contracts;
 
 mod native_fallback;
